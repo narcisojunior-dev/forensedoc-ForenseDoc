@@ -1,0 +1,22 @@
+# Resumo da Refatoração do ForenseDoc
+
+## O que foi alterado
+A refatoração visou dividir os componentes complexos e monolíticos em módulos especializados para facilitar a leitura, manutenção e futura adição de novas funcionalidades, sem alterar o comportamento ou a lógica do sistema.
+
+### 1. Backend (`backend/`)
+O arquivo `server.js`, que possuía mais de 500 linhas contendo toda a lógica de negócio, foi reduzido a cerca de 15 linhas. A lógica foi extraída para a nova pasta `backend/src/`:
+- **`utils/stringUtils.js` e `utils/geoUtils.js`**: Reúnem funções auxiliares de tratamento de strings, datas e montagem de queries de geolocalização.
+- **`services/pdfService.js`, `services/ocrService.js`, `services/extractionService.js`, `services/apiService.js`**: Separam a responsabilidade de leitura do PDF, OCR, heurística de extração de dados e comunicação com APIs externas.
+- **`controllers/analyzeController.js` e `controllers/geoController.js`**: Encarregam-se de receber as requisições, orquestrar os serviços e formatar as respostas JSON.
+- **`routes/index.js`**: Define todas as rotas da aplicação, mantendo o `server.js` limpo.
+
+### 2. Frontend (`frontend/`)
+O `ForenseDoc.jsx` possuía mais de 1600 linhas, das quais foram separadas responsabilidades visuais e utilitários.
+- **Estilos**: O imenso bloco `CSS` injetado via string literal foi movido para `frontend/src/styles/ForenseDoc.css`, aproveitando os recursos normais do CSS no Vite.
+- **Componentes Visuais**: Extraímos sub-componentes (como `Row`, `Badge`, `Section`, `DistanceBanner` e `GeoMap`) para `frontend/src/components/UiComponents.jsx`, `DistanceBanner.jsx` e `GeoMap.jsx`.
+- **Utilitários**: Lógicas de exportação para PDF, geolocalização e criptografia/hashing foram movidas para arquivos na pasta `frontend/src/utils/` (`api.js`, `crypto.js`, `geo.js`, `pdfExport.js`).
+- O `ForenseDoc.jsx` foi mantido apenas para gerir o estado de tela, envio do arquivo e integração final dos dados, reduzindo seu tamanho drasticamente.
+
+## Validação
+Os terminais foram mantidos rodando os serviços. Devido à natureza do Vite (Frontend) e Node.js (se usando nodemon/node --watch, o que deve estar ocorrendo ou exigirá reiniciar a API), as atualizações são absorvidas ou basta reiniciar o script `start-dev.sh` que estava gerenciando o processo globalmente. 
+A lógica em si manteve-se intacta e focada em isolamento.
