@@ -1,5 +1,17 @@
 node_modules
 dist
 .env
+.env.production
+.env.local
 *.log
 .DS_Store
+
+# Prisma
+backend/prisma/migrations/*.sql
+
+# Build
+frontend/dist
+backend/dist
+
+# Railway
+.railway

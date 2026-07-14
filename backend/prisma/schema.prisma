@@ -1,0 +1,385 @@
+// ForenseDoc v3.0 — Prisma Schema
+// Gerado com base no PRD v3.0
+// Infra: PostgreSQL 16 (Railway no lançamento, VPS em produção)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  // URL configurada em prisma.config.ts (Prisma 7)
+}
+
+// ─────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────
+
+enum TenantStatus {
+  TRIAL
+  ACTIVE
+  SUSPENDED
+  CANCELLED
+}
+
+enum UserRole {
+  OWNER
+  MEMBER
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  OVERDUE
+  CANCELLED
+}
+
+enum CreditTransactionType {
+  EARN_MONTHLY
+  EARN_AVULSO
+  EARN_EMERGENCY
+  EARN_MANUAL
+  SPEND
+  EXPIRE
+  REFUND
+}
+
+enum AnalysisStatus {
+  PROCESSING
+  COMPLETED
+  ERROR
+  REFUNDED
+}
+
+enum PaymentType {
+  SUBSCRIPTION
+  AVULSO
+  EXCESS
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+enum NotificationType {
+  CREDITS_80PCT
+  CREDITS_95PCT
+  CREDITS_EXHAUSTED
+  PAYMENT_FAILED
+  PAYMENT_CONFIRMED
+  RENEWAL_REMINDER
+  ACCOUNT_SUSPENDED
+  ANALYSIS_ERROR
+  ANALYSIS_COMPLETED
+  INVITE_RECEIVED
+  REFERRAL_CONVERTED
+}
+
+// ─────────────────────────────────────────────
+// TENANT (escritório / conta principal)
+// ─────────────────────────────────────────────
+
+model Tenant {
+  id           String       @id @default(uuid())
+  name         String
+  cpfCnpj      String       @unique
+  oabNumber    String?
+  oabState     String?      @db.Char(2)
+  status       TenantStatus @default(TRIAL)
+  referralCode String       @unique @default(cuid())
+  asaasCustomerId String?   // ID do cliente no Asaas
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  users         User[]
+  subscription  Subscription?
+  creditBalance CreditBalance?
+  analyses      Analysis[]
+  creditTx      CreditTransaction[]
+  payments      Payment[]
+  notifications Notification[]
+  auditLogs     AuditLog[]
+
+  // Programa de indicação
+  referredBy       String?  // referralCode de quem indicou
+  referralBonuses  Int      @default(0) // meses gratuitos já ganhos
+
+  @@map("tenants")
+}
+
+// ─────────────────────────────────────────────
+// USER (membro do tenant)
+// ─────────────────────────────────────────────
+
+model User {
+  id            String    @id @default(uuid())
+  tenantId      String
+  email         String    @unique
+  name          String
+  passwordHash  String
+  role          UserRole  @default(MEMBER)
+  oabNumber     String?
+  emailVerified Boolean   @default(false)
+  isPlatformAdmin Boolean @default(false)
+  lastLoginAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  tenant            Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  analyses          Analysis[]
+  creditTx          CreditTransaction[]
+  notifications     Notification[]
+  refreshTokens     RefreshToken[]
+  emailVerifications EmailVerification[]
+  passwordResets    PasswordReset[]
+  auditLogs         AuditLog[]
+
+  @@index([tenantId])
+  @@map("users")
+}
+
+// ─────────────────────────────────────────────
+// AUTH TOKENS
+// ─────────────────────────────────────────────
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String
+  tokenHash String   @unique // SHA-256 do token opaco (nunca guardar o token cru)
+  expiresAt DateTime
+  revoked   Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model EmailVerification {
+  id        String   @id @default(uuid())
+  userId    String
+  tokenHash String   @unique // SHA-256 do token de verificação
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("email_verifications")
+}
+
+model PasswordReset {
+  id        String   @id @default(uuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("password_resets")
+}
+
+// ─────────────────────────────────────────────
+// PLANOS
+// ─────────────────────────────────────────────
+
+model Plan {
+  id                    String  @id @default(uuid())
+  name                  String  @unique
+  slug                  String  @unique // 'inicial', 'profissional', 'escritorio', 'massa', 'fundador'
+  priceBrl              Decimal @db.Decimal(10, 2)
+  creditsMonthly        Int
+  maxUsers              Int     @default(1)
+  isActive              Boolean @default(true)
+  isFounder             Boolean @default(false)
+  founderSlotsTotal     Int?
+  founderSlotsRemaining Int?
+  excessPriceBrl        Decimal? @db.Decimal(10, 2) // preço do excedente por laudo
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  subscriptions Subscription[]
+
+  @@map("plans")
+}
+
+// ─────────────────────────────────────────────
+// CONVITES (Plano Fundador)
+// ─────────────────────────────────────────────
+
+model FounderInvite {
+  id        String    @id @default(uuid())
+  code      String    @unique
+  email     String?   // e-mail para quem o convite foi enviado (opcional)
+  tenantId  String?   // preenchido quando o convite é aceito
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@map("founder_invites")
+}
+
+// ─────────────────────────────────────────────
+// ASSINATURAS
+// ─────────────────────────────────────────────
+
+model Subscription {
+  id                  String             @id @default(uuid())
+  tenantId            String             @unique
+  planId              String
+  status              SubscriptionStatus @default(ACTIVE)
+  currentPeriodStart  DateTime
+  currentPeriodEnd    DateTime
+  asaasSubscriptionId String?            @unique
+  isAnnual            Boolean            @default(false)
+  founderLocked       Boolean            @default(false) // plano fundador travado por 12 meses
+  founderLockedUntil  DateTime?
+  emergencyGrantedAt  DateTime?          // última vez que créditos de emergência foram concedidos
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  plan   Plan   @relation(fields: [planId], references: [id])
+
+  @@index([currentPeriodEnd]) // para o cron de expiração de créditos
+  @@map("subscriptions")
+}
+
+// ─────────────────────────────────────────────
+// SALDO DE CRÉDITOS
+// ─────────────────────────────────────────────
+
+model CreditBalance {
+  id               String   @id @default(uuid())
+  tenantId         String   @unique
+  creditsMonthly   Int      @default(0)   // expira na renovação do ciclo
+  creditsAvulso    Int      @default(0)   // sem validade — persiste indefinidamente
+  creditsEmergency Int      @default(0)   // expira ao regularizar o pagamento
+  creditsManual    Int      @default(0)   // concedidos pelo admin
+  cycleStart       DateTime?
+  cycleEnd         DateTime?
+  updatedAt        DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("credit_balances")
+}
+
+// ─────────────────────────────────────────────
+// TRANSAÇÕES DE CRÉDITO (ledger imutável)
+// ─────────────────────────────────────────────
+
+model CreditTransaction {
+  id         String                @id @default(uuid())
+  tenantId   String
+  userId     String?
+  type       CreditTransactionType
+  amount     Int                   // positivo = entrada, negativo = saída
+  creditType String                // 'monthly', 'avulso', 'emergency', 'manual'
+  source     String                // 'subscription_renewal', 'avulso_purchase', 'payment_failure', 'admin', 'analysis', 'refund'
+  analysisId String?  @unique
+  notes      String?
+  createdAt  DateTime              @default(now())
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user     User?     @relation(fields: [userId], references: [id])
+  analysis Analysis? @relation(fields: [analysisId], references: [id])
+
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@map("credit_transactions")
+}
+
+// ─────────────────────────────────────────────
+// ANÁLISES / LAUDOS (resultado apenas — sem o PDF)
+// ─────────────────────────────────────────────
+
+model Analysis {
+  id                    String         @id @default(uuid())
+  tenantId              String
+  userId                String
+  filenameHash          String         // hash SHA-256 do nome do arquivo (não do conteúdo)
+  status                AnalysisStatus @default(PROCESSING)
+  result                Json?          // laudo estruturado (JSONB) — sem dados binários do PDF
+  creditTransactionId   String?        @unique
+  processingStartedAt   DateTime?
+  processingCompletedAt DateTime?
+  createdAt             DateTime       @default(now())
+
+  tenant            Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user              User                @relation(fields: [userId], references: [id])
+  creditTransaction CreditTransaction?
+
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@map("analyses")
+}
+
+// ─────────────────────────────────────────────
+// PAGAMENTOS
+// ─────────────────────────────────────────────
+
+model Payment {
+  id               String        @id @default(uuid())
+  tenantId         String
+  amountBrl        Decimal       @db.Decimal(10, 2)
+  type             PaymentType
+  status           PaymentStatus @default(PENDING)
+  asaasPaymentId   String?       @unique // idempotência — nunca processar 2x
+  asaasBillingType String?       // 'PIX', 'BOLETO', 'CREDIT_CARD'
+  dueDate          DateTime?
+  paidAt           DateTime?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@map("payments")
+}
+
+// ─────────────────────────────────────────────
+// NOTIFICAÇÕES IN-APP
+// ─────────────────────────────────────────────
+
+model Notification {
+  id       String           @id @default(uuid())
+  tenantId String
+  userId   String?          // null = para todos do tenant
+  type     NotificationType
+  title    String
+  body     String
+  read     Boolean          @default(false)
+  readAt   DateTime?
+  createdAt DateTime        @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User?  @relation(fields: [userId], references: [id])
+
+  @@index([tenantId, read, createdAt(sort: Desc)])
+  @@map("notifications")
+}
+
+// ─────────────────────────────────────────────
+// AUDIT LOG (imutável — só INSERT)
+// ─────────────────────────────────────────────
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  tenantId  String?
+  userId    String?
+  action    String   // 'login', 'logout', 'register', 'analysis_started', 'credit_spent', 'payment_received', 'admin_credit_added', etc.
+  ipAddress String?
+  userAgent String?
+  metadata  Json?    // dados adicionais do evento
+  createdAt DateTime @default(now())
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id])
+  user   User?   @relation(fields: [userId], references: [id])
+
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@index([action, createdAt(sort: Desc)])
+  @@map("audit_logs")
+}

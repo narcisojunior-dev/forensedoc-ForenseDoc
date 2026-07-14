@@ -1,0 +1,119 @@
+# ─────────────────────────────────────────────────────────────────
+# ForenseDoc v3.0 — Docker Compose (VPS Produção)
+# ─────────────────────────────────────────────────────────────────
+# ATENÇÃO: Este arquivo é para a fase de PRODUÇÃO na VPS dedicada.
+# Durante o lançamento com fundadores, a infra roda no Railway.
+# Referência: implementation-plan.md → Seção "Migração Railway → VPS"
+# ─────────────────────────────────────────────────────────────────
+
+version: "3.9"
+
+services:
+  # ── Proxy Reverso / TLS ──────────────────────────────────────
+  nginx:
+    image: nginx:alpine
+    container_name: forensedoc_nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/certs:/etc/letsencrypt:ro
+      - frontend_dist:/var/www/html:ro
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - forensedoc_net
+
+  # ── API Backend ───────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: forensedoc_backend
+    env_file: ./backend/.env.production
+    expose:
+      - "8787"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    user: node
+    networks:
+      - forensedoc_net
+
+  # ── Worker BullMQ (Processamento Assíncrono) ──────────────────
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: forensedoc_worker
+    command: node src/worker.js
+    env_file: ./backend/.env.production
+    environment:
+      - WORKER_MODE=true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    user: node
+    networks:
+      - forensedoc_net
+
+  # ── PostgreSQL 16 ─────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: forensedoc_postgres
+    env_file: ./backend/.env.production
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-forensedoc_app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-forensedoc_prod}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    expose:
+      - "5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-forensedoc_app}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - forensedoc_net
+
+  # ── Redis 7 ───────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: forensedoc_redis
+    command: redis-server --requirepass ${REDIS_PASSWORD} --appendonly yes
+    expose:
+      - "6379"
+    volumes:
+      - redisdata:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - forensedoc_net
+
+volumes:
+  pgdata:
+    driver: local
+  redisdata:
+    driver: local
+  frontend_dist:
+    driver: local
+
+networks:
+  forensedoc_net:
+    driver: bridge
+    internal: false
