@@ -1,0 +1,342 @@
+import bcrypt from "bcryptjs";
+import { v4 as uuidv4 } from "uuid";
+import crypto from "crypto";
+import { z } from "zod";
+import { prisma } from "../utils/prisma.js";
+import { generateAccessToken } from "../utils/jwt.js";
+import { sendEmail } from "../utils/mailer.js";
+import { redis } from "../utils/redis.js";
+
+// ─── Schemas de Validação (Zod) ────────────────────────────────────────────────
+const registerSchema = z.object({
+  name: z.string().min(3, "Nome muito curto"),
+  email: z.string().email("E-mail inválido"),
+  password: z.string().min(8, "Senha deve ter no mínimo 8 caracteres"),
+  cpfCnpj: z.string().min(11, "CPF/CNPJ inválido"),
+  oabNumber: z.string().optional(),
+  oabState: z.string().length(2).optional(),
+});
+
+const loginSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(1),
+});
+
+// Helper para gerar hash do token de refresh e verificação
+function hashToken(token) {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
+
+// ─── Controllers ────────────────────────────────────────────────────────────────
+
+export async function register(req, res) {
+  try {
+    const data = registerSchema.parse(req.body);
+
+    // 1. Verificar unicidade (E-mail e CPF/CNPJ)
+    const existingUser = await prisma.user.findUnique({ where: { email: data.email } });
+    if (existingUser) return res.status(400).json({ error: "E-mail já cadastrado." });
+
+    const existingTenant = await prisma.tenant.findUnique({ where: { cpfCnpj: data.cpfCnpj } });
+    if (existingTenant) return res.status(400).json({ error: "CPF/CNPJ já cadastrado." });
+
+    // 2. Hash da senha
+    const passwordHash = await bcrypt.hash(data.password, 12);
+
+    // 3. Transação: Criar Tenant, User, Saldo de Créditos
+    const result = await prisma.$transaction(async (tx) => {
+      // Criar Tenant
+      const tenant = await tx.tenant.create({
+        data: {
+          name: data.name, // Nome provisório do escritório
+          cpfCnpj: data.cpfCnpj,
+          oabNumber: data.oabNumber,
+          oabState: data.oabState,
+          status: "TRIAL",
+        },
+      });
+
+      // Criar User (Owner)
+      const user = await tx.user.create({
+        data: {
+          tenantId: tenant.id,
+          name: data.name,
+          email: data.email,
+          passwordHash,
+          role: "OWNER",
+          oabNumber: data.oabNumber,
+          isPlatformAdmin: data.email === process.env.PLATFORM_ADMIN_EMAIL,
+        },
+      });
+
+      // Criar Saldo Trial (3 créditos)
+      await tx.creditBalance.create({
+        data: {
+          tenantId: tenant.id,
+          creditsMonthly: 0,
+          creditsAvulso: 3, // 3 laudos grátis
+        },
+      });
+
+      // Criar transação de crédito inicial
+      await tx.creditTransaction.create({
+        data: {
+          tenantId: tenant.id,
+          userId: user.id,
+          type: "EARN_AVULSO",
+          amount: 3,
+          creditType: "avulso",
+          source: "trial",
+          notes: "Bônus de cadastro",
+        },
+      });
+
+      // Criar token de verificação de e-mail
+      const verifyToken = uuidv4();
+      await tx.emailVerification.create({
+        data: {
+          userId: user.id,
+          tokenHash: hashToken(verifyToken),
+          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24h
+        },
+      });
+
+      return { user, tenant, verifyToken };
+    });
+
+    // 4. Enviar e-mail de verificação
+    const verifyUrl = `${process.env.FRONTEND_URL}/verify-email?token=${result.verifyToken}`;
+    await sendEmail({
+      to: result.user.email,
+      subject: "Confirme seu e-mail — ForenseDoc",
+      html: `Olá ${result.user.name},<br><br>Clique no link abaixo para confirmar seu e-mail e ativar seus 3 laudos grátis:<br><a href="${verifyUrl}">${verifyUrl}</a>`,
+    });
+
+    return res.status(201).json({
+      message: "Cadastro realizado. Verifique seu e-mail para ativar a conta.",
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.errors[0].message });
+    }
+    console.error("[Auth] Erro no registro:", error);
+    return res.status(500).json({ error: "Erro interno no servidor." });
+  }
+}
+
+export async function login(req, res) {
+  try {
+    const { email, password } = loginSchema.parse(req.body);
+
+    const user = await prisma.user.findUnique({
+      where: { email },
+      include: { tenant: true },
+    });
+
+    if (!user) return res.status(401).json({ error: "Credenciais inválidas." });
+
+    const isValidPassword = await bcrypt.compare(password, user.passwordHash);
+    if (!isValidPassword) return res.status(401).json({ error: "Credenciais inválidas." });
+
+    if (!user.emailVerified) return res.status(403).json({ error: "E-mail não confirmado.", code: "EMAIL_NOT_VERIFIED" });
+    if (user.tenant.status === "SUSPENDED") return res.status(403).json({ error: "Conta suspensa.", code: "ACCOUNT_SUSPENDED" });
+
+    // Gerar Tokens
+    const accessToken = generateAccessToken({
+      userId: user.id,
+      tenantId: user.tenantId,
+      role: user.role,
+      isPlatformAdmin: user.isPlatformAdmin,
+      status: user.tenant.status,
+    });
+
+    const refreshTokenString = uuidv4();
+    const refreshExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 dias
+
+    await prisma.refreshToken.create({
+      data: {
+        userId: user.id,
+        tokenHash: hashToken(refreshTokenString),
+        expiresAt: refreshExpiresAt,
+      },
+    });
+
+    // Atualizar último login e logar auditoria
+    await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
+    await prisma.auditLog.create({
+      data: {
+        tenantId: user.tenantId,
+        userId: user.id,
+        action: "login",
+        ipAddress: req.ip,
+        userAgent: req.headers["user-agent"],
+      },
+    });
+
+    // Enviar refreshToken via Cookie HttpOnly
+    res.cookie("refreshToken", refreshTokenString, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
+      maxAge: 30 * 24 * 60 * 60 * 1000,
+    });
+
+    return res.json({ accessToken });
+  } catch (error) {
+    if (error instanceof z.ZodError) return res.status(400).json({ error: "Dados inválidos." });
+    console.error("[Auth] Erro no login:", error);
+    return res.status(500).json({ error: "Erro interno no servidor." });
+  }
+}
+
+export async function refresh(req, res) {
+  try {
+    // Para simplificar no dev local se cookies não estiverem configurados, podemos aceitar no header/body também,
+    // mas em prod sempre usar cookie
+    const refreshTokenString = req.cookies?.refreshToken || req.body.refreshToken;
+    if (!refreshTokenString) return res.status(401).json({ error: "Refresh token ausente." });
+
+    const hashedToken = hashToken(refreshTokenString);
+    const storedToken = await prisma.refreshToken.findUnique({
+      where: { tokenHash: hashedToken },
+      include: { user: { include: { tenant: true } } },
+    });
+
+    if (!storedToken) return res.status(401).json({ error: "Refresh token inválido." });
+
+    if (storedToken.revoked) {
+      // Rotacionamento comprometido: revogar todos os tokens do usuário
+      await prisma.refreshToken.updateMany({
+        where: { userId: storedToken.userId },
+        data: { revoked: true },
+      });
+      return res.status(401).json({ error: "Token comprometido. Faça login novamente." });
+    }
+
+    if (new Date() > storedToken.expiresAt) {
+      return res.status(401).json({ error: "Refresh token expirado." });
+    }
+
+    // Revogar token atual
+    await prisma.refreshToken.update({
+      where: { id: storedToken.id },
+      data: { revoked: true },
+    });
+
+    // Gerar novos tokens
+    const { user } = storedToken;
+    const newAccessToken = generateAccessToken({
+      userId: user.id,
+      tenantId: user.tenantId,
+      role: user.role,
+      isPlatformAdmin: user.isPlatformAdmin,
+      status: user.tenant.status,
+    });
+
+    const newRefreshTokenString = uuidv4();
+    await prisma.refreshToken.create({
+      data: {
+        userId: user.id,
+        tokenHash: hashToken(newRefreshTokenString),
+        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      },
+    });
+
+    res.cookie("refreshToken", newRefreshTokenString, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
+      maxAge: 30 * 24 * 60 * 60 * 1000,
+    });
+
+    return res.json({ accessToken: newAccessToken });
+  } catch (error) {
+    console.error("[Auth] Erro no refresh:", error);
+    return res.status(500).json({ error: "Erro interno no servidor." });
+  }
+}
+
+export async function verifyEmail(req, res) {
+  try {
+    const { token } = req.body;
+    if (!token) return res.status(400).json({ error: "Token ausente." });
+
+    const hashedToken = hashToken(token);
+    const verification = await prisma.emailVerification.findUnique({
+      where: { tokenHash: hashedToken },
+    });
+
+    if (!verification) return res.status(400).json({ error: "Token inválido." });
+    if (verification.usedAt) return res.status(400).json({ error: "E-mail já verificado." });
+    if (new Date() > verification.expiresAt) return res.status(400).json({ error: "Token expirado." });
+
+    await prisma.$transaction([
+      prisma.emailVerification.update({
+        where: { id: verification.id },
+        data: { usedAt: new Date() },
+      }),
+      prisma.user.update({
+        where: { id: verification.userId },
+        data: { emailVerified: true },
+      }),
+    ]);
+
+    return res.json({ message: "E-mail verificado com sucesso." });
+  } catch (error) {
+    console.error("[Auth] Erro na verificação:", error);
+    return res.status(500).json({ error: "Erro interno no servidor." });
+  }
+}
+
+export async function logout(req, res) {
+  try {
+    const refreshTokenString = req.cookies?.refreshToken || req.body.refreshToken;
+    const accessToken = req.headers.authorization?.split(" ")[1];
+
+    if (refreshTokenString) {
+      await prisma.refreshToken.updateMany({
+        where: { tokenHash: hashToken(refreshTokenString) },
+        data: { revoked: true },
+      });
+    }
+
+    if (accessToken) {
+      // Redis blacklist até o token expirar (15 min)
+      await redis.setex(`blacklist:${accessToken}`, 15 * 60, "1");
+    }
+
+    res.clearCookie("refreshToken");
+    return res.json({ message: "Logout realizado com sucesso." });
+  } catch (error) {
+    console.error("[Auth] Erro no logout:", error);
+    return res.status(500).json({ error: "Erro interno no servidor." });
+  }
+}
+
+export async function me(req, res) {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.auth.userId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        isPlatformAdmin: true,
+        tenant: {
+          select: {
+            id: true,
+            name: true,
+            status: true,
+          }
+        }
+      }
+    });
+
+    if (!user) return res.status(404).json({ error: "Usuário não encontrado." });
+    return res.json({ user });
+  } catch (error) {
+    console.error("[Auth] Erro em /me:", error);
+    return res.status(500).json({ error: "Erro interno no servidor." });
+  }
+}
