@@ -1,0 +1,24 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-background text-foreground antialiased selection:bg-primary selection:text-white;
+  }
+}
+
+/* Utilitários para Glassmorphism e Efeitos */
+@layer utilities {
+  .glass {
+    @apply bg-surface/60 backdrop-blur-md border border-surface-border;
+  }
+  
+  .text-gradient {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-primary to-blue-300;
+  }
+  
+  .text-gradient-accent {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-accent to-yellow-200;
+  }
+}
