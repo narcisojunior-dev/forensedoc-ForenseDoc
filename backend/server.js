@@ -55,28 +55,16 @@ app.use(express.json({ limit: "30mb" }));
 app.use("/api", routes);
 
 // ─── Health Check (Railway / Load Balancer) ──────────────────────────────────
-app.get("/health", async (_req, res) => {
-  const health = {
+// Importante: o healthcheck NÃO deve consultar o banco de dados ou qualquer
+// dependência externa. Ele precisa responder rapidamente para que o Railway
+// não interprete o serviço como indisponível durante o deploy.
+app.get("/health", (_req, res) => {
+  return res.status(200).json({
     status: "ok",
     version: "3.0.0",
     timestamp: new Date().toISOString(),
     env: process.env.NODE_ENV || "development",
-  };
-
-  // Verificar conexão com banco (se Prisma estiver configurado)
-  try {
-    const { PrismaClient } = await import("@prisma/client");
-    const prisma = new PrismaClient();
-    await prisma.$queryRaw`SELECT 1`;
-    await prisma.$disconnect();
-    health.db = "ok";
-  } catch {
-    health.db = "unavailable";
-    health.status = "degraded";
-  }
-
-  const statusCode = health.status === "ok" ? 200 : 503;
-  return res.status(statusCode).json(health);
+  });
 });
 
 // ─── 404 Handler ──────────────────────────────────────────────────────────────
@@ -96,8 +84,53 @@ app.use((err, _req, res, _next) => {
 });
 
 // ─── Inicialização ───────────────────────────────────────────────────────────
-const PORT = process.env.PORT || 8787;
-app.listen(PORT, () => {
-  console.log(`[ForenseDoc v3.0] Backend rodando em http://localhost:${PORT}`);
-  console.log(`[ForenseDoc v3.0] Ambiente: ${process.env.NODE_ENV || "development"}`);
+const PORT = Number(process.env.PORT) || 8787;
+const HOST = "0.0.0.0";
+
+let server;
+
+try {
+  server = app.listen(PORT, HOST, () => {
+    console.log(`[ForenseDoc v3.0] ✅ Backend iniciado com sucesso em http://${HOST}:${PORT}`);
+    console.log(`[ForenseDoc v3.0] Ambiente: ${process.env.NODE_ENV || "development"}`);
+    console.log(`[ForenseDoc v3.0] Healthcheck disponível em /health`);
+  });
+
+  server.on("error", (err) => {
+    console.error("[ForenseDoc v3.0] ❌ Erro ao iniciar o servidor:", err.message);
+    process.exit(1);
+  });
+} catch (err) {
+  console.error("[ForenseDoc v3.0] ❌ Falha crítica na inicialização do servidor:", err);
+  process.exit(1);
+}
+
+// ─── Graceful Shutdown ────────────────────────────────────────────────────────
+function shutdown(signal) {
+  console.log(`[ForenseDoc v3.0] Recebido ${signal}, encerrando servidor graciosamente...`);
+  if (!server) {
+    process.exit(0);
+    return;
+  }
+  server.close(() => {
+    console.log("[ForenseDoc v3.0] Servidor encerrado com sucesso.");
+    process.exit(0);
+  });
+
+  // Força o encerramento caso o graceful shutdown demore demais
+  setTimeout(() => {
+    console.error("[ForenseDoc v3.0] Encerramento forçado após timeout.");
+    process.exit(1);
+  }, 10000).unref();
+}
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
+
+process.on("uncaughtException", (err) => {
+  console.error("[ForenseDoc v3.0] ❌ Exceção não tratada:", err);
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[ForenseDoc v3.0] ❌ Rejeição de Promise não tratada:", reason);
 });
