@@ -1,7 +1,9 @@
 import axios from "axios";
 
-// Lê a URL base do Vite, com fallback para o proxy local se não definida
-const baseURL = import.meta.env.VITE_API_BASE || "/api";
+// Mesma convenção de utils/api.js: VITE_API_BASE é o host "nu" (sem /api),
+// ex. https://forensedoc-backend.up.railway.app — em dev, fica vazio e o
+// proxy do Vite encaminha /api para o backend local.
+const baseURL = (import.meta.env.VITE_API_BASE || "") + "/api";
 
 export const api = axios.create({
   baseURL,
