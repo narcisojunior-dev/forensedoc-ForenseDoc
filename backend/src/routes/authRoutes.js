@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { rateLimit } from "express-rate-limit";
-import { register, login, refresh, verifyEmail, logout, me } from "../controllers/authController.js";
+import { register, login, refresh, verifyEmail, logout, me, forgotPassword, resetPassword } from "../controllers/authController.js";
 import { requireAuth } from "../middleware/auth.js";
 // import { RedisStore } from "rate-limit-redis";
 // import { redis } from "../utils/redis.js";
@@ -21,11 +21,19 @@ const registerLimiter = rateLimit({
   message: { error: "Limite de registros excedido. Tente novamente mais tarde." },
 });
 
+const forgotPasswordLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hora
+  max: 3, // 3 requisições
+  message: { error: "Limite de solicitações excedido. Tente novamente mais tarde." },
+});
+
 // Rotas Públicas
 router.post("/register", registerLimiter, register);
 router.post("/login", loginLimiter, login);
 router.post("/refresh", refresh);
 router.post("/verify-email", verifyEmail);
+router.post("/forgot-password", forgotPasswordLimiter, forgotPassword);
+router.post("/reset-password", resetPassword);
 
 // Rotas Protegidas
 router.post("/logout", requireAuth, logout);

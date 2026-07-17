@@ -101,6 +101,7 @@ model Tenant {
   payments      Payment[]
   notifications Notification[]
   auditLogs     AuditLog[]
+  invites       TenantInvite[]
 
   // Programa de indicação
   referredBy       String?  // referralCode de quem indicou
@@ -123,6 +124,7 @@ model User {
   oabNumber     String?
   emailVerified Boolean   @default(false)
   isPlatformAdmin Boolean @default(false)
+  active        Boolean   @default(true)
   lastLoginAt   DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -135,6 +137,7 @@ model User {
   emailVerifications EmailVerification[]
   passwordResets    PasswordReset[]
   auditLogs         AuditLog[]
+  sentInvites       TenantInvite[]
 
   @@index([tenantId])
   @@map("users")
@@ -182,6 +185,28 @@ model PasswordReset {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("password_resets")
+}
+
+// ─────────────────────────────────────────────
+// CONVITES DE EQUIPE (Módulo 1 — M1.4)
+// ─────────────────────────────────────────────
+
+model TenantInvite {
+  id          String    @id @default(uuid())
+  tenantId    String
+  email       String
+  role        UserRole  @default(MEMBER)
+  tokenHash   String    @unique
+  invitedById String
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  invitedBy User   @relation(fields: [invitedById], references: [id])
+
+  @@index([tenantId])
+  @@map("tenant_invites")
 }
 
 // ─────────────────────────────────────────────

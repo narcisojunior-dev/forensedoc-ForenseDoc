@@ -96,11 +96,57 @@ export async function debitCredit(tenantId, userId, analysisId, txClient = prism
   ]);
 
   await invalidateCreditCache(tenantId);
-  
-  // Opcional: disparar verificação assíncrona de alertas (Módulo 7)
-  // setImmediate(() => checkCreditAlerts(tenantId, balance));
+
+  await checkCreditAlerts(tenantId, balance);
 
   return creditTx;
+}
+
+export async function getActiveSubscription(tenantId) {
+  return prisma.subscription.findUnique({
+    where: { tenantId },
+    include: { plan: true },
+  });
+}
+
+// Dispara no máximo um alerta in-app por débito, com base no saldo mensal
+// ANTES do decremento — a comparação com o limiar detecta a transição exata
+// (ex.: 1 crédito restante -> 0), evitando notificações duplicadas em débitos
+// subsequentes que já estão abaixo do limiar.
+export async function checkCreditAlerts(tenantId, balanceBefore) {
+  const subscription = await getActiveSubscription(tenantId);
+  if (!subscription || subscription.status !== "ACTIVE") return;
+
+  const totalMonthly = subscription.plan.creditsMonthly;
+  if (!totalMonthly) return;
+
+  const used = totalMonthly - balanceBefore.creditsMonthly;
+  const pct = (used / totalMonthly) * 100;
+
+  let type = null;
+  if (pct >= 100 && balanceBefore.creditsMonthly > 0) {
+    type = "CREDITS_EXHAUSTED";
+  } else if (pct >= 95 && balanceBefore.creditsMonthly > Math.ceil(totalMonthly * 0.05)) {
+    type = "CREDITS_95PCT";
+  } else if (pct >= 80 && balanceBefore.creditsMonthly > Math.ceil(totalMonthly * 0.20)) {
+    type = "CREDITS_80PCT";
+  }
+  if (!type) return;
+
+  const ALERT_COPY = {
+    CREDITS_80PCT: { title: "80% dos laudos utilizados", body: "Você já usou 80% dos seus laudos mensais." },
+    CREDITS_95PCT: { title: "Poucos laudos restantes", body: "Restam poucos laudos disponíveis neste ciclo." },
+    CREDITS_EXHAUSTED: { title: "Créditos esgotados", body: "Seus laudos mensais acabaram. Recarregue para continuar." },
+  };
+
+  await prisma.notification.create({
+    data: {
+      tenantId,
+      type,
+      title: ALERT_COPY[type].title,
+      body: ALERT_COPY[type].body,
+    },
+  });
 }
 
 export async function refundCredit(tenantId, userId, analysisId, reason = "Erro na análise") {

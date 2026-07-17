@@ -22,6 +22,15 @@ const loginSchema = z.object({
   password: z.string().min(1),
 });
 
+const forgotPasswordSchema = z.object({
+  email: z.string().email("E-mail inválido"),
+});
+
+const resetPasswordSchema = z.object({
+  token: z.string().min(1, "Token ausente"),
+  newPassword: z.string().min(8, "Senha deve ter no mínimo 8 caracteres"),
+});
+
 // Helper para gerar hash do token de refresh e verificação
 function hashToken(token) {
   return crypto.createHash("sha256").update(token).digest("hex");
@@ -139,6 +148,7 @@ export async function login(req, res) {
     if (!isValidPassword) return res.status(401).json({ error: "Credenciais inválidas." });
 
     if (!user.emailVerified) return res.status(403).json({ error: "E-mail não confirmado.", code: "EMAIL_NOT_VERIFIED" });
+    if (!user.active) return res.status(403).json({ error: "Conta desativada.", code: "ACCOUNT_DEACTIVATED" });
     if (user.tenant.status === "SUSPENDED") return res.status(403).json({ error: "Conta suspensa.", code: "ACCOUNT_SUSPENDED" });
 
     // Gerar Tokens
@@ -284,6 +294,80 @@ export async function verifyEmail(req, res) {
     return res.json({ message: "E-mail verificado com sucesso." });
   } catch (error) {
     console.error("[Auth] Erro na verificação:", error);
+    return res.status(500).json({ error: "Erro interno no servidor." });
+  }
+}
+
+export async function forgotPassword(req, res) {
+  try {
+    const { email } = forgotPasswordSchema.parse(req.body);
+
+    const user = await prisma.user.findUnique({ where: { email } });
+
+    // Sempre responde com a mesma mensagem genérica, exista ou não o e-mail
+    // (evita enumeração de contas cadastradas).
+    if (user) {
+      const resetToken = uuidv4();
+      await prisma.passwordReset.create({
+        data: {
+          userId: user.id,
+          tokenHash: hashToken(resetToken),
+          expiresAt: new Date(Date.now() + 60 * 60 * 1000), // 1h
+        },
+      });
+
+      const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
+      await sendEmail({
+        to: user.email,
+        subject: "Redefinição de senha — ForenseDoc",
+        html: `Olá ${user.name},<br><br>Clique no link abaixo para redefinir sua senha (válido por 1 hora):<br><a href="${resetUrl}">${resetUrl}</a><br><br>Se você não solicitou isso, ignore este e-mail.`,
+      });
+    }
+
+    return res.json({ message: "Se o e-mail estiver cadastrado, você receberá instruções para redefinir sua senha." });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.errors[0].message });
+    }
+    console.error("[Auth] Erro no forgot-password:", error);
+    return res.status(500).json({ error: "Erro interno no servidor." });
+  }
+}
+
+export async function resetPassword(req, res) {
+  try {
+    const { token, newPassword } = resetPasswordSchema.parse(req.body);
+
+    const hashedToken = hashToken(token);
+    const reset = await prisma.passwordReset.findUnique({ where: { tokenHash: hashedToken } });
+
+    if (!reset) return res.status(400).json({ error: "Token inválido." });
+    if (reset.used) return res.status(400).json({ error: "Token já utilizado." });
+    if (new Date() > reset.expiresAt) return res.status(400).json({ error: "Token expirado." });
+
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+
+    await prisma.$transaction([
+      prisma.user.update({ where: { id: reset.userId }, data: { passwordHash } }),
+      prisma.passwordReset.update({ where: { id: reset.id }, data: { used: true } }),
+      // Revoga todos os refresh tokens do usuário — força novo login em todos os dispositivos
+      prisma.refreshToken.updateMany({ where: { userId: reset.userId }, data: { revoked: true } }),
+      prisma.auditLog.create({
+        data: {
+          userId: reset.userId,
+          action: "password_reset",
+          ipAddress: req.ip,
+          userAgent: req.headers["user-agent"],
+        },
+      }),
+    ]);
+
+    return res.json({ message: "Senha redefinida com sucesso." });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.errors[0].message });
+    }
+    console.error("[Auth] Erro no reset-password:", error);
     return res.status(500).json({ error: "Erro interno no servidor." });
   }
 }
