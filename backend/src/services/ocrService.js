@@ -14,9 +14,9 @@ const OCR_LANG_PATH = resolve(__dirname, "../../ocr/lang-data") + "/";
 const OCR_LANG = process.env.OCR_LANG || "por+eng";
 const OCR_DPI = String(process.env.OCR_DPI || 180);
 const OCR_MAX_PAGES = Number(process.env.OCR_MAX_PAGES || 20);
+const OCR_TIMEOUT_MS = Number(process.env.OCR_TIMEOUT_MS || 60_000);
 const PDFTOPPM_CANDIDATES = [
   process.env.PDFTOPPM_PATH,
-  "/Users/ronneywellyngton/.cache/codex-runtimes/codex-primary-runtime/dependencies/bin/pdftoppm",
   "pdftoppm",
 ].filter(Boolean);
 const execFileAsync = promisify(execFile);
@@ -48,6 +48,15 @@ export async function extractPdfTextWithOcr(pdfBuffer) {
     return { text: baseText, usedOcr: false, ocrPages: 0 };
   }
 
+  return Promise.race([
+    runOcr(baseText, pdfBuffer),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`OCR timeout após ${OCR_TIMEOUT_MS}ms`)), OCR_TIMEOUT_MS)
+    ),
+  ]);
+}
+
+async function runOcr(baseText, pdfBuffer) {
   const pdftoppm = await findPdftoppm();
   const tempDir = await mkdtemp(join(tmpdir(), "forensedoc-ocr-"));
   let worker = null;

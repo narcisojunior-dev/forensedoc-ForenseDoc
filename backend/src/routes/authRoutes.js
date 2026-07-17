@@ -1,30 +1,31 @@
 import { Router } from "express";
 import { rateLimit } from "express-rate-limit";
+import { RedisStore } from "rate-limit-redis";
 import { register, login, refresh, verifyEmail, logout, me, forgotPassword, resetPassword } from "../controllers/authController.js";
 import { requireAuth } from "../middleware/auth.js";
-// import { RedisStore } from "rate-limit-redis";
-// import { redis } from "../utils/redis.js";
+import { redis } from "../utils/redis.js";
 
 const router = Router();
 
-// Configuração básica de rate limit (idealmente usar RedisStore em prod)
 const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 10, // 10 tentativas
+  windowMs: 15 * 60 * 1000,
+  max: 10,
   message: { error: "Muitas tentativas de login. Tente novamente mais tarde." },
-  // store: new RedisStore({ sendCommand: (...args) => redis.call(...args) })
+  store: new RedisStore({ sendCommand: (...args) => redis.call(...args), prefix: "rl:login:" }),
 });
 
 const registerLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 hora
-  max: 5, // 5 registros
+  windowMs: 60 * 60 * 1000,
+  max: 5,
   message: { error: "Limite de registros excedido. Tente novamente mais tarde." },
+  store: new RedisStore({ sendCommand: (...args) => redis.call(...args), prefix: "rl:register:" }),
 });
 
 const forgotPasswordLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 hora
-  max: 3, // 3 requisições
+  windowMs: 60 * 60 * 1000,
+  max: 3,
   message: { error: "Limite de solicitações excedido. Tente novamente mais tarde." },
+  store: new RedisStore({ sendCommand: (...args) => redis.call(...args), prefix: "rl:forgot:" }),
 });
 
 // Rotas Públicas

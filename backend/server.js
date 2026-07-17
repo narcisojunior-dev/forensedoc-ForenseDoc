@@ -1,8 +1,10 @@
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
+import cookieParser from "cookie-parser";
 import "dotenv/config";
 import routes from "./src/routes/index.js";
+import "./src/worker.js";
 
 const app = express();
 
@@ -50,6 +52,7 @@ app.use(
 
 // ─── Body Parser ──────────────────────────────────────────────────────────────
 app.use(express.json({ limit: "30mb" }));
+app.use(cookieParser());
 
 // ─── Rotas ────────────────────────────────────────────────────────────────────
 app.use("/api", routes);
@@ -106,22 +109,34 @@ try {
 }
 
 // ─── Graceful Shutdown ────────────────────────────────────────────────────────
-function shutdown(signal) {
+async function shutdown(signal) {
   console.log(`[ForenseDoc v3.0] Recebido ${signal}, encerrando servidor graciosamente...`);
-  if (!server) {
-    process.exit(0);
-    return;
-  }
-  server.close(() => {
-    console.log("[ForenseDoc v3.0] Servidor encerrado com sucesso.");
-    process.exit(0);
-  });
 
   // Força o encerramento caso o graceful shutdown demore demais
-  setTimeout(() => {
+  const forceTimer = setTimeout(() => {
     console.error("[ForenseDoc v3.0] Encerramento forçado após timeout.");
     process.exit(1);
-  }, 10000).unref();
+  }, 10000);
+  forceTimer.unref();
+
+  try {
+    if (server) {
+      await new Promise((resolve) => server.close(resolve));
+    }
+
+    // Fechar conexões do Prisma e Redis
+    const { prisma } = await import("./src/utils/prisma.js");
+    const { redis } = await import("./src/utils/redis.js");
+
+    await prisma.$disconnect();
+    redis.disconnect();
+
+    console.log("[ForenseDoc v3.0] Servidor encerrado com sucesso.");
+    process.exit(0);
+  } catch (err) {
+    console.error("[ForenseDoc v3.0] Erro durante encerramento:", err);
+    process.exit(1);
+  }
 }
 
 process.on("SIGTERM", () => shutdown("SIGTERM"));
@@ -129,6 +144,7 @@ process.on("SIGINT", () => shutdown("SIGINT"));
 
 process.on("uncaughtException", (err) => {
   console.error("[ForenseDoc v3.0] ❌ Exceção não tratada:", err);
+  process.exit(1);
 });
 
 process.on("unhandledRejection", (reason) => {
