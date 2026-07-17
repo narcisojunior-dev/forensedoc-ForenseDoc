@@ -2,6 +2,7 @@ import "dotenv/config";
 import { Worker, Queue } from "bullmq";
 import { processCreditExpirations } from "./jobs/expireCredits.js";
 import { processWebhook, suspendIfStillOverdue } from "./jobs/webhookProcessor.js";
+import { processAnalysis } from "./jobs/analysisWorker.js";
 
 // Conexão do Redis para o BullMQ
 const connection = {
@@ -29,8 +30,9 @@ const worker = new Worker("saas-jobs", async (job) => {
     await processWebhook(job);
   } else if (job.name === "suspend-if-overdue") {
     await suspendIfStillOverdue(job.data.tenantId);
+  } else if (job.name === "process-pdf") {
+    await processAnalysis(job);
   }
-  // Módulo 4: job de análise de PDF será adicionado aqui depois
 }, { connection });
 
 worker.on("error", (err) => {

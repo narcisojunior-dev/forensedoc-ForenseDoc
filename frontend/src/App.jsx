@@ -13,6 +13,7 @@ import DashboardLayout from "./components/Layout/DashboardLayout.jsx";
 
 // Rotas Privadas (SaaS)
 import Dashboard from "./pages/Dashboard.jsx";
+import Analyze from "./pages/Analyze.jsx";
 
 // Temporário para manter a v2.2 acessível enquanto construímos o dashboard do v3.0
 import ForenseDocOld from "./ForenseDoc.jsx";
@@ -39,7 +40,7 @@ function App() {
         {/* Rotas Protegidas do Dashboard */}
         <Route path="/dashboard" element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}>
           <Route index element={<Dashboard />} />
-          <Route path="analyze" element={<div className="p-8 text-center text-zinc-400">Nova Análise (Em breve - Módulo 4)</div>} />
+          <Route path="analyze" element={<Analyze />} />
           <Route path="history" element={<div className="p-8 text-center text-zinc-400">Histórico de Laudos (Em breve - Módulo 4)</div>} />
           <Route path="plans" element={<div className="p-8 text-center text-zinc-400">Planos e Créditos (Em breve - Módulo 3)</div>} />
           <Route path="settings" element={<div className="p-8 text-center text-zinc-400">Configurações (Em breve)</div>} />
