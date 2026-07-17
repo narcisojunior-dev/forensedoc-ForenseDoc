@@ -200,3 +200,98 @@ export async function refundCredit(tenantId, userId, analysisId, reason = "Erro 
     await invalidateCreditCache(tenantId);
   });
 }
+
+// Créditos mensais (renovação de assinatura confirmada pelo webhook da Asaas).
+export async function addMonthlyCredits(tenantId, amount, cycleStart, cycleEnd) {
+  await prisma.$transaction([
+    prisma.creditBalance.update({
+      where: { tenantId },
+      data: { creditsMonthly: { increment: amount }, cycleStart, cycleEnd },
+    }),
+    prisma.creditTransaction.create({
+      data: {
+        tenantId,
+        type: "EARN_MONTHLY",
+        amount,
+        creditType: "monthly",
+        source: "subscription_renewal",
+      },
+    }),
+  ]);
+  await invalidateCreditCache(tenantId);
+}
+
+// Crédito avulso (compra confirmada pelo webhook da Asaas).
+export async function addAvulsoCredit(tenantId, paymentId) {
+  await prisma.$transaction([
+    prisma.creditBalance.update({
+      where: { tenantId },
+      data: { creditsAvulso: { increment: 1 } },
+    }),
+    prisma.creditTransaction.create({
+      data: {
+        tenantId,
+        type: "EARN_AVULSO",
+        amount: 1,
+        creditType: "avulso",
+        source: "avulso_purchase",
+        notes: `Payment ${paymentId}`,
+      },
+    }),
+  ]);
+  await invalidateCreditCache(tenantId);
+}
+
+// Créditos de emergência (falha de cobrança) — 2 créditos, sem cobrança.
+export async function addEmergencyCredits(tenantId) {
+  await prisma.$transaction([
+    prisma.creditBalance.update({
+      where: { tenantId },
+      data: { creditsEmergency: { increment: 2 } },
+    }),
+    prisma.creditTransaction.create({
+      data: {
+        tenantId,
+        type: "EARN_EMERGENCY",
+        amount: 2,
+        creditType: "emergency",
+        source: "payment_failure",
+      },
+    }),
+    prisma.subscription.update({
+      where: { tenantId },
+      data: { emergencyGrantedAt: new Date() },
+    }),
+  ]);
+  await invalidateCreditCache(tenantId);
+}
+
+// Expira créditos de emergência não usados ao regularizar o pagamento.
+export async function expireEmergencyCredits(tenantId) {
+  const balance = await prisma.creditBalance.findUnique({ where: { tenantId } });
+  if (!balance || balance.creditsEmergency <= 0) return;
+
+  await prisma.$transaction([
+    prisma.creditBalance.update({
+      where: { tenantId },
+      data: { creditsEmergency: 0 },
+    }),
+    prisma.creditTransaction.create({
+      data: {
+        tenantId,
+        type: "EXPIRE",
+        amount: -balance.creditsEmergency,
+        creditType: "emergency",
+        source: "payment_regularized",
+      },
+    }),
+  ]);
+  await invalidateCreditCache(tenantId);
+}
+
+// Evita conceder emergência duas vezes no mesmo ciclo de cobrança.
+export async function wasEmergencyGrantedThisCycle(tenantId) {
+  const subscription = await getActiveSubscription(tenantId);
+  if (!subscription?.emergencyGrantedAt) return false;
+  return subscription.emergencyGrantedAt >= subscription.currentPeriodStart;
+}

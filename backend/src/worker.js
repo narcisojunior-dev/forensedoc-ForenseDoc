@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { Worker, Queue } from "bullmq";
 import { processCreditExpirations } from "./jobs/expireCredits.js";
+import { processWebhook, suspendIfStillOverdue } from "./jobs/webhookProcessor.js";
 
 // Conexão do Redis para o BullMQ
 const connection = {
@@ -24,6 +25,10 @@ console.log("[ForenseDoc v3.0] Worker iniciado. Aguardando jobs da fila 'saas-jo
 const worker = new Worker("saas-jobs", async (job) => {
   if (job.name === "expire-credits") {
     await processCreditExpirations();
+  } else if (job.name === "process-webhook") {
+    await processWebhook(job);
+  } else if (job.name === "suspend-if-overdue") {
+    await suspendIfStillOverdue(job.data.tenantId);
   }
   // Módulo 4: job de análise de PDF será adicionado aqui depois
 }, { connection });

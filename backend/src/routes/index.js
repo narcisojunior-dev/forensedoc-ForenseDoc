@@ -4,6 +4,8 @@ import { geocode, ipLocation } from "../controllers/geoController.js";
 import authRoutes from "./authRoutes.js";
 import tenantRoutes from "./tenantRoutes.js";
 import creditRoutes from "./creditRoutes.js";
+import billingRoutes from "./billingRoutes.js";
+import webhookRoutes from "./webhookRoutes.js";
 import { requireAuth } from "../middleware/auth.js";
 
 const router = Router();
@@ -27,6 +29,8 @@ function requestTimeout(ms) {
 router.use("/auth", authRoutes);
 router.use("/tenant", tenantRoutes);
 router.use("/credits", creditRoutes);
+router.use("/billing", billingRoutes);
+router.use("/webhooks", webhookRoutes);
 
 // Rotas de Análise (v2.2 mantida, precisará de adaptação no Módulo 4)
 router.post("/analyze", requireAuth, requestTimeout(ANALYZE_TIMEOUT_MS), analyzePdf);
