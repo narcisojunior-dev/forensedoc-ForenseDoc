@@ -2,8 +2,6 @@ import "dotenv/config";
 import { Worker, Queue } from "bullmq";
 import { processCreditExpirations } from "./jobs/expireCredits.js";
 
-console.log("[Boot] worker.js: módulo carregado, REDIS_URL definida?", Boolean(process.env.REDIS_URL));
-
 // Conexão do Redis para o BullMQ
 const connection = {
   url: process.env.REDIS_URL || "redis://localhost:6379",
