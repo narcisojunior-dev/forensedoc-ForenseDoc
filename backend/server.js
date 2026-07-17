@@ -6,6 +6,8 @@ import "dotenv/config";
 import routes from "./src/routes/index.js";
 import "./src/worker.js";
 
+console.log("[Boot] server.js: imports concluídos, montando Express...");
+
 const app = express();
 
 // ─── Segurança: cabeçalhos HTTP ───────────────────────────────────────────────
@@ -91,6 +93,8 @@ const PORT = Number(process.env.PORT) || 8787;
 const HOST = "0.0.0.0";
 
 let server;
+
+console.log(`[Boot] server.js: chamando app.listen — process.env.PORT="${process.env.PORT}" PORT=${PORT} HOST=${HOST}`);
 
 try {
   server = app.listen(PORT, HOST, () => {
