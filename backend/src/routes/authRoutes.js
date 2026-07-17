@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { rateLimit } from "express-rate-limit";
 import { RedisStore } from "rate-limit-redis";
-import { register, login, refresh, verifyEmail, logout, me, forgotPassword, resetPassword } from "../controllers/authController.js";
+import { register, login, refresh, verifyEmail, logout, me, forgotPassword, resetPassword, updateProfile, changePassword } from "../controllers/authController.js";
 import { requireAuth } from "../middleware/auth.js";
 import { redis } from "../utils/redis.js";
 
@@ -39,5 +39,7 @@ router.post("/reset-password", resetPassword);
 // Rotas Protegidas
 router.post("/logout", requireAuth, logout);
 router.get("/me", requireAuth, me);
+router.patch("/me", requireAuth, updateProfile);
+router.post("/change-password", requireAuth, changePassword);
 
 export default router;

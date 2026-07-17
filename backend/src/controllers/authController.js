@@ -26,6 +26,16 @@ const forgotPasswordSchema = z.object({
   email: z.string().email("E-mail inválido"),
 });
 
+const updateProfileSchema = z.object({
+  name: z.string().min(3, "Nome muito curto").optional(),
+  oabNumber: z.string().optional(),
+});
+
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, "Senha atual é obrigatória"),
+  newPassword: z.string().min(8, "Senha deve ter no mínimo 8 caracteres"),
+});
+
 const resetPasswordSchema = z.object({
   token: z.string().min(1, "Token ausente"),
   newPassword: z.string().min(8, "Senha deve ter no mínimo 8 caracteres"),
@@ -416,6 +426,7 @@ export async function me(req, res) {
         name: true,
         email: true,
         role: true,
+        oabNumber: true,
         isPlatformAdmin: true,
         tenant: {
           select: {
@@ -431,6 +442,70 @@ export async function me(req, res) {
     return res.json({ user });
   } catch (error) {
     console.error("[Auth] Erro em /me:", error);
+    return res.status(500).json({ error: "Erro interno no servidor." });
+  }
+}
+
+export async function updateProfile(req, res) {
+  try {
+    const data = updateProfileSchema.parse(req.body);
+
+    const user = await prisma.user.update({
+      where: { id: req.auth.userId },
+      data,
+      select: { id: true, name: true, email: true, oabNumber: true, role: true },
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        action: "profile_updated",
+        ipAddress: req.ip,
+        userAgent: req.headers["user-agent"],
+      },
+    });
+
+    return res.json({ user });
+  } catch (error) {
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    console.error("[Auth] Erro ao atualizar perfil:", error);
+    return res.status(500).json({ error: "Erro interno no servidor." });
+  }
+}
+
+export async function changePassword(req, res) {
+  try {
+    const { currentPassword, newPassword } = changePasswordSchema.parse(req.body);
+
+    const user = await prisma.user.findUnique({ where: { id: req.auth.userId } });
+    if (!user) return res.status(404).json({ error: "Usuário não encontrado." });
+
+    const isValid = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!isValid) return res.status(401).json({ error: "Senha atual incorreta." });
+
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+
+    await prisma.$transaction([
+      prisma.user.update({ where: { id: user.id }, data: { passwordHash } }),
+      // Revoga todos os refresh tokens — força novo login em todos os dispositivos,
+      // mesmo padrão de segurança já usado em resetPassword.
+      prisma.refreshToken.updateMany({ where: { userId: user.id }, data: { revoked: true } }),
+      prisma.auditLog.create({
+        data: {
+          tenantId: req.auth.tenantId,
+          userId: user.id,
+          action: "password_changed",
+          ipAddress: req.ip,
+          userAgent: req.headers["user-agent"],
+        },
+      }),
+    ]);
+
+    return res.json({ message: "Senha alterada com sucesso." });
+  } catch (error) {
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    console.error("[Auth] Erro ao trocar senha:", error);
     return res.status(500).json({ error: "Erro interno no servidor." });
   }
 }

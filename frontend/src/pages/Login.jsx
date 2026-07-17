@@ -23,7 +23,9 @@ export default function Login() {
 
     if (result.success) {
       toast.success("Login realizado com sucesso!");
-      navigate("/dashboard"); // Rota do dashboard que será criada depois
+      const user = useAuthStore.getState().user;
+      const seenOnboarding = user && localStorage.getItem(`onboarding_seen_${user.id}`);
+      navigate(seenOnboarding ? "/dashboard" : "/onboarding");
     } else {
       toast.error(result.error);
     }
