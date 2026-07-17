@@ -91,11 +91,15 @@ export async function inviteMember(req, res) {
     });
 
     const inviteUrl = `${process.env.FRONTEND_URL}/invite/${inviteToken}`;
-    await sendEmail({
-      to: email,
-      subject: `Convite para ${tenant.name} — ForenseDoc`,
-      html: `Você foi convidado para fazer parte da equipe "${tenant.name}" no ForenseDoc.<br><br>Clique no link abaixo para aceitar (válido por 72 horas):<br><a href="${inviteUrl}">${inviteUrl}</a>`,
-    });
+    try {
+      await sendEmail({
+        to: email,
+        subject: `Convite para ${tenant.name} — ForenseDoc`,
+        html: `Você foi convidado para fazer parte da equipe "${tenant.name}" no ForenseDoc.<br><br>Clique no link abaixo para aceitar (válido por 72 horas):<br><a href="${inviteUrl}">${inviteUrl}</a>`,
+      });
+    } catch (emailError) {
+      console.error("[Tenant] Falha ao enviar e-mail de convite:", emailError.message);
+    }
 
     return res.status(201).json({ message: "Convite enviado com sucesso." });
   } catch (error) {

@@ -8,6 +8,11 @@ import "./src/worker.js";
 
 const app = express();
 
+// Railway roda atrás de um proxy reverso — sem isso, express-rate-limit e
+// req.ip não conseguem identificar o IP real do cliente a partir do
+// X-Forwarded-For (rate limit e audit log ficariam incorretos).
+app.set("trust proxy", 1);
+
 // ─── Segurança: cabeçalhos HTTP ───────────────────────────────────────────────
 // No Railway, helmet substitui o Nginx para headers de segurança.
 // Na VPS (produção), os headers serão movidos para o Nginx.
