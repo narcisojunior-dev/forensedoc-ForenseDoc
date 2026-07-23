@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { prisma } from "../utils/prisma.js";
 import { refundCredit } from "../services/creditService.js";
 import { notify } from "../services/notificationService.js";
@@ -5,13 +6,26 @@ import { releaseLock, analysisLockKey } from "../utils/lock.js";
 import { extractPdfTextWithOcr } from "../services/ocrService.js";
 import { extractPdfMetadata } from "../services/pdfService.js";
 import { heuristicExtractionFromText } from "../services/extractionService.js";
+import { enrichGeography } from "../services/geoEnrichmentService.js";
 import { cleanPdfBase64, stripDiacritics } from "../utils/stringUtils.js";
 
+function fileHashes(buffer) {
+  return {
+    sha256: crypto.createHash("sha256").update(buffer).digest("hex").toUpperCase(),
+    sha1: crypto.createHash("sha1").update(buffer).digest("hex").toUpperCase(),
+  };
+}
+
 export async function processAnalysis(job) {
-  const { analysisId, pdfBase64, tenantId, userId, lockToken } = job.data;
+  const { analysisId, pdfBase64, tenantId, userId, lockToken, homeAddress, filename } = job.data;
 
   try {
     const pdfBuffer = Buffer.from(cleanPdfBase64(pdfBase64), "base64");
+
+    // Hash do arquivo calculado sobre o que o SERVIDOR recebeu e analisou —
+    // origem autoritativa da cadeia de custódia. Antes vinha do navegador.
+    const hashes = fileHashes(pdfBuffer);
+
     const [extraction, metadata] = await Promise.all([
       extractPdfTextWithOcr(pdfBuffer),
       extractPdfMetadata(pdfBuffer),
@@ -25,6 +39,18 @@ export async function processAnalysis(job) {
       metadata.warnings.push(`O autor declarado nos metadados (${metadata.author}) difere do nome do contratante extraído (${fallback.cliente.nome}). A divergência não comprova fraude, mas deve ser contextualizada.`);
     }
 
+    // Confronto geográfico (§5). Depende de serviços externos instáveis
+    // (Nominatim, ipapi.co), então roda em try/catch PRÓPRIO: se a geo falhar,
+    // a análise continua COMPLETED com os campos geo vazios. Deixar a exceção
+    // subir cairia no catch de baixo, que estorna o crédito e marca REFUNDED —
+    // punindo o cliente por uma extração que deu certo.
+    let geo = { home: null, contractGeo: null, geoDeclaredPresent: false, ipAnalysis: [] };
+    try {
+      geo = await enrichGeography(fallback, homeAddress);
+    } catch (geoError) {
+      console.error(`[AnalysisWorker] Enriquecimento geográfico falhou para ${analysisId}:`, geoError.message);
+    }
+
     const result = {
       text: JSON.stringify(fallback),
       metadata,
@@ -34,6 +60,14 @@ export async function processAnalysis(job) {
       warning: extraction.usedOcr
         ? `OCR aplicado automaticamente em ${extraction.ocrPages} página(s) antes da análise local.`
         : "",
+      // Artefatos forenses persistidos (Fase A) — laudo reprodutível.
+      hashes,
+      file: { name: filename || null, sizeBytes: pdfBuffer.length },
+      home: geo.home,
+      contractGeo: geo.contractGeo,
+      geoDeclaredPresent: geo.geoDeclaredPresent,
+      ipAnalysis: geo.ipAnalysis,
+      generatedAt: new Date().toISOString(),
     };
 
     await prisma.analysis.update({
