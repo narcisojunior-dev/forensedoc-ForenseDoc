@@ -140,9 +140,11 @@ export async function listTenants(req, res) {
     const skip = (page - 1) * limit;
     const search = (req.query.search || "").trim();
     const status = req.query.status;
+    const planSlug = req.query.plan;
 
     const where = {
       ...(status ? { status } : {}),
+      ...(planSlug ? { subscription: { plan: { slug: planSlug } } } : {}),
       ...(search
         ? {
             OR: [
@@ -168,7 +170,11 @@ export async function listTenants(req, res) {
           createdAt: true,
           creditBalance: true,
           subscription: { select: { status: true, plan: { select: { name: true } } } },
-          users: { select: { id: true, name: true, email: true, role: true } },
+          // lastLoginAt do membro mais recente = "último acesso" do escritório (RF-19).
+          users: {
+            select: { id: true, name: true, email: true, role: true, lastLoginAt: true },
+            orderBy: { lastLoginAt: "desc" },
+          },
           _count: { select: { analyses: true } },
         },
       }),

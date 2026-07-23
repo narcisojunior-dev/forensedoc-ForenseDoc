@@ -8,6 +8,13 @@ import {
   suspendTenant,
   activateTenant,
 } from "../controllers/adminController.js";
+import {
+  getDashboard,
+  listPlans,
+  updatePlan,
+  listAuditLogs,
+  listAllPayments,
+} from "../controllers/adminMetricsController.js";
 import { requireAuth, requirePlatformAdmin } from "../middleware/auth.js";
 import { createLimiter } from "../utils/rateLimitStore.js";
 
@@ -34,5 +41,16 @@ router.get("/tenants/:id", getTenant);
 router.post("/tenants/:id/credits", grantManualCredits);
 router.post("/tenants/:id/suspend", suspendTenant);
 router.post("/tenants/:id/activate", activateTenant);
+
+// Métricas do operador (RF-18)
+router.get("/dashboard", getDashboard);
+
+// Gestão de planos (RF-20)
+router.get("/plans", listPlans);
+router.patch("/plans/:id", updatePlan);
+
+// Auditoria e pagamentos
+router.get("/audit-logs", listAuditLogs);
+router.get("/payments", listAllPayments);
 
 export default router;

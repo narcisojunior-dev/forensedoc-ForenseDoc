@@ -1,16 +1,22 @@
 import { useState } from "react";
-import { Shield, Building2, Ticket } from "lucide-react";
+import { Shield, Building2, Ticket, LayoutDashboard, CreditCard, ScrollText } from "lucide-react";
 import { cn } from "../utils/cn";
+import AdminDashboard from "./admin/AdminDashboard";
 import AdminTenants from "./admin/AdminTenants";
+import AdminPlans from "./admin/AdminPlans";
+import AdminAuditLog from "./admin/AdminAuditLog";
 import AdminFounders from "./admin/AdminFounders";
 
 const TABS = [
+  { id: "dashboard", label: "Painel", icon: LayoutDashboard, Component: AdminDashboard },
   { id: "tenants", label: "Contas", icon: Building2, Component: AdminTenants },
+  { id: "plans", label: "Planos", icon: CreditCard, Component: AdminPlans },
+  { id: "audit", label: "Auditoria", icon: ScrollText, Component: AdminAuditLog },
   { id: "founders", label: "Convites Fundador", icon: Ticket, Component: AdminFounders },
 ];
 
 export default function Admin() {
-  const [active, setActive] = useState("tenants");
+  const [active, setActive] = useState("dashboard");
   const ActiveComponent = TABS.find((t) => t.id === active).Component;
 
   return (
