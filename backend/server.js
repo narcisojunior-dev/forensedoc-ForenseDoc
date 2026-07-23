@@ -41,12 +41,25 @@ app.use(
 );
 
 // ─── CORS ────────────────────────────────────────────────────────────────────
-const allowedOrigins = (process.env.CORS_ORIGIN || "http://localhost:5173").split(",");
+const allowedOrigins = (process.env.CORS_ORIGIN || "http://localhost:5173")
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
+
+const isProduction = process.env.NODE_ENV === "production";
+
+// Em desenvolvimento, localhost e 127.0.0.1 são origens DIFERENTES para o
+// navegador, e o proxy do Vite repassa o Origin original — servir o front em
+// 127.0.0.1 com CORS_ORIGIN=localhost bloqueia toda chamada. Aceitar as duas
+// formas em qualquer porta evita esse atrito. Nunca vale em produção.
+const DEV_ORIGIN_RE = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+
 app.use(
   cors({
     origin: (origin, callback) => {
       // Permitir requisições sem origin (ex: Postman, Railway health checks)
       if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+      if (!isProduction && DEV_ORIGIN_RE.test(origin)) return callback(null, true);
       callback(new Error(`CORS bloqueado para origem: ${origin}`));
     },
     credentials: true,

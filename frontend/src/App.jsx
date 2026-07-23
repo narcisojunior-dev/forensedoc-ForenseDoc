@@ -20,6 +20,8 @@ import History from "./pages/History.jsx";
 import Plans from "./pages/Plans.jsx";
 import Settings from "./pages/Settings.jsx";
 import Onboarding from "./pages/Onboarding.jsx";
+import Admin from "./pages/Admin.jsx";
+import AdminRoute from "./components/AdminRoute.jsx";
 
 // Temporário para manter a v2.2 acessível enquanto construímos o dashboard do v3.0
 import ForenseDocOld from "./ForenseDoc.jsx";
@@ -53,6 +55,7 @@ function App() {
           <Route path="history" element={<History />} />
           <Route path="plans" element={<Plans />} />
           <Route path="settings" element={<Settings />} />
+          <Route path="admin" element={<AdminRoute><Admin /></AdminRoute>} />
         </Route>
       </Routes>
     </>

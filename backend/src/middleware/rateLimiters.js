@@ -32,6 +32,10 @@ export const analyzeLimiter = createLimiter({
   windowMs: 30 * 1000,
   max: 1,
   keyGenerator: tenantKey,
+  // Só conta requisições que realmente iniciaram uma análise. Sem isto, um
+  // PDF inválido (400) ou saldo insuficiente (402) travariam o usuário por
+  // 30 segundos por uma tentativa que não chegou a custar nada.
+  skipFailedRequests: true,
   message: {
     error: "Aguarde 30 segundos entre análises.",
     code: "ANALYSIS_RATE_LIMITED",

@@ -222,8 +222,16 @@ export async function getTenant(req, res) {
 // ─────────────────────────────────────────────────────────────
 
 const manualCreditSchema = z.object({
-  amount: z.number().int().refine((n) => n !== 0, "Quantidade não pode ser zero"),
-  notes: z.string().min(3, "Descreva o motivo da concessão").max(500),
+  // O `error` cobre o campo ausente/tipo errado; o `.min()` cobre o valor
+  // curto. Sem os dois, um campo faltando devolveria a mensagem crua do Zod.
+  amount: z
+    .number({ error: "Informe a quantidade de créditos." })
+    .int("A quantidade deve ser um número inteiro.")
+    .refine((n) => n !== 0, "Quantidade não pode ser zero"),
+  notes: z
+    .string({ error: "Descreva o motivo da concessão." })
+    .min(3, "Descreva o motivo da concessão.")
+    .max(500, "Motivo muito longo (máximo 500 caracteres)."),
 });
 
 export async function grantManualCredits(req, res) {
@@ -271,7 +279,10 @@ export async function grantManualCredits(req, res) {
 // ─────────────────────────────────────────────────────────────
 
 const suspendSchema = z.object({
-  reason: z.string().min(3, "Informe o motivo da suspensão").max(500),
+  reason: z
+    .string({ error: "Informe o motivo da suspensão." })
+    .min(3, "Informe o motivo da suspensão.")
+    .max(500, "Motivo muito longo (máximo 500 caracteres)."),
 });
 
 export async function suspendTenant(req, res) {

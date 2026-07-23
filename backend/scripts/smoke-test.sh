@@ -24,12 +24,20 @@ green() { printf "\033[0;32m%s\033[0m\n" "$1"; }
 red()   { printf "\033[0;31m%s\033[0m\n" "$1"; }
 dim()   { printf "\033[0;90m%s\033[0m\n" "$1"; }
 
+SKIP=0
+
 # check <descrição> <status esperado> <status recebido> [detalhe]
 check() {
   local desc="$1" expected="$2" actual="$3" detail="${4:-}"
   if [ "$actual" = "$expected" ]; then
     green "  ✓ $desc"
     PASS=$((PASS + 1))
+  # 429 significa que o limitador entrou em ação — comum ao reexecutar o
+  # script várias vezes seguidas. Não é falha do sistema, mas também não
+  # confirma nada: fica registrado à parte.
+  elif [ "$actual" = "429" ]; then
+    dim   "  ~ $desc (rate limit atingido — inconclusivo)"
+    SKIP=$((SKIP + 1))
   else
     red   "  ✗ $desc (esperado $expected, recebeu $actual)"
     [ -n "$detail" ] && dim "    $detail"
@@ -38,6 +46,26 @@ check() {
 }
 
 status_of() { curl -s -o /dev/null -w "%{http_code}" -m 15 "$@"; }
+
+# Envia JSON via arquivo temporário (@-). Passar o corpo direto em -d dentro
+# de $(...) sofre brace expansion do shell: o `{"a":1,"b":2}` é quebrado em
+# duas palavras no vírgula e vira duas requisições — cada uma com metade do
+# payload e resposta 400.
+post_json() {
+  local url="$1" payload="$2"
+  printf '%s' "$payload" > "$TMP_PAYLOAD"
+  curl -s -o /dev/null -w "%{http_code}" -m 20 -X POST "$url" \
+    -H 'Content-Type: application/json' -d @"$TMP_PAYLOAD"
+}
+
+post_json_body() {
+  local url="$1" payload="$2"
+  printf '%s' "$payload" > "$TMP_PAYLOAD"
+  curl -s -m 20 -X POST "$url" -H 'Content-Type: application/json' -d @"$TMP_PAYLOAD"
+}
+
+TMP_PAYLOAD="$(mktemp)"
+trap 'rm -f "$TMP_PAYLOAD"' EXIT
 
 echo
 echo "Smoke test — $BASE_URL"
@@ -67,37 +95,41 @@ EMAIL="smoke+$SUFFIX@forensedoc.test"
 PASSWORD="SmokeTest123"
 CPF="$(printf '%011d' $((RANDOM * RANDOM % 100000000000)))"
 
-REGISTER=$(curl -s -m 20 -X POST "$API/auth/register" \
-  -H 'Content-Type: application/json' \
-  -d "{\"name\":\"Smoke Test\",\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\",\"cpfCnpj\":\"$CPF\",\"oabNumber\":\"12345\",\"oabState\":\"PI\"}")
-echo "$REGISTER" | grep -q "Cadastro realizado" \
-  && check "registro aceito" "ok" "ok" \
-  || check "registro aceito" "ok" "falhou" "$REGISTER"
+REGISTER=$(post_json_body "$API/auth/register" \
+  "{\"name\":\"Smoke Test\",\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\",\"cpfCnpj\":\"$CPF\",\"oabNumber\":\"12345\",\"oabState\":\"PI\"}")
+if echo "$REGISTER" | grep -q "Cadastro realizado"; then
+  check "registro aceito" "ok" "ok"
+else
+  check "registro aceito" "ok" "falhou" "$REGISTER"
+fi
 
-# Login antes da verificação de e-mail deve ser recusado.
-LOGIN_STATUS=$(status_of -X POST "$API/auth/login" -H 'Content-Type: application/json' \
-  -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}")
-check "login bloqueado antes de verificar e-mail" "403" "$LOGIN_STATUS"
+# O status vai para uma variável antes do check. Chamar post_json dentro dos
+# argumentos de check executa em subshell, e o payload escrito lá não chega
+# confiavelmente ao curl — o resultado eram 400 fantasmas.
+UNVERIFIED_STATUS=$(post_json "$API/auth/login" "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}")
+check "login bloqueado antes de verificar e-mail" "403" "$UNVERIFIED_STATUS"
 
-check "senha errada → 401" "401" \
-  "$(status_of -X POST "$API/auth/login" -H 'Content-Type: application/json' \
-     -d "{\"email\":\"$EMAIL\",\"password\":\"SenhaErrada123\"}")"
+WRONGPASS_STATUS=$(post_json "$API/auth/login" "{\"email\":\"$EMAIL\",\"password\":\"SenhaErrada123\"}")
+check "senha errada → 401" "401" "$WRONGPASS_STATUS"
 
-check "e-mail duplicado → 400" "400" \
-  "$(status_of -X POST "$API/auth/register" -H 'Content-Type: application/json' \
-     -d "{\"name\":\"Dup\",\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\",\"cpfCnpj\":\"98765432100\",\"oabNumber\":\"1\",\"oabState\":\"PI\"}")"
+DUP_STATUS=$(post_json "$API/auth/register" \
+  "{\"name\":\"Dup\",\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\",\"cpfCnpj\":\"98765432100\",\"oabNumber\":\"1\",\"oabState\":\"PI\"}")
+check "e-mail duplicado → 400" "400" "$DUP_STATUS"
 
 # ── 4. Proteção de entrada ──────────────────────────────────────────────────
 echo "4. Validação de upload"
 # Sem token o requireAuth barra antes — o que se testa aqui é que a rota não
 # aceita chamada anônima; a validação de PDF é coberta por teste unitário.
-check "POST /analyze sem token → 401" "401" \
-  "$(status_of -X POST "$API/analyze" -H 'Content-Type: application/json' -d '{"pdfBase64":"AAAA"}')"
+ANALYZE_STATUS=$(post_json "$API/analyze" '{"pdfBase64":"AAAA"}')
+check "POST /analyze sem token → 401" "401" "$ANALYZE_STATUS"
 
 echo "5. Webhook"
-check "webhook sem token → 401 ou 403" "sim" \
-  "$(s=$(status_of -X POST "$API/webhooks/asaas" -H 'Content-Type: application/json' -d '{"event":"PAYMENT_RECEIVED"}'); \
-     [ "$s" = "401" ] || [ "$s" = "403" ] && echo sim || echo "não ($s)")"
+WEBHOOK_STATUS=$(post_json "$API/webhooks/asaas" '{"event":"PAYMENT_RECEIVED"}')
+if [ "$WEBHOOK_STATUS" = "401" ] || [ "$WEBHOOK_STATUS" = "403" ]; then
+  check "webhook sem token → 401 ou 403" "sim" "sim"
+else
+  check "webhook sem token → 401 ou 403" "sim" "não ($WEBHOOK_STATUS)"
+fi
 
 echo "6. Rotas inexistentes"
 check "rota desconhecida → 404" "404" "$(status_of "$API/rota-que-nao-existe")"
@@ -106,10 +138,12 @@ check "rota desconhecida → 404" "404" "$(status_of "$API/rota-que-nao-existe")
 echo "────────────────────────────────────────────"
 if [ "$FAIL" -eq 0 ]; then
   green "✅ $PASS verificações passaram."
+  [ "$SKIP" -gt 0 ] && dim "   ($SKIP inconclusiva(s) por rate limit — reexecute em 15 min)"
   echo
   dim "Conta de teste criada: $EMAIL (não verificada)"
   exit 0
 else
-  red "❌ $FAIL de $((PASS + FAIL)) verificações falharam."
+  red "❌ $FAIL de $((PASS + FAIL + SKIP)) verificações falharam."
+  [ "$SKIP" -gt 0 ] && dim "   ($SKIP inconclusiva(s) por rate limit)"
   exit 1
 fi

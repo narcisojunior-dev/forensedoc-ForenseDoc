@@ -307,7 +307,10 @@ model CreditTransaction {
   amount     Int                   // positivo = entrada, negativo = saída
   creditType String                // 'monthly', 'avulso', 'emergency', 'manual'
   source     String                // 'subscription_renewal', 'avulso_purchase', 'payment_failure', 'admin', 'analysis', 'refund'
-  analysisId String?  @unique
+  // NÃO pode ser @unique: uma análise que falha gera duas transações — o
+  // SPEND e o REFUND correspondente. Com a restrição de unicidade o estorno
+  // quebrava e o cliente perdia o crédito de toda análise com erro.
+  analysisId String?
   notes      String?
   createdAt  DateTime              @default(now())
 
@@ -316,6 +319,7 @@ model CreditTransaction {
   analysis Analysis? @relation(fields: [analysisId], references: [id])
 
   @@index([tenantId, createdAt(sort: Desc)])
+  @@index([analysisId])
   @@map("credit_transactions")
 }
 
@@ -330,14 +334,14 @@ model Analysis {
   filenameHash          String         // hash SHA-256 do nome do arquivo (não do conteúdo)
   status                AnalysisStatus @default(PROCESSING)
   result                Json?          // laudo estruturado (JSONB) — sem dados binários do PDF
-  creditTransactionId   String?        @unique
   processingStartedAt   DateTime?
   processingCompletedAt DateTime?
   createdAt             DateTime       @default(now())
 
   tenant            Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   user              User                @relation(fields: [userId], references: [id])
-  creditTransaction CreditTransaction?
+  // Uma análise tem o gasto e, se falhar, também o estorno.
+  creditTransactions CreditTransaction[]
 
   @@index([tenantId, createdAt(sort: Desc)])
   @@map("analyses")

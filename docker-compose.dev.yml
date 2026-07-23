@@ -1,0 +1,49 @@
+# ─────────────────────────────────────────────────────────────────
+# ForenseDoc v3.0 — Dependências para desenvolvimento local
+# ─────────────────────────────────────────────────────────────────
+# Sobe apenas Postgres e Redis. O backend e o frontend rodam na
+# máquina (npm start / npm run dev), para ter hot reload e logs
+# diretos — inclusive os e-mails, que em dev são impressos no
+# console em vez de enviados.
+#
+#   docker compose -f docker-compose.dev.yml up -d
+#   docker compose -f docker-compose.dev.yml down        # para
+#   docker compose -f docker-compose.dev.yml down -v     # zera os dados
+#
+# Para produção na VPS use o docker-compose.yml.
+# ─────────────────────────────────────────────────────────────────
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: forensedoc_dev_postgres
+    environment:
+      POSTGRES_USER: forensedoc
+      POSTGRES_PASSWORD: forensedoc_dev
+      POSTGRES_DB: forensedoc_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - dev_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U forensedoc -d forensedoc_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: forensedoc_dev_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - dev_redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  dev_pgdata:
+  dev_redisdata:

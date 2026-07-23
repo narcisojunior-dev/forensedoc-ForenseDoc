@@ -9,7 +9,8 @@ import {
   LogOut, 
   Menu, 
   X,
-  Scale
+  Scale,
+  Shield
 } from "lucide-react";
 import { useAuthStore } from "../../store/authStore";
 import { cn } from "../../utils/cn";
@@ -27,6 +28,10 @@ export default function DashboardLayout() {
     { name: "Histórico", path: "/dashboard/history", icon: History },
     { name: "Planos & Créditos", path: "/dashboard/plans", icon: CreditCard },
     { name: "Configurações", path: "/dashboard/settings", icon: Settings },
+    // Só o operador da plataforma vê o item; o acesso em si é barrado no backend.
+    ...(user?.isPlatformAdmin
+      ? [{ name: "Administração", path: "/dashboard/admin", icon: Shield }]
+      : []),
   ];
 
   return (
