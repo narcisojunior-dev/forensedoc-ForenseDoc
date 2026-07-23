@@ -19,6 +19,36 @@ function arrayBufferToBase64(buffer) {
   return btoa(binary);
 }
 
+const PRECISION_LABEL = {
+  manual: "confirmada pelo operador",
+  gps: "GPS do log do contrato",
+  rooftop: "nível de endereço (número)",
+  street: "nível de rua",
+  postal: "nível de CEP",
+  city: "nível de cidade (aproximada)",
+};
+
+function precisionLabel(geo) {
+  const p = geo?.precision;
+  return p && PRECISION_LABEL[p] ? PRECISION_LABEL[p] : "precisão não determinada";
+}
+
+// Precisão apenas em nível de cidade (ou desconhecida) = residência não confiável.
+function isCoarseHome(geo) {
+  return !!geo && (geo.precision === "city" || !geo.precision);
+}
+
+// Interpreta "lat, lon" colado do Google Maps. Devolve {lat, lon} ou null.
+export function parseLatLon(text) {
+  const m = String(text || "").trim().match(/^(-?\d{1,2}(?:\.\d+)?)\s*[,;\s]\s*(-?\d{1,3}(?:\.\d+)?)$/);
+  if (!m) return null;
+  const lat = parseFloat(m[1]);
+  const lon = parseFloat(m[2]);
+  // Faixa do Brasil — evita inverter lat/lon ou colar lixo.
+  if (lat < -34 || lat > 6 || lon < -74 || lon > -33) return null;
+  return { lat, lon };
+}
+
 function parseExtraction(raw) {
   if (!raw) return null;
   const t = raw.replace(/```json|```/g, "").trim();
@@ -57,7 +87,38 @@ export default function Analyze() {
   const [pdfDownload, setPdfDownload] = useState(null);
   const [serverPdfBusy, setServerPdfBusy] = useState(false);
   const [homeAddr, setHomeAddr] = useState("");
+  const [homeCoordInput, setHomeCoordInput] = useState("");
+  const [correctCoord, setCorrectCoord] = useState("");
+  const [correcting, setCorrecting] = useState(false);
   const fileRef = useRef();
+
+  // Correção da coordenada da residência pelo operador — recalcula o §5 no
+  // servidor e re-persiste, para o PDF refletir o ponto confirmado.
+  const handleGeoCorrect = async () => {
+    const coord = parseLatLon(correctCoord);
+    if (!coord) {
+      setError("Coordenada inválida. Cole no formato: latitude, longitude (ex.: -5.0951, -42.8100).");
+      return;
+    }
+    if (!report?.analysisId) return;
+    setCorrecting(true);
+    try {
+      const { data } = await api.patch(`/analyses/${report.analysisId}/geo`, coord);
+      const r = data.result || {};
+      setReport((prev) => ({
+        ...prev,
+        home: r.home || prev.home,
+        contractGeo: r.contractGeo || prev.contractGeo,
+        ipAnalysis: r.ipAnalysis || prev.ipAnalysis,
+      }));
+      setCorrectCoord("");
+      setError("");
+    } catch (err) {
+      setError(err.response?.data?.error || "Não foi possível corrigir a coordenada.");
+    } finally {
+      setCorrecting(false);
+    }
+  };
 
   const handleServerPdf = async () => {
     if (!report?.analysisId) return;
@@ -92,10 +153,12 @@ export default function Analyze() {
       // Todo o processamento pesado — extração, hashes do arquivo e confronto
       // geográfico (§5) — roda no servidor e fica persistido, para o laudo ser
       // reproduzível. O cliente apenas envia o PDF e renderiza o resultado.
+      const coord = parseLatLon(homeCoordInput);
       const { data: startData } = await api.post("/analyze", {
         pdfBase64: base64,
         filename: file.name,
         homeAddress: (homeAddr || "").trim(),
+        ...(coord ? { homeLat: coord.lat, homeLon: coord.lon } : {}),
       });
 
       setProgress({ label: "Extraindo dados, calculando hashes e geolocalizando...", pct: 34 });
@@ -161,7 +224,7 @@ export default function Analyze() {
       setError(typeof apiError === "string" ? apiError : err.message || "Erro inesperado durante a análise.");
       setStage("error");
     }
-  }, [homeAddr]);
+  }, [homeAddr, homeCoordInput]);
 
   const handleDrop = (e) => {
     e.preventDefault();
@@ -198,6 +261,19 @@ export default function Analyze() {
                 />
                 <span className="hint">
                   Ponto de referência de todas as comparações de distância: a geolocalização declarada no contrato e cada IP serão confrontados com este endereço. Se ficar em branco, o sistema usa o endereço extraído do próprio contrato.
+                </span>
+              </div>
+
+              <div className="field">
+                <label>Coordenada exata da residência (opcional)</label>
+                <input
+                  type="text"
+                  value={homeCoordInput}
+                  onChange={(e) => setHomeCoordInput(e.target.value)}
+                  placeholder="Ex.: -5.0951, -42.8100"
+                />
+                <span className="hint">
+                  Para máxima precisão do laudo, cole a coordenada exata da residência (no Google Maps, clique com o botão direito sobre o local → a primeira linha copia "latitude, longitude"). Quando informada, ela prevalece sobre a geocodificação automática do endereço. Você também poderá confirmar ou corrigir a coordenada depois, no laudo.
                 </span>
               </div>
 
@@ -567,7 +643,7 @@ export default function Analyze() {
                         <div className="gmeta">
                           {report.home.query || "Endereço não informado"}<br />
                           Origem: {report.home.source || "não disponível"}<br />
-                          Coordenada aproximada por geocodificação
+                          Precisão: {precisionLabel(report.home.geo)}
                         </div>
                       </div>
                       <div className="geo-card" style={{ borderTopColor: "var(--warn)" }}>
@@ -585,6 +661,33 @@ export default function Analyze() {
                     </div>
 
                     {report.contractGeo.dataHora && <Row label="Data / hora da geolocalização" value={report.contractGeo.dataHora} />}
+
+                    {isCoarseHome(report.home.geo) && (
+                      <div className="note" style={{ borderLeftColor: "var(--crit)", background: "rgba(240,99,99,0.08)" }}>
+                        <b>Atenção:</b> a coordenada da residência foi resolvida apenas em nível de cidade. A distância abaixo é aproximada. Para um laudo definitivo, confirme a coordenada exata da residência no campo abaixo.
+                      </div>
+                    )}
+
+                    {/* Correção manual — padrão-ouro forense: coordenada confirmada por humano */}
+                    <div className="note" style={{ borderLeftColor: "var(--accent)", background: "rgba(79,195,232,0.06)" }}>
+                      <div style={{ fontSize: 12.5, color: "var(--label)", marginBottom: 8 }}>
+                        {report.home.geo?.precision === "manual"
+                          ? "Coordenada da residência confirmada pelo operador."
+                          : "Confirmar ou corrigir a coordenada da residência (no Google Maps, botão direito no local → clique na coordenada para copiar):"}
+                      </div>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                        <input
+                          type="text"
+                          value={correctCoord}
+                          onChange={(e) => setCorrectCoord(e.target.value)}
+                          placeholder="Ex.: -5.0951, -42.8100"
+                          style={{ flex: 1, minWidth: 200, padding: "8px 12px", background: "var(--panel-2)", border: "1px solid var(--line)", borderRadius: 8, color: "var(--ink-2)", fontSize: 13 }}
+                        />
+                        <button className="btn btn-primary" onClick={handleGeoCorrect} disabled={correcting} style={{ whiteSpace: "nowrap" }}>
+                          {correcting ? "Aplicando..." : "Aplicar coordenada"}
+                        </button>
+                      </div>
+                    </div>
 
                     {report.contractGeo.distance !== null && report.contractGeo.distance !== undefined ? (
                       <div className="geo-visual-block">

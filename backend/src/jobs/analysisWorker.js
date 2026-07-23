@@ -17,7 +17,7 @@ function fileHashes(buffer) {
 }
 
 export async function processAnalysis(job) {
-  const { analysisId, pdfBase64, tenantId, userId, lockToken, homeAddress, filename } = job.data;
+  const { analysisId, pdfBase64, tenantId, userId, lockToken, homeAddress, homeCoord, filename } = job.data;
 
   try {
     const pdfBuffer = Buffer.from(cleanPdfBase64(pdfBase64), "base64");
@@ -46,7 +46,7 @@ export async function processAnalysis(job) {
     // punindo o cliente por uma extração que deu certo.
     let geo = { home: null, contractGeo: null, geoDeclaredPresent: false, ipAnalysis: [] };
     try {
-      geo = await enrichGeography(fallback, homeAddress);
+      geo = await enrichGeography(fallback, homeAddress, homeCoord);
     } catch (geoError) {
       console.error(`[AnalysisWorker] Enriquecimento geográfico falhou para ${analysisId}:`, geoError.message);
     }

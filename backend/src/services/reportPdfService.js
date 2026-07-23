@@ -246,18 +246,43 @@ function sectionSignature(ctx, extracted) {
   for (const [label, ok] of itens) badge(ctx, label, ok ? "PRESENTE" : "AUSENTE", !!ok);
 }
 
+// Rótulo legível da precisão de uma coordenada.
+const PRECISION_LABEL = {
+  manual: "confirmada pelo operador",
+  gps: "GPS do log do contrato",
+  rooftop: "nível de endereço (número)",
+  street: "nível de rua",
+  postal: "nível de CEP",
+  city: "nível de cidade (aproximada)",
+};
+
+function precisionText(geoLike) {
+  const p = geoLike?.precision;
+  return p && PRECISION_LABEL[p] ? PRECISION_LABEL[p] : "precisão não determinada";
+}
+
 function sectionGeo(ctx, result) {
   heading(ctx, "§ 5 · Geolocalização da assinatura · confronto geográfico");
 
-  if (result.home?.query) {
-    field(ctx, `Residência (${result.home.source || "referência"})`, result.home.query);
-    if (result.home.geo?.display) field(ctx, "Geocodificação", result.home.geo.display);
+  const home = result.home?.geo;
+  if (result.home?.query || home) {
+    if (result.home?.query) field(ctx, `Residência (${result.home.source || "referência"})`, result.home.query);
+    if (home?.display) field(ctx, "Coordenada da residência", `${home.display} — precisão ${precisionText(home)}`);
+    // Aviso explícito quando a residência é só aproximada (nível de cidade):
+    // a distância derivada dela não pode ser tratada como exata.
+    if (home && (home.precision === "city" || !home.precision)) {
+      paragraph(
+        ctx,
+        "Atenção: a coordenada da residência foi resolvida apenas em nível de cidade. A distância abaixo é aproximada e não deve ser usada como medida exata sem confirmação da coordenada pelo operador.",
+        { color: DANGER, size: 8.5 }
+      );
+    }
   }
 
   const cg = result.contractGeo;
   if (cg) {
     field(ctx, "Local declarado da assinatura", cg.endereco || `${cg.lat}, ${cg.lon}`);
-    field(ctx, "Coordenadas", `${cg.lat}, ${cg.lon}${cg.geocoded ? " (geocodificado)" : " (GPS do log)"}`);
+    field(ctx, "Coordenadas", `${cg.lat}, ${cg.lon} — precisão ${precisionText(cg)}`);
     if (cg.distance != null) {
       const r = riskFromDistance(cg.distance);
       badge(ctx, "Distância assinatura ate residência", `${cg.distance.toFixed(2)} km · ${r.label}`, r.score <= 1);

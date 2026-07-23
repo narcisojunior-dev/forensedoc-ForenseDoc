@@ -5,9 +5,20 @@ import { saasQueue } from "../queues.js";
 import { acquireLock, releaseLock, analysisLockKey } from "../utils/lock.js";
 import { validatePdfPayload } from "../utils/pdfValidation.js";
 import { buildReportPdf } from "../services/reportPdfService.js";
+import { haversineKm } from "../utils/geoUtils.js";
 
 function hashFilename(filename) {
   return crypto.createHash("sha256").update(filename || "").digest("hex");
+}
+
+// Coordenada válida no Brasil (lat ~ -34..5, lon ~ -74..-34). Fora disso é
+// erro de digitação — melhor ignorar que gravar um ponto absurdo.
+function parseCoord(lat, lon) {
+  const la = Number(lat);
+  const lo = Number(lon);
+  if (!Number.isFinite(la) || !Number.isFinite(lo)) return null;
+  if (la < -34 || la > 6 || lo < -74 || lo > -33) return null;
+  return { lat: la, lon: lo };
 }
 
 // TTL do lock: teto de quanto uma análise pode demorar. Se o worker morrer
@@ -20,7 +31,7 @@ export async function analyzePdf(req, res) {
   let analysis = null;
 
   try {
-    const { pdfBase64, filename, homeAddress } = req.body || {};
+    const { pdfBase64, filename, homeAddress, homeLat, homeLon } = req.body || {};
 
     // Valida assinatura e tamanho ANTES de travar o tenant ou debitar crédito.
     const validation = validatePdfPayload(pdfBase64);
@@ -31,6 +42,10 @@ export async function analyzePdf(req, res) {
     // Endereço residencial informado na tela — usado no confronto geográfico
     // do §5, com prioridade sobre o extraído do contrato. Opcional e limitado.
     const home = typeof homeAddress === "string" ? homeAddress.trim().slice(0, 300) : "";
+
+    // Coordenada confirmada pelo operador (padrão-ouro): se informada e válida,
+    // vence a geocodificação automática.
+    const homeCoord = parseCoord(homeLat, homeLon);
 
     // Uma análise por vez por tenant (M4.4). O lock é liberado pelo worker
     // ao concluir o job — não aqui, que retorna 202 antes do processamento.
@@ -69,6 +84,7 @@ export async function analyzePdf(req, res) {
         userId,
         lockToken,
         homeAddress: home,
+        homeCoord,
         filename: filename || null,
       },
       { attempts: 1, removeOnComplete: true, removeOnFail: true }
@@ -140,6 +156,75 @@ export async function getAnalysisResult(req, res) {
     return res.json({ status: analysis.status, result: analysis.result });
   } catch (error) {
     console.error("[Analyze] Erro ao buscar resultado:", error);
+    return res.status(500).json({ error: "Erro interno no servidor." });
+  }
+}
+
+// Correção da coordenada da residência pelo operador (padrão-ouro forense).
+// Recalcula as distâncias do §5 e re-persiste o resultado, para o laudo e o
+// PDF refletirem o ponto confirmado por humano. Não custa crédito.
+export async function correctAnalysisGeo(req, res) {
+  try {
+    const analysis = await prisma.analysis.findUnique({ where: { id: req.params.id } });
+    if (!analysis || analysis.tenantId !== req.tenantId) {
+      return res.status(404).json({ error: "Análise não encontrada." });
+    }
+    if (analysis.status !== "COMPLETED" || !analysis.result) {
+      return res.status(409).json({ error: "Só é possível corrigir uma análise concluída." });
+    }
+
+    const coord = parseCoord(req.body?.lat, req.body?.lon);
+    if (!coord) {
+      return res.status(400).json({ error: "Coordenada inválida. Informe latitude e longitude dentro do Brasil." });
+    }
+
+    const result = { ...analysis.result };
+
+    // Substitui a residência pela coordenada confirmada e recalcula distâncias.
+    result.home = {
+      query: result.home?.query || null,
+      source: "Coordenada confirmada pelo operador",
+      geo: {
+        lat: coord.lat,
+        lon: coord.lon,
+        display: "Coordenada confirmada pelo operador",
+        precision: "manual",
+        source: "manual",
+        cityMatch: true,
+      },
+    };
+
+    if (result.contractGeo) {
+      result.contractGeo.distance = haversineKm(coord.lat, coord.lon, result.contractGeo.lat, result.contractGeo.lon);
+    }
+    if (Array.isArray(result.ipAnalysis)) {
+      result.ipAnalysis = result.ipAnalysis.map((ip) => ({
+        ...ip,
+        distance: ip.geo?.lat != null && ip.geo?.lon != null
+          ? haversineKm(coord.lat, coord.lon, ip.geo.lat, ip.geo.lon)
+          : null,
+      }));
+    }
+    result.geoCorrectedAt = new Date().toISOString();
+
+    await prisma.analysis.update({ where: { id: analysis.id }, data: { result } });
+
+    await prisma.auditLog
+      .create({
+        data: {
+          tenantId: req.tenantId,
+          userId: req.auth.userId,
+          action: "analysis_geo_corrected",
+          ipAddress: req.ip,
+          userAgent: req.headers["user-agent"],
+          metadata: { analysisId: analysis.id, lat: coord.lat, lon: coord.lon },
+        },
+      })
+      .catch(() => {});
+
+    return res.json({ result });
+  } catch (error) {
+    console.error("[Analyze] Erro ao corrigir geolocalização:", error);
     return res.status(500).json({ error: "Erro interno no servidor." });
   }
 }

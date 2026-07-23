@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { analyzePdf, getAnalysisStatus, getAnalysisResult, getAnalysisPdf, listAnalyses } from "../controllers/analyzeController.js";
+import { analyzePdf, getAnalysisStatus, getAnalysisResult, getAnalysisPdf, correctAnalysisGeo, listAnalyses } from "../controllers/analyzeController.js";
 import { geocode, ipLocation } from "../controllers/geoController.js";
 import authRoutes from "./authRoutes.js";
 import tenantRoutes from "./tenantRoutes.js";
@@ -55,6 +55,7 @@ router.post(
 router.get("/analyses/:id/status", requireAuth, tenantLimiter, getAnalysisStatus);
 router.get("/analyses/:id/result", requireAuth, tenantLimiter, getAnalysisResult);
 router.get("/analyses/:id/pdf", requireAuth, tenantLimiter, getAnalysisPdf);
+router.patch("/analyses/:id/geo", requireAuth, tenantLimiter, correctAnalysisGeo);
 router.get("/analyses", requireAuth, tenantLimiter, listAnalyses);
 
 // Rotas Utilitárias

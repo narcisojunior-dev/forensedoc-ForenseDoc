@@ -1,4 +1,5 @@
-import { geocodeAddress, getIpInfo } from "../services/apiService.js";
+import { getIpInfo } from "../services/apiService.js";
+import { geocodeAddress } from "../services/geocodingService.js";
 
 export async function geocode(req, res) {
   try {

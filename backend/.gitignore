@@ -3,3 +3,6 @@ node_modules
 .env
 
 /src/generated/prisma
+
+# Tesseract.js baixa os dados de idioma no cwd em runtime
+*.traineddata

@@ -1,4 +1,5 @@
-import { geocodeAddress, getIpInfo } from "./apiService.js";
+import { getIpInfo } from "./apiService.js";
+import { geocodeAddress } from "./geocodingService.js";
 import { haversineKm } from "../utils/geoUtils.js";
 
 /**
@@ -12,11 +13,14 @@ import { haversineKm } from "../utils/geoUtils.js";
  * Persistir isso é o que torna o laudo REPRODUTÍVEL — reabrir a análise não
  * refaz a geocodificação ao vivo, que poderia devolver outro resultado.
  *
- * @param {object} extracted resultado da extração local
+ * @param {object}  extracted resultado da extração local
  * @param {string=} homeAddress endereço residencial informado na tela (tem
  *   prioridade sobre o extraído do contrato, como na regra do frontend)
+ * @param {{lat:number, lon:number}=} homeCoord coordenada confirmada pelo
+ *   operador — quando presente, é usada direto (precisão máxima), sem
+ *   geocodificar. É o padrão-ouro forense: ponto confirmado por humano.
  */
-export async function enrichGeography(extracted, homeAddress) {
+export async function enrichGeography(extracted, homeAddress, homeCoord = null) {
   const cliente = extracted.cliente || {};
 
   // 1. Geolocalizar cada IP extraído do PDF.
@@ -42,7 +46,21 @@ export async function enrichGeography(extracted, homeAddress) {
     : extractedAddr
       ? "Extraído do contrato"
       : null;
-  const homeGeo = homeQuery ? await geocodeAddress(homeQuery) : null;
+
+  // Coordenada confirmada pelo operador vence a geocodificação automática.
+  let homeGeo;
+  if (homeCoord && Number.isFinite(homeCoord.lat) && Number.isFinite(homeCoord.lon)) {
+    homeGeo = {
+      lat: homeCoord.lat,
+      lon: homeCoord.lon,
+      display: "Coordenada confirmada pelo operador",
+      precision: "manual",
+      source: "manual",
+      cityMatch: true,
+    };
+  } else {
+    homeGeo = homeQuery ? await geocodeAddress(homeQuery) : null;
+  }
 
   // 3. Geolocalização declarada da assinatura: coordenada GPS do log, senão
   // geocodificar o endereço declarado.
@@ -52,6 +70,7 @@ export async function enrichGeography(extracted, homeAddress) {
     const plat = g.latitude != null ? parseFloat(String(g.latitude).replace(",", ".")) : NaN;
     const plon = g.longitude != null ? parseFloat(String(g.longitude).replace(",", ".")) : NaN;
     if (!Number.isNaN(plat) && !Number.isNaN(plon)) {
+      // Coordenada GPS vinda do próprio log do contrato — precisão máxima.
       contractGeo = {
         lat: plat,
         lon: plon,
@@ -60,6 +79,8 @@ export async function enrichGeography(extracted, homeAddress) {
         precisao: g.precisao_metros,
         dataHora: g.data_hora,
         geocoded: false,
+        precision: "gps",
+        cityMatch: true,
       };
     } else if (g.endereco_declarado) {
       const gc = await geocodeAddress(g.endereco_declarado);
@@ -72,6 +93,9 @@ export async function enrichGeography(extracted, homeAddress) {
           precisao: g.precisao_metros,
           dataHora: g.data_hora,
           geocoded: true,
+          precision: gc.precision,
+          geocodeSource: gc.source,
+          cityMatch: gc.cityMatch,
         };
       }
     }
