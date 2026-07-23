@@ -16,3 +16,13 @@ export function riskFromDistance(km) {
   if (km < 1000) return { label: "RISCO ALTO",     color: "#f5853f", bg: "rgba(245,133,63,0.09)",  score: 3 };
   return             { label: "RISCO CRÍTICO", color: "#f06363", bg: "rgba(240,99,99,0.09)",   score: 4 };
 }
+
+// Compatibilidade IP × geolocalização declarada da assinatura. Geo por IP é de
+// nível de operadora, então as faixas são largas: o sinal é "mesma região" vs
+// "regiões distintas", não uma distância exata.
+export function ipSignatureCompat(km) {
+  if (km === null || km === undefined) return { label: "indeterminada", color: "#8595a8" };
+  if (km < 100) return { label: "COMPATÍVEL (mesma região)", color: "#3ddc97" };
+  if (km < 500) return { label: "DIVERGÊNCIA RELEVANTE", color: "#f2b03d" };
+  return { label: "INCOMPATÍVEL (regiões distintas)", color: "#f06363" };
+}

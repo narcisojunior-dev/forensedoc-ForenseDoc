@@ -261,6 +261,17 @@ function precisionText(geoLike) {
   return p && PRECISION_LABEL[p] ? PRECISION_LABEL[p] : "precisão não determinada";
 }
 
+// Compatibilidade entre a origem do IP e o local declarado da assinatura.
+// Geo por IP é de nível de operadora (dezenas de km de margem, VPN distorce),
+// então as faixas são largas: o sinal útil é "mesma região" vs "regiões
+// distintas", não uma distância exata.
+function ipSignatureCompat(km) {
+  if (km == null) return { label: "indeterminada", ok: null };
+  if (km < 100) return { label: "COMPATÍVEL (mesma região)", ok: true };
+  if (km < 500) return { label: "DIVERGÊNCIA RELEVANTE", ok: false };
+  return { label: "INCOMPATÍVEL (regiões distintas)", ok: false };
+}
+
 function sectionGeo(ctx, result) {
   heading(ctx, "§ 5 · Geolocalização da assinatura · confronto geográfico");
 
@@ -291,12 +302,34 @@ function sectionGeo(ctx, result) {
 
   const ips = result.ipAnalysis || [];
   if (ips.length) {
-    ctx.doc.moveDown(0.2);
+    ctx.doc.moveDown(0.3);
+    const anySignature = ips.some((ip) => ip.distanceToSignature != null);
+    field(
+      ctx,
+      "Confronto de IPs",
+      anySignature
+        ? "cada IP é confrontado com a residência e com a geolocalização declarada da assinatura"
+        : "cada IP é confrontado com a residência"
+    );
     for (const ip of ips) {
       const local = ip.geo?.city ? `${ip.geo.city}/${ip.geo.region || ""}` : "localização indeterminada";
-      const dist = ip.distance != null ? `${ip.distance.toFixed(2)} km` : "sem distância";
-      const r = riskFromDistance(ip.distance);
-      badge(ctx, `IP ${ip.endereco} · ${local}`, dist, r.score <= 1);
+      ctx.doc.moveDown(0.15);
+      field(ctx, `IP ${ip.endereco}`, local);
+      if (ip.distance != null) {
+        const r = riskFromDistance(ip.distance);
+        badge(ctx, "   distância até a residência", `${ip.distance.toFixed(2)} km · ${r.label}`, r.score <= 1);
+      }
+      if (ip.distanceToSignature != null) {
+        const c = ipSignatureCompat(ip.distanceToSignature);
+        badge(ctx, "   IP × assinatura declarada", `${ip.distanceToSignature.toFixed(2)} km · ${c.label}`, c.ok === true);
+      }
+    }
+    if (anySignature) {
+      paragraph(
+        ctx,
+        "A geolocalização por IP é de nível de operadora (margem de dezenas de quilômetros; VPN/proxy podem distorcê-la). Divergência entre a origem do IP e a geolocalização declarada da assinatura é indício de larga escala — GPS potencialmente forjado ou ato praticado por terceiro — e não uma medida exata de distância.",
+        { color: MUTED, size: 8.5 }
+      );
     }
   }
 

@@ -101,13 +101,21 @@ export async function enrichGeography(extracted, homeAddress, homeCoord = null) 
     }
   }
 
-  // 4. Distâncias por Haversine.
+  // 4. Distâncias por Haversine. Cada IP é confrontado com DOIS pontos:
+  //    - a residência (distance): a conexão partiu de perto de onde o cliente mora?
+  //    - a geolocalização declarada da assinatura (distanceToSignature): a origem
+  //      real da conexão bate com o local que o contrato AFIRMA que a assinatura
+  //      aconteceu? Incompatibilidade grosseira aqui é forte indício de GPS
+  //      forjado ou assinatura por terceiro. (Geo por IP é de nível de operadora,
+  //      então serve como indício de larga escala, não como coordenada exata.)
   const ipAnalysis = ipResults.map((ip) => {
     let distance = null;
-    if (homeGeo && ip.geo?.lat != null && ip.geo?.lon != null) {
-      distance = haversineKm(homeGeo.lat, homeGeo.lon, ip.geo.lat, ip.geo.lon);
+    let distanceToSignature = null;
+    if (ip.geo?.lat != null && ip.geo?.lon != null) {
+      if (homeGeo) distance = haversineKm(homeGeo.lat, homeGeo.lon, ip.geo.lat, ip.geo.lon);
+      if (contractGeo) distanceToSignature = haversineKm(contractGeo.lat, contractGeo.lon, ip.geo.lat, ip.geo.lon);
     }
-    return { ...ip, distance };
+    return { ...ip, distance, distanceToSignature };
   });
 
   let contractToHomeKm = null;

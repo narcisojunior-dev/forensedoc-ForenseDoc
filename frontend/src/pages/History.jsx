@@ -4,7 +4,7 @@ import toast from "react-hot-toast";
 import "../styles/ForenseDoc.css";
 import { api } from "../lib/axios";
 import { Row, Badge, Section } from "../components/UiComponents.jsx";
-import { riskFromDistance } from "../utils/geo.js";
+import { riskFromDistance, ipSignatureCompat } from "../utils/geo.js";
 import { downloadReportPdf } from "../utils/reportDownload.js";
 
 function parseExtraction(raw) {
@@ -171,17 +171,30 @@ function AnalysisDetailModal({ analysisId, onClose }) {
               {result?.ipAnalysis?.length > 0 ? (
                 <Section title={`Endereços IP · geolocalização (${result.ipAnalysis.length})`}>
                   {result.ipAnalysis.map((ip, i) => (
-                    <div key={i} className="row">
-                      <span className="row-label" style={{ fontFamily: "monospace" }}>
-                        {ip.endereco}{ip.geo?.city ? ` · ${ip.geo.city}/${ip.geo.region || ""}` : ""}
-                      </span>
-                      {ip.distance != null ? (
-                        <span className="row-value" style={{ color: riskFromDistance(ip.distance).color, fontWeight: 700 }}>
-                          {ip.distance.toFixed(2)} km
+                    <div key={i} style={{ marginBottom: 10 }}>
+                      <div className="row">
+                        <span className="row-label" style={{ fontFamily: "monospace" }}>
+                          {ip.endereco}{ip.geo?.city ? ` · ${ip.geo.city}/${ip.geo.region || ""}` : ""}
                         </span>
-                      ) : (
-                        <span className="row-value" style={{ color: "var(--muted)" }}>sem distância</span>
-                      )}
+                        {ip.distance != null ? (
+                          <span className="row-value" style={{ color: riskFromDistance(ip.distance).color, fontWeight: 700 }}>
+                            {ip.distance.toFixed(2)} km da residência
+                          </span>
+                        ) : (
+                          <span className="row-value" style={{ color: "var(--muted)" }}>sem distância</span>
+                        )}
+                      </div>
+                      {ip.distanceToSignature != null && (() => {
+                        const c = ipSignatureCompat(ip.distanceToSignature);
+                        return (
+                          <div className="row">
+                            <span className="row-label" style={{ fontSize: 12 }}>IP × assinatura declarada</span>
+                            <span className="row-value" style={{ color: c.color, fontWeight: 700, fontSize: 12 }}>
+                              {ip.distanceToSignature.toFixed(2)} km · {c.label}
+                            </span>
+                          </div>
+                        );
+                      })()}
                     </div>
                   ))}
                 </Section>

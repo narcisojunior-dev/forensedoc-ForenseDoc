@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 import "../styles/ForenseDoc.css";
 import { api } from "../lib/axios.js";
 import { classifyHashString } from "../utils/crypto.js";
-import { riskFromDistance } from "../utils/geo.js";
+import { riskFromDistance, ipSignatureCompat } from "../utils/geo.js";
 import { exportReportPDF } from "../utils/pdfExport.js";
 import { downloadReportPdf } from "../utils/reportDownload.js";
 import { Row, Badge, Section } from "../components/UiComponents.jsx";
@@ -728,6 +728,11 @@ export default function Analyze() {
                     <div className="sub-head">
                       Referência das distâncias: {report.home.query ? `residência do cliente (${report.home.source})` : "endereço residencial não informado"}
                     </div>
+                    {report.contractGeo && report.ipAnalysis.some((ip) => ip.distanceToSignature != null) && (
+                      <div className="note" style={{ borderLeftColor: "var(--label)", background: "rgba(133,149,168,0.07)" }}>
+                        Cada IP é confrontado com dois pontos: a residência do cliente e a geolocalização declarada da assinatura. A geolocalização por IP é de nível de operadora (margem de dezenas de quilômetros; VPN/proxy podem distorcê-la), então a divergência entre a origem do IP e o local declarado da assinatura é indício de larga escala — GPS potencialmente forjado ou ato praticado por terceiro — e não uma medida exata.
+                      </div>
+                    )}
                     {report.ipAnalysis.map((ip, i) => {
                       const risk = riskFromDistance(ip.distance);
                       return (
@@ -758,6 +763,17 @@ export default function Analyze() {
                                   Endereço residencial não geocodificado. Distância indisponível para este IP.
                                 </div>
                               )}
+                              {ip.distanceToSignature !== null && ip.distanceToSignature !== undefined && (() => {
+                                const compat = ipSignatureCompat(ip.distanceToSignature);
+                                return (
+                                  <div className="row">
+                                    <span className="row-label">IP × geolocalização declarada da assinatura</span>
+                                    <span className="row-value" style={{ color: compat.color, fontWeight: 700 }}>
+                                      {ip.distanceToSignature.toFixed(2)} km · {compat.label}
+                                    </span>
+                                  </div>
+                                );
+                              })()}
                             </>
                           ) : (
                             <div style={{ fontSize: 13, color: "var(--muted)", padding: "6px 0" }}>
