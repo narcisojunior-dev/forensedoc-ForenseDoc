@@ -1,5 +1,7 @@
 import { prisma } from "../utils/prisma.js";
 import * as creditService from "../services/creditService.js";
+import { notify } from "../services/notificationService.js";
+import { saasQueue } from "../queues.js";
 
 export async function processWebhook(job) {
   const { event, payment, subscription } = job.data;
@@ -89,10 +91,29 @@ async function handlePaymentReceived(payment) {
         newPeriodEnd
       );
       await creditService.expireEmergencyCredits(tenant.id);
+
+      await notify({
+        tenantId: tenant.id,
+        type: "PAYMENT_CONFIRMED",
+        title: "Pagamento confirmado",
+        body: `Seus ${subscription.plan.creditsMonthly} laudos do plano ${subscription.plan.name} já estão disponíveis.`,
+        emailData: {
+          planName: subscription.plan.name,
+          credits: subscription.plan.creditsMonthly,
+        },
+      });
     }
   } else {
     // AVULSO ou EXCESS
     await creditService.addAvulsoCredit(tenant.id, updated.id);
+
+    await notify({
+      tenantId: tenant.id,
+      type: "PAYMENT_CONFIRMED",
+      title: "Laudo avulso liberado",
+      body: "Seu pagamento foi confirmado e o laudo avulso já está no seu saldo. Ele não expira.",
+      emailData: { planName: "Laudo avulso", credits: 1 },
+    });
   }
 }
 
@@ -108,6 +129,16 @@ async function handlePaymentOverdue(payment) {
   const alreadyGranted = await creditService.wasEmergencyGrantedThisCycle(tenant.id);
   if (!alreadyGranted) {
     await creditService.addEmergencyCredits(tenant.id);
+
+    // Só notifica junto da concessão: o mesmo guard de idempotência evita
+    // um e-mail a cada reenvio do webhook PAYMENT_OVERDUE pela Asaas.
+    await notify({
+      tenantId: tenant.id,
+      type: "PAYMENT_FAILED",
+      title: "Pagamento não aprovado",
+      body: "Liberamos 2 laudos de emergência. Regularize em até 7 dias para evitar a suspensão da conta.",
+      emailData: { invoiceUrl: payment.invoiceUrl || payment.bankSlipUrl || null },
+    });
   }
 
   await prisma.payment.upsert({
@@ -128,7 +159,6 @@ async function handlePaymentOverdue(payment) {
     .update({ where: { tenantId: tenant.id }, data: { status: "OVERDUE" } })
     .catch(() => {});
 
-  const { saasQueue } = await import("../worker.js");
   await saasQueue.add(
     "suspend-if-overdue",
     { tenantId: tenant.id },
@@ -158,5 +188,12 @@ export async function suspendIfStillOverdue(tenantId) {
   if (subscription?.status === "OVERDUE") {
     await prisma.tenant.update({ where: { id: tenantId }, data: { status: "SUSPENDED" } });
     console.log(`[Webhook] Tenant ${tenantId} suspenso após 7 dias em atraso.`);
+
+    await notify({
+      tenantId,
+      type: "ACCOUNT_SUSPENDED",
+      title: "Conta suspensa",
+      body: "Sua conta foi suspensa por falta de pagamento. Regularize para reativar o acesso às análises.",
+    });
   }
 }

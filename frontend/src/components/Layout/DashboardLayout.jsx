@@ -14,6 +14,7 @@ import {
 import { useAuthStore } from "../../store/authStore";
 import { cn } from "../../utils/cn";
 import CreditWidget from "../CreditWidget";
+import NotificationBell from "../NotificationBell";
 
 export default function DashboardLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -103,7 +104,9 @@ export default function DashboardLayout() {
           
           <div className="flex-1" />
           
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 sm:gap-4">
+            <NotificationBell />
+
             <div className="hidden md:flex flex-col items-end">
               <span className="text-sm font-bold text-foreground">{user?.name}</span>
               <span className="text-xs text-zinc-500">{user?.tenant?.name || 'Escritório'}</span>

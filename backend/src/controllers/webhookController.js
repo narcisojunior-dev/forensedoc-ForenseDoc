@@ -1,4 +1,4 @@
-import { saasQueue } from "../worker.js";
+import { saasQueue } from "../queues.js";
 
 export async function handleAsaasWebhook(req, res) {
   const token = req.headers["asaas-access-token"];

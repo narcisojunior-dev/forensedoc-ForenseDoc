@@ -6,6 +6,7 @@ import tenantRoutes from "./tenantRoutes.js";
 import creditRoutes from "./creditRoutes.js";
 import billingRoutes from "./billingRoutes.js";
 import webhookRoutes from "./webhookRoutes.js";
+import notificationRoutes from "./notificationRoutes.js";
 import { requireAuth } from "../middleware/auth.js";
 import { requireCredit } from "../middleware/creditGuard.js";
 
@@ -32,6 +33,7 @@ router.use("/tenant", tenantRoutes);
 router.use("/credits", creditRoutes);
 router.use("/billing", billingRoutes);
 router.use("/webhooks", webhookRoutes);
+router.use("/notifications", notificationRoutes);
 
 // Rotas de Análise (Módulo 4 — assíncrono via BullMQ, ver worker.js)
 router.post("/analyze", requireAuth, requireCredit, requestTimeout(ANALYZE_TIMEOUT_MS), analyzePdf);

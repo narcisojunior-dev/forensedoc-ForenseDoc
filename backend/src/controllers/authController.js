@@ -4,7 +4,7 @@ import crypto from "crypto";
 import { z } from "zod";
 import { prisma } from "../utils/prisma.js";
 import { generateAccessToken } from "../utils/jwt.js";
-import { sendEmail } from "../utils/mailer.js";
+import { enqueueEmail } from "../services/notificationService.js";
 import { redis } from "../utils/redis.js";
 
 // ─── Schemas de Validação (Zod) ────────────────────────────────────────────────
@@ -123,19 +123,15 @@ export async function register(req, res) {
       return { user, tenant, verifyToken };
     });
 
-    // 4. Enviar e-mail de verificação — a conta já foi criada com sucesso,
-    // então uma falha aqui (SMTP fora do ar, etc.) não deve virar erro 500
-    // para o cliente.
+    // 4. Enfileirar o e-mail de verificação. A conta já está criada, então o
+    // envio não pode prender a resposta nem falhar o cadastro — a fila cuida
+    // do retry se o SMTP estiver instável.
     const verifyUrl = `${process.env.FRONTEND_URL}/verify-email?token=${result.verifyToken}`;
-    try {
-      await sendEmail({
-        to: result.user.email,
-        subject: "Confirme seu e-mail — ForenseDoc",
-        html: `Olá ${result.user.name},<br><br>Clique no link abaixo para confirmar seu e-mail e ativar seus 3 laudos grátis:<br><a href="${verifyUrl}">${verifyUrl}</a>`,
-      });
-    } catch (emailError) {
-      console.error("[Auth] Falha ao enviar e-mail de verificação:", emailError.message);
-    }
+    await enqueueEmail({
+      to: result.user.email,
+      template: "EMAIL_VERIFICATION",
+      data: { name: result.user.name, verifyUrl },
+    });
 
     return res.status(201).json({
       message: "Cadastro realizado. Verifique seu e-mail para ativar a conta.",
@@ -333,15 +329,11 @@ export async function forgotPassword(req, res) {
       });
 
       const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
-      try {
-        await sendEmail({
-          to: user.email,
-          subject: "Redefinição de senha — ForenseDoc",
-          html: `Olá ${user.name},<br><br>Clique no link abaixo para redefinir sua senha (válido por 1 hora):<br><a href="${resetUrl}">${resetUrl}</a><br><br>Se você não solicitou isso, ignore este e-mail.`,
-        });
-      } catch (emailError) {
-        console.error("[Auth] Falha ao enviar e-mail de redefinição de senha:", emailError.message);
-      }
+      await enqueueEmail({
+        to: user.email,
+        template: "PASSWORD_RESET",
+        data: { name: user.name, resetUrl },
+      });
     }
 
     return res.json({ message: "Se o e-mail estiver cadastrado, você receberá instruções para redefinir sua senha." });

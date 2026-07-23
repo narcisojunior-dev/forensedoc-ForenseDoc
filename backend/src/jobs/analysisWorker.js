@@ -1,5 +1,6 @@
 import { prisma } from "../utils/prisma.js";
 import { refundCredit } from "../services/creditService.js";
+import { notify } from "../services/notificationService.js";
 import { extractPdfTextWithOcr } from "../services/ocrService.js";
 import { extractPdfMetadata } from "../services/pdfService.js";
 import { heuristicExtractionFromText } from "../services/extractionService.js";
@@ -38,6 +39,17 @@ export async function processAnalysis(job) {
       where: { id: analysisId },
       data: { status: "COMPLETED", result, processingCompletedAt: new Date() },
     });
+
+    // Só in-app: o usuário está olhando a tela fazendo polling, um e-mail a
+    // cada laudo concluído seria ruído.
+    await notify({
+      tenantId,
+      userId,
+      type: "ANALYSIS_COMPLETED",
+      title: "Laudo concluído",
+      body: "Sua análise foi processada e o laudo está disponível no histórico.",
+      email: false,
+    });
   } catch (error) {
     console.error(`[AnalysisWorker] Falha ao processar análise ${analysisId}:`, error);
 
@@ -52,5 +64,14 @@ export async function processAnalysis(job) {
         .update({ where: { id: analysisId }, data: { status: "ERROR" } })
         .catch(() => {});
     }
+
+    await notify({
+      tenantId,
+      userId,
+      type: "ANALYSIS_ERROR",
+      title: "Falha na análise",
+      body: "Não foi possível processar seu documento. O crédito foi estornado automaticamente.",
+      emailData: { reason: error.message },
+    });
   }
 }

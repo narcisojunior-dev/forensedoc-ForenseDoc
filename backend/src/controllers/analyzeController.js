@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import { prisma } from "../utils/prisma.js";
 import { debitCredit } from "../services/creditService.js";
-import { saasQueue } from "../worker.js";
+import { saasQueue } from "../queues.js";
 
 function hashFilename(filename) {
   return crypto.createHash("sha256").update(filename || "").digest("hex");

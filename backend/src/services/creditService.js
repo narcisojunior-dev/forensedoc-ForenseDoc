@@ -1,5 +1,6 @@
 import { prisma } from "../utils/prisma.js";
 import { redis } from "../utils/redis.js";
+import { notify } from "./notificationService.js";
 
 const CREDIT_CACHE_TTL = 30; // segundos
 const getCacheKey = (tenantId) => `credits:${tenantId}`;
@@ -139,13 +140,13 @@ export async function checkCreditAlerts(tenantId, balanceBefore) {
     CREDITS_EXHAUSTED: { title: "Créditos esgotados", body: "Seus laudos mensais acabaram. Recarregue para continuar." },
   };
 
-  await prisma.notification.create({
-    data: {
-      tenantId,
-      type,
-      title: ALERT_COPY[type].title,
-      body: ALERT_COPY[type].body,
-    },
+  await notify({
+    tenantId,
+    type,
+    title: ALERT_COPY[type].title,
+    body: ALERT_COPY[type].body,
+    // O saldo já foi decrementado quando este alerta dispara.
+    emailData: { remaining: Math.max(balanceBefore.creditsMonthly - 1, 0), total: totalMonthly },
   });
 }
 

@@ -3,7 +3,7 @@ import { v4 as uuidv4 } from "uuid";
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import { prisma } from "../utils/prisma.js";
-import { sendEmail } from "../utils/mailer.js";
+import { enqueueEmail } from "../services/notificationService.js";
 
 const inviteSchema = z.object({
   email: z.string().email(),
@@ -91,15 +91,17 @@ export async function inviteMember(req, res) {
     });
 
     const inviteUrl = `${process.env.FRONTEND_URL}/invite/${inviteToken}`;
-    try {
-      await sendEmail({
-        to: email,
-        subject: `Convite para ${tenant.name} — ForenseDoc`,
-        html: `Você foi convidado para fazer parte da equipe "${tenant.name}" no ForenseDoc.<br><br>Clique no link abaixo para aceitar (válido por 72 horas):<br><a href="${inviteUrl}">${inviteUrl}</a>`,
-      });
-    } catch (emailError) {
-      console.error("[Tenant] Falha ao enviar e-mail de convite:", emailError.message);
-    }
+    // O JWT não carrega o nome — aproveitamos os users já incluídos no tenant.
+    const inviter = tenant.users.find((u) => u.id === req.auth.userId);
+    await enqueueEmail({
+      to: email,
+      template: "INVITE_RECEIVED",
+      data: {
+        tenantName: tenant.name,
+        inviterName: inviter?.name || tenant.name,
+        inviteUrl,
+      },
+    });
 
     return res.status(201).json({ message: "Convite enviado com sucesso." });
   } catch (error) {
