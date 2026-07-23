@@ -1,5 +1,6 @@
 import PDFDocument from "pdfkit";
 import { riskFromDistance } from "../utils/geoUtils.js";
+import { fetchStaticMap, signatureMapPoints } from "./staticMapService.js";
 import {
   FIRM,
   NOTA_ASSINATURA,
@@ -24,10 +25,18 @@ const MARGIN = 50;
  * Devolve o próprio PDFDocument (stream legível) para o controller encanar na
  * resposta — geração on-demand, sem cache (M4.3).
  *
+ * É async porque busca a imagem do mapa estático (Geoapify) ANTES de montar o
+ * documento — o PDFKit constrói de forma síncrona, então a imagem precisa já
+ * estar em memória. Se o mapa não vier (sem chave, sem coordenadas ou falha),
+ * o §5 sai sem ele, com a tabela de coordenadas de sempre.
+ *
  * @param {object} analysis linha de Analysis (para id, datas)
  * @param {object} result   Analysis.result já parseado
  */
-export function buildReportPdf(analysis, result) {
+export async function buildReportPdf(analysis, result) {
+  // Pré-busca do mapa (não bloqueia o laudo se falhar).
+  const mapBuffer = await fetchStaticMap(signatureMapPoints(result)).catch(() => null);
+
   const doc = new PDFDocument({
     size: "A4",
     margins: { top: MARGIN, bottom: 70, left: MARGIN, right: MARGIN },
@@ -52,7 +61,7 @@ export function buildReportPdf(analysis, result) {
   sectionContract(ctx, extracted);
   sectionClient(ctx, extracted);
   sectionSignature(ctx, extracted);
-  sectionGeo(ctx, result);
+  sectionGeo(ctx, result, mapBuffer);
   sectionIrregularities(ctx, extracted);
   sectionRemarks(ctx, extracted);
   sectionLegal(ctx);
@@ -272,7 +281,34 @@ function ipSignatureCompat(km) {
   return { label: "INCOMPATÍVEL (regiões distintas)", ok: false };
 }
 
-function sectionGeo(ctx, result) {
+// Insere a imagem do mapa estático (residência × assinatura declarada) com
+// legenda. Quebra de página se não couber no espaço restante.
+function drawMap(ctx, mapBuffer) {
+  const { doc, contentWidth } = ctx;
+  const imgH = contentWidth * (460 / 780); // mesma proporção da imagem buscada
+  if (doc.y + imgH + 40 > doc.page.height - 60) doc.addPage();
+  doc.moveDown(0.4);
+  try {
+    doc.image(mapBuffer, MARGIN, doc.y, { width: contentWidth });
+    doc.y += imgH + 4;
+  } catch (err) {
+    console.error("[ReportPdf] Falha ao embutir mapa:", err.message);
+    return;
+  }
+  doc
+    .fontSize(8)
+    .font("Helvetica-Oblique")
+    .fillColor(MUTED)
+    .text(
+      "Mapa: residência do cliente (R, azul) × local declarado da assinatura (A, âmbar). A linha vermelha representa a distância geodésica entre os dois pontos. Base cartográfica OpenStreetMap.",
+      MARGIN,
+      doc.y,
+      { width: contentWidth, align: "center" }
+    );
+  doc.moveDown(0.4);
+}
+
+function sectionGeo(ctx, result, mapBuffer) {
   heading(ctx, "§ 5 · Geolocalização da assinatura · confronto geográfico");
 
   const home = result.home?.geo;
@@ -299,6 +335,9 @@ function sectionGeo(ctx, result) {
       badge(ctx, "Distância assinatura ate residência", `${cg.distance.toFixed(2)} km · ${r.label}`, r.score <= 1);
     }
   }
+
+  // Mapa real dos dois pontos, quando disponível.
+  if (mapBuffer) drawMap(ctx, mapBuffer);
 
   const ips = result.ipAnalysis || [];
   if (ips.length) {

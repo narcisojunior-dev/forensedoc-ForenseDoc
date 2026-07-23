@@ -243,7 +243,7 @@ export async function getAnalysisPdf(req, res) {
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="laudo-${analysis.id.slice(0, 8)}.pdf"`);
 
-    const pdf = buildReportPdf(analysis, analysis.result);
+    const pdf = await buildReportPdf(analysis, analysis.result);
     pdf.on("error", (err) => {
       console.error("[Analyze] Erro ao gerar PDF:", err.message);
       if (!res.headersSent) res.status(500).end();

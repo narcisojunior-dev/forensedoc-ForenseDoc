@@ -390,3 +390,15 @@ body.fd-exporting #fd-report svg text[fill="#aeb9c7"] { fill: #5d6875; }
   .wordmark { font-size: 28px; }
   .dist-banner { flex-direction: column; align-items: flex-start; gap: 8px; }
 }
+
+/* Rótulo de distância sobre a linha do mapa Leaflet (§5) */
+.leaflet-tooltip.geo-dist-label {
+  background: #0f1722;
+  color: #f06363;
+  border: 1px solid #f06363;
+  border-radius: 12px;
+  font: 700 12px/1 "JetBrains Mono", monospace;
+  padding: 4px 10px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+.leaflet-tooltip.geo-dist-label::before { display: none; }
