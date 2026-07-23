@@ -20,6 +20,37 @@ function hashToken(token) {
   return crypto.createHash("sha256").update(token).digest("hex");
 }
 
+/**
+ * Quantos usuários o plano do tenant permite. Sem assinatura (TRIAL), só o
+ * titular — o cliente compra o direito de usar créditos, e o tamanho da
+ * equipe é parte do que ele contrata.
+ */
+export async function getMaxUsers(tenantId, client = prisma) {
+  const subscription = await client.subscription.findUnique({
+    where: { tenantId },
+    include: { plan: true },
+  });
+  if (!subscription || subscription.status === "CANCELLED") return 1;
+  return subscription.plan.maxUsers;
+}
+
+/**
+ * Vagas ocupadas: usuários ativos + convites pendentes ainda válidos.
+ *
+ * Contar os convites pendentes é o que impede o titular de disparar 10
+ * convites num plano de 3 — cada um passava porque, até alguém aceitar, o
+ * número de usuários não mudava.
+ */
+export async function countOccupiedSeats(tenantId, client = prisma) {
+  const [users, pendingInvites] = await Promise.all([
+    client.user.count({ where: { tenantId, active: true } }),
+    client.tenantInvite.count({
+      where: { tenantId, acceptedAt: null, expiresAt: { gt: new Date() } },
+    }),
+  ]);
+  return { users, pendingInvites, total: users + pendingInvites };
+}
+
 export async function inviteMember(req, res) {
   try {
     const { email } = inviteSchema.parse(req.body);
@@ -30,20 +61,7 @@ export async function inviteMember(req, res) {
       return res.status(403).json({ error: "Apenas o proprietário pode convidar membros." });
     }
 
-    // Verificar limite de usuários do plano
-    const tenant = await prisma.tenant.findUnique({
-      where: { id: tenantId },
-      include: {
-        users: true,
-        subscription: { include: { plan: true } },
-      },
-    });
-
-    // Se estiver em TRIAL (sem assinatura ativa), o limite padrão é 1 (apenas o owner)
-    const maxUsers = tenant.subscription ? tenant.subscription.plan.maxUsers : 1;
-    if (tenant.users.length >= maxUsers) {
-      return res.status(403).json({ error: "Limite de membros do plano atingido." });
-    }
+    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
 
     // Verifica se já existe uma conta com esse e-mail
     const existing = await prisma.user.findUnique({ where: { email } });
@@ -51,15 +69,35 @@ export async function inviteMember(req, res) {
       return res.status(400).json({ error: "E-mail já cadastrado." });
     }
 
-    const inviteToken = uuidv4();
-    const tokenHash = hashToken(inviteToken);
-    const expiresAt = new Date(Date.now() + INVITE_EXPIRES_MS);
-
-    // Se já existir um convite pendente para esse e-mail neste tenant, renova o token
-    // em vez de criar um duplicado.
+    // Reenviar convite para quem já tem um pendente apenas renova o token —
+    // a vaga dele já está contabilizada, então não consome outra.
     const pendingInvite = await prisma.tenantInvite.findFirst({
       where: { tenantId, email, acceptedAt: null },
     });
+
+    // Limite do plano: usuários + convites pendentes.
+    if (!pendingInvite) {
+      const [maxUsers, seats] = await Promise.all([
+        getMaxUsers(tenantId),
+        countOccupiedSeats(tenantId),
+      ]);
+
+      if (seats.total >= maxUsers) {
+        return res.status(403).json({
+          error:
+            seats.pendingInvites > 0
+              ? `Limite do plano atingido (${maxUsers} usuário(s)): ${seats.users} na equipe e ${seats.pendingInvites} convite(s) aguardando aceite.`
+              : `Limite do plano atingido (${maxUsers} usuário(s)). Faça upgrade para convidar mais membros.`,
+          code: "PLAN_USER_LIMIT_REACHED",
+          limit: maxUsers,
+          ...seats,
+        });
+      }
+    }
+
+    const inviteToken = uuidv4();
+    const tokenHash = hashToken(inviteToken);
+    const expiresAt = new Date(Date.now() + INVITE_EXPIRES_MS);
 
     if (pendingInvite) {
       await prisma.tenantInvite.update({
@@ -91,8 +129,11 @@ export async function inviteMember(req, res) {
     });
 
     const inviteUrl = `${process.env.FRONTEND_URL}/invite/${inviteToken}`;
-    // O JWT não carrega o nome — aproveitamos os users já incluídos no tenant.
-    const inviter = tenant.users.find((u) => u.id === req.auth.userId);
+    // O JWT não carrega o nome de quem convida — buscamos só esse campo.
+    const inviter = await prisma.user.findUnique({
+      where: { id: req.auth.userId },
+      select: { name: true },
+    });
     await enqueueEmail({
       to: email,
       template: "INVITE_RECEIVED",
@@ -150,22 +191,51 @@ export async function acceptInvite(req, res) {
 
     const passwordHash = await bcrypt.hash(password, 12);
 
-    await prisma.$transaction([
-      prisma.user.create({
-        data: {
-          tenantId: invite.tenantId,
-          email: invite.email,
-          name,
-          passwordHash,
-          role: invite.role,
-          emailVerified: true, // o convite já comprova posse do e-mail
+    // O limite é revalidado AQUI, no aceite — não basta checar no envio.
+    // Entre convidar e aceitar, o plano pode ter mudado, outros convites
+    // podem ter sido resgatados ou o titular pode ter feito downgrade.
+    // Serializable impede que dois aceites simultâneos passem pela mesma
+    // vaga: um dos dois falha e é retentado pelo cliente.
+    try {
+      await prisma.$transaction(
+        async (tx) => {
+          const maxUsers = await getMaxUsers(invite.tenantId, tx);
+          const users = await tx.user.count({
+            where: { tenantId: invite.tenantId, active: true },
+          });
+
+          if (users >= maxUsers) {
+            throw new Error("PLAN_USER_LIMIT_REACHED");
+          }
+
+          await tx.user.create({
+            data: {
+              tenantId: invite.tenantId,
+              email: invite.email,
+              name,
+              passwordHash,
+              role: invite.role,
+              emailVerified: true, // o convite já comprova posse do e-mail
+            },
+          });
+
+          await tx.tenantInvite.update({
+            where: { id: invite.id },
+            data: { acceptedAt: new Date() },
+          });
         },
-      }),
-      prisma.tenantInvite.update({
-        where: { id: invite.id },
-        data: { acceptedAt: new Date() },
-      }),
-    ]);
+        { isolationLevel: "Serializable" }
+      );
+    } catch (err) {
+      if (err.message === "PLAN_USER_LIMIT_REACHED") {
+        return res.status(403).json({
+          error:
+            "O escritório atingiu o limite de usuários do plano. Peça ao titular para liberar uma vaga ou fazer upgrade.",
+          code: "PLAN_USER_LIMIT_REACHED",
+        });
+      }
+      throw err;
+    }
 
     return res.status(201).json({ message: "Convite aceito. Você já pode fazer login." });
   } catch (error) {

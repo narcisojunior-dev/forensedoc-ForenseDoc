@@ -1,6 +1,17 @@
 import { z } from "zod";
 import { prisma } from "../utils/prisma.js";
 import * as asaasService from "../services/asaasService.js";
+import { countOccupiedSeats } from "./tenantController.js";
+
+// Guard reutilizado nas rotas financeiras: o titular contrata e paga, os
+// membros convidados apenas consomem os créditos do escritório.
+function ensureOwner(req, res, acao) {
+  if (req.auth.role !== "OWNER") {
+    res.status(403).json({ error: `Apenas o proprietário pode ${acao}.` });
+    return false;
+  }
+  return true;
+}
 
 const billingTypeSchema = z.enum(["PIX", "BOLETO", "CREDIT_CARD", "UNDEFINED"]);
 
@@ -135,6 +146,7 @@ export async function subscribe(req, res) {
 
 export async function purchaseAvulso(req, res) {
   try {
+    if (!ensureOwner(req, res, "comprar créditos")) return;
     const { billingType } = avulsoSchema.parse(req.body);
     const tenantId = req.tenantId;
 
@@ -216,6 +228,23 @@ export async function upgradeSubscription(req, res) {
     const newPlan = await prisma.plan.findUnique({ where: { id: planId } });
     if (!newPlan || !newPlan.isActive || newPlan.isFounder) {
       return res.status(404).json({ error: "Plano não encontrado." });
+    }
+
+    // Downgrade não pode deixar a equipe acima do limite do plano novo.
+    // Verificado ANTES de tocar na Asaas: cancelar a assinatura atual para
+    // só então descobrir que o plano não cabe deixaria o cliente sem nada.
+    const seats = await countOccupiedSeats(tenantId);
+    if (seats.total > newPlan.maxUsers) {
+      return res.status(409).json({
+        error:
+          `O plano ${newPlan.name} permite ${newPlan.maxUsers} usuário(s), mas o escritório tem ` +
+          `${seats.users} na equipe` +
+          (seats.pendingInvites > 0 ? ` e ${seats.pendingInvites} convite(s) pendente(s)` : "") +
+          `. Remova os excedentes antes de trocar de plano.`,
+        code: "PLAN_USER_LIMIT_EXCEEDED",
+        limit: newPlan.maxUsers,
+        ...seats,
+      });
     }
 
     // Cancela a assinatura atual na Asaas e cria uma nova com o novo valor —
@@ -311,6 +340,7 @@ export async function cancelSubscription(req, res) {
 
 export async function getPayments(req, res) {
   try {
+    if (!ensureOwner(req, res, "ver o histórico de pagamentos")) return;
     const tenantId = req.tenantId;
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
@@ -338,6 +368,7 @@ export async function getPayments(req, res) {
 
 export async function getInvoice(req, res) {
   try {
+    if (!ensureOwner(req, res, "acessar a cobrança")) return;
     const tenantId = req.tenantId;
     const payment = await prisma.payment.findFirst({
       where: { tenantId, status: "PENDING" },
