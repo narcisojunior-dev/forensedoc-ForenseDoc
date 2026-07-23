@@ -75,6 +75,32 @@ app.get("/health", (_req, res) => {
   });
 });
 
+// ─── Readiness Check (diagnóstico — FL.4) ────────────────────────────────────
+// Este SIM consulta as dependências, e por isso NÃO é o endpoint apontado no
+// healthcheck do Railway: uma oscilação momentânea do Postgres reiniciaria a
+// API inteira, transformando uma falha parcial numa queda total. Usar
+// manualmente ou em monitoramento externo.
+app.get("/health/ready", async (_req, res) => {
+  const checks = { db: "unknown", redis: "unknown" };
+
+  const [dbResult, redisResult] = await Promise.allSettled([
+    import("./src/utils/prisma.js").then(({ prisma }) => prisma.$queryRaw`SELECT 1`),
+    import("./src/utils/redis.js").then(({ redis }) => redis.ping()),
+  ]);
+
+  checks.db = dbResult.status === "fulfilled" ? "ok" : "error";
+  checks.redis = redisResult.status === "fulfilled" ? "ok" : "error";
+
+  const healthy = checks.db === "ok" && checks.redis === "ok";
+
+  return res.status(healthy ? 200 : 503).json({
+    status: healthy ? "ok" : "degraded",
+    ...checks,
+    version: "3.0.0",
+    timestamp: new Date().toISOString(),
+  });
+});
+
 // ─── 404 Handler ──────────────────────────────────────────────────────────────
 app.use((_req, res) => {
   res.status(404).json({ error: "Rota não encontrada." });

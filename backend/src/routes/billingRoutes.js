@@ -10,13 +10,14 @@ import {
   getInvoice,
 } from "../controllers/billingController.js";
 import { requireAuth } from "../middleware/auth.js";
+import { tenantLimiter } from "../middleware/rateLimiters.js";
 
 const router = Router();
 
 // Pública — precisa ser vista antes do login (landing page / onboarding).
 router.get("/plans", getPlans);
 
-router.use(requireAuth);
+router.use(requireAuth, tenantLimiter);
 
 router.post("/subscribe", subscribe);
 router.post("/avulso", purchaseAvulso);

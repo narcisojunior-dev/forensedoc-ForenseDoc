@@ -7,8 +7,10 @@ import creditRoutes from "./creditRoutes.js";
 import billingRoutes from "./billingRoutes.js";
 import webhookRoutes from "./webhookRoutes.js";
 import notificationRoutes from "./notificationRoutes.js";
+import adminRoutes from "./adminRoutes.js";
 import { requireAuth } from "../middleware/auth.js";
 import { requireCredit } from "../middleware/creditGuard.js";
+import { tenantLimiter, analyzeLimiter } from "../middleware/rateLimiters.js";
 
 const router = Router();
 
@@ -28,22 +30,35 @@ function requestTimeout(ms) {
 }
 
 // Rotas Base
+// /auth e /webhooks ficam de fora do tenantLimiter: têm limitadores próprios
+// por IP e, no caso do webhook, quem chama é a Asaas (sem tenant no request).
 router.use("/auth", authRoutes);
+router.use("/webhooks", webhookRoutes);
+
+// Os demais aplicam requireAuth + tenantLimiter internamente (o limitador
+// precisa do req.tenantId que o requireAuth injeta).
 router.use("/tenant", tenantRoutes);
 router.use("/credits", creditRoutes);
 router.use("/billing", billingRoutes);
-router.use("/webhooks", webhookRoutes);
 router.use("/notifications", notificationRoutes);
+router.use("/admin", adminRoutes);
 
 // Rotas de Análise (Módulo 4 — assíncrono via BullMQ, ver worker.js)
-router.post("/analyze", requireAuth, requireCredit, requestTimeout(ANALYZE_TIMEOUT_MS), analyzePdf);
-router.get("/analyses/:id/status", requireAuth, getAnalysisStatus);
-router.get("/analyses/:id/result", requireAuth, getAnalysisResult);
-router.get("/analyses", requireAuth, listAnalyses);
+router.post(
+  "/analyze",
+  requireAuth,
+  analyzeLimiter, // anti-duplo-clique: 1 análise / 30s por tenant
+  requireCredit,
+  requestTimeout(ANALYZE_TIMEOUT_MS),
+  analyzePdf
+);
+router.get("/analyses/:id/status", requireAuth, tenantLimiter, getAnalysisStatus);
+router.get("/analyses/:id/result", requireAuth, tenantLimiter, getAnalysisResult);
+router.get("/analyses", requireAuth, tenantLimiter, listAnalyses);
 
 // Rotas Utilitárias
-router.get("/geocode", requireAuth, geocode);
-router.get("/ip/:ip", requireAuth, ipLocation);
+router.get("/geocode", requireAuth, tenantLimiter, geocode);
+router.get("/ip/:ip", requireAuth, tenantLimiter, ipLocation);
 
 export default router;
 

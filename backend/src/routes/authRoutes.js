@@ -1,31 +1,29 @@
 import { Router } from "express";
-import { rateLimit } from "express-rate-limit";
-import { RedisStore } from "rate-limit-redis";
 import { register, login, refresh, verifyEmail, logout, me, forgotPassword, resetPassword, updateProfile, changePassword } from "../controllers/authController.js";
 import { requireAuth } from "../middleware/auth.js";
-import { redis } from "../utils/redis.js";
+import { createLimiter } from "../utils/rateLimitStore.js";
 
 const router = Router();
 
-const loginLimiter = rateLimit({
+const loginLimiter = createLimiter({
   windowMs: 15 * 60 * 1000,
   max: 10,
   message: { error: "Muitas tentativas de login. Tente novamente mais tarde." },
-  store: new RedisStore({ sendCommand: (...args) => redis.call(...args), prefix: "rl:login:" }),
+  prefix: "rl:login:",
 });
 
-const registerLimiter = rateLimit({
+const registerLimiter = createLimiter({
   windowMs: 60 * 60 * 1000,
   max: 5,
   message: { error: "Limite de registros excedido. Tente novamente mais tarde." },
-  store: new RedisStore({ sendCommand: (...args) => redis.call(...args), prefix: "rl:register:" }),
+  prefix: "rl:register:",
 });
 
-const forgotPasswordLimiter = rateLimit({
+const forgotPasswordLimiter = createLimiter({
   windowMs: 60 * 60 * 1000,
   max: 3,
   message: { error: "Limite de solicitações excedido. Tente novamente mais tarde." },
-  store: new RedisStore({ sendCommand: (...args) => redis.call(...args), prefix: "rl:forgot:" }),
+  prefix: "rl:forgot:",
 });
 
 // Rotas Públicas

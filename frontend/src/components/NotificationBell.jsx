@@ -10,6 +10,7 @@ import {
   Ban,
   FileCheck,
   Users,
+  Gift,
 } from "lucide-react";
 import { api } from "../lib/axios";
 import { cn } from "../utils/cn";
@@ -22,6 +23,7 @@ const ICONS = {
   CREDITS_80PCT: { Icon: Zap, tone: "text-amber-500" },
   CREDITS_95PCT: { Icon: Zap, tone: "text-amber-500" },
   CREDITS_EXHAUSTED: { Icon: Zap, tone: "text-red-500" },
+  CREDITS_GRANTED: { Icon: Gift, tone: "text-emerald-500" },
   PAYMENT_CONFIRMED: { Icon: CheckCircle2, tone: "text-emerald-500" },
   PAYMENT_FAILED: { Icon: CreditCard, tone: "text-red-500" },
   RENEWAL_REMINDER: { Icon: Calendar, tone: "text-primary" },
@@ -37,6 +39,7 @@ const LINKS = {
   CREDITS_80PCT: "/dashboard/plans",
   CREDITS_95PCT: "/dashboard/plans",
   CREDITS_EXHAUSTED: "/dashboard/plans",
+  CREDITS_GRANTED: "/dashboard",
   PAYMENT_CONFIRMED: "/dashboard/plans",
   PAYMENT_FAILED: "/dashboard/plans",
   RENEWAL_REMINDER: "/dashboard/plans",

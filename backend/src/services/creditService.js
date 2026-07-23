@@ -98,6 +98,17 @@ export async function debitCredit(tenantId, userId, analysisId, txClient = prism
 
   await invalidateCreditCache(tenantId);
 
+  // Auditoria do gasto (Seção 2.8). Entra na mesma transação do débito para
+  // que um rollback não deixe registro de um crédito que nunca saiu.
+  await txClient.auditLog.create({
+    data: {
+      tenantId,
+      userId,
+      action: "credit_spent",
+      metadata: { creditType: creditTypeUsed, analysisId, remaining: getTotalCredits(balance) - 1 },
+    },
+  });
+
   await checkCreditAlerts(tenantId, balance);
 
   return creditTx;
@@ -237,6 +248,29 @@ export async function addAvulsoCredit(tenantId, paymentId) {
         creditType: "avulso",
         source: "avulso_purchase",
         notes: `Payment ${paymentId}`,
+      },
+    }),
+  ]);
+  await invalidateCreditCache(tenantId);
+}
+
+// Créditos manuais concedidos pelo operador da plataforma (cortesia, correção
+// de incidente, negociação comercial). Nunca expiram — só saem via consumo.
+export async function addManualCredits(tenantId, amount, notes, adminUserId) {
+  await prisma.$transaction([
+    prisma.creditBalance.update({
+      where: { tenantId },
+      data: { creditsManual: { increment: amount } },
+    }),
+    prisma.creditTransaction.create({
+      data: {
+        tenantId,
+        userId: adminUserId,
+        type: "EARN_MANUAL",
+        amount,
+        creditType: "manual",
+        source: "admin",
+        notes,
       },
     }),
   ]);

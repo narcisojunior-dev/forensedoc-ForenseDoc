@@ -1,13 +1,14 @@
 import { prisma } from "../utils/prisma.js";
 import { refundCredit } from "../services/creditService.js";
 import { notify } from "../services/notificationService.js";
+import { releaseLock, analysisLockKey } from "../utils/lock.js";
 import { extractPdfTextWithOcr } from "../services/ocrService.js";
 import { extractPdfMetadata } from "../services/pdfService.js";
 import { heuristicExtractionFromText } from "../services/extractionService.js";
 import { cleanPdfBase64, stripDiacritics } from "../utils/stringUtils.js";
 
 export async function processAnalysis(job) {
-  const { analysisId, pdfBase64, tenantId, userId } = job.data;
+  const { analysisId, pdfBase64, tenantId, userId, lockToken } = job.data;
 
   try {
     const pdfBuffer = Buffer.from(cleanPdfBase64(pdfBase64), "base64");
@@ -73,5 +74,9 @@ export async function processAnalysis(job) {
       body: "Não foi possível processar seu documento. O crédito foi estornado automaticamente.",
       emailData: { reason: error.message },
     });
+  } finally {
+    // Libera o mutex de "uma análise por vez" tanto no sucesso quanto na
+    // falha — sem isso o tenant ficaria bloqueado até o TTL do lock expirar.
+    await releaseLock(analysisLockKey(tenantId), lockToken);
   }
 }
