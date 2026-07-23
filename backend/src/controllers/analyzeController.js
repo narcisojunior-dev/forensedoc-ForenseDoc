@@ -4,6 +4,7 @@ import { debitCredit, refundCredit } from "../services/creditService.js";
 import { saasQueue } from "../queues.js";
 import { acquireLock, releaseLock, analysisLockKey } from "../utils/lock.js";
 import { validatePdfPayload } from "../utils/pdfValidation.js";
+import { buildReportPdf } from "../services/reportPdfService.js";
 
 function hashFilename(filename) {
   return crypto.createHash("sha256").update(filename || "").digest("hex");
@@ -19,13 +20,17 @@ export async function analyzePdf(req, res) {
   let analysis = null;
 
   try {
-    const { pdfBase64, filename } = req.body || {};
+    const { pdfBase64, filename, homeAddress } = req.body || {};
 
     // Valida assinatura e tamanho ANTES de travar o tenant ou debitar crédito.
     const validation = validatePdfPayload(pdfBase64);
     if (!validation.ok) {
       return res.status(400).json({ error: validation.error, code: validation.code });
     }
+
+    // Endereço residencial informado na tela — usado no confronto geográfico
+    // do §5, com prioridade sobre o extraído do contrato. Opcional e limitado.
+    const home = typeof homeAddress === "string" ? homeAddress.trim().slice(0, 300) : "";
 
     // Uma análise por vez por tenant (M4.4). O lock é liberado pelo worker
     // ao concluir o job — não aqui, que retorna 202 antes do processamento.
@@ -57,7 +62,15 @@ export async function analyzePdf(req, res) {
     // debitado precisa voltar em vez de deixar a análise presa em PROCESSING.
     await saasQueue.add(
       "process-pdf",
-      { analysisId: analysis.id, pdfBase64: validation.base64, tenantId, userId, lockToken },
+      {
+        analysisId: analysis.id,
+        pdfBase64: validation.base64,
+        tenantId,
+        userId,
+        lockToken,
+        homeAddress: home,
+        filename: filename || null,
+      },
       { attempts: 1, removeOnComplete: true, removeOnFail: true }
     );
 
@@ -128,6 +141,32 @@ export async function getAnalysisResult(req, res) {
   } catch (error) {
     console.error("[Analyze] Erro ao buscar resultado:", error);
     return res.status(500).json({ error: "Erro interno no servidor." });
+  }
+}
+
+// Laudo em PDF gerado no servidor (Fase B). On-demand, sem cache (M4.3).
+export async function getAnalysisPdf(req, res) {
+  try {
+    const analysis = await prisma.analysis.findUnique({ where: { id: req.params.id } });
+    if (!analysis || analysis.tenantId !== req.tenantId) {
+      return res.status(404).json({ error: "Análise não encontrada." });
+    }
+    if (analysis.status !== "COMPLETED" || !analysis.result) {
+      return res.status(409).json({ error: "Laudo indisponível: análise não concluída.", status: analysis.status });
+    }
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="laudo-${analysis.id.slice(0, 8)}.pdf"`);
+
+    const pdf = buildReportPdf(analysis, analysis.result);
+    pdf.on("error", (err) => {
+      console.error("[Analyze] Erro ao gerar PDF:", err.message);
+      if (!res.headersSent) res.status(500).end();
+    });
+    pdf.pipe(res);
+  } catch (error) {
+    console.error("[Analyze] Erro ao gerar laudo PDF:", error);
+    if (!res.headersSent) return res.status(500).json({ error: "Erro interno no servidor." });
   }
 }
 

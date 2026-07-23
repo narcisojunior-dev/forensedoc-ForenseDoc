@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
-import { FileSearch, Loader2, X, ChevronLeft, ChevronRight, Eye } from "lucide-react";
+import { FileSearch, Loader2, X, ChevronLeft, ChevronRight, Eye, Download } from "lucide-react";
 import toast from "react-hot-toast";
 import "../styles/ForenseDoc.css";
 import { api } from "../lib/axios";
 import { Row, Badge, Section } from "../components/UiComponents.jsx";
+import { riskFromDistance } from "../utils/geo.js";
+import { downloadReportPdf } from "../utils/reportDownload.js";
 
 function parseExtraction(raw) {
   if (!raw) return null;
@@ -27,8 +29,9 @@ const STATUS_LABELS = {
 function AnalysisDetailModal({ analysisId, onClose }) {
   const [loading, setLoading] = useState(true);
   const [extracted, setExtracted] = useState(null);
-  const [metadata, setMetadata] = useState(null);
+  const [result, setResult] = useState(null);
   const [error, setError] = useState("");
+  const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -36,7 +39,7 @@ function AnalysisDetailModal({ analysisId, onClose }) {
         const { data } = await api.get(`/analyses/${analysisId}/result`);
         const parsed = parseExtraction(data.result?.text);
         setExtracted(parsed || {});
-        setMetadata(data.result?.metadata || null);
+        setResult(data.result || null);
       } catch (err) {
         setError(err.response?.data?.error || "Erro ao carregar detalhes da análise.");
       } finally {
@@ -46,6 +49,21 @@ function AnalysisDetailModal({ analysisId, onClose }) {
     load();
   }, [analysisId]);
 
+  const metadata = result?.metadata || null;
+  // Laudos gerados antes da Fase A não têm os artefatos forenses persistidos.
+  const hasForensics = !!(result?.hashes || result?.contractGeo || result?.ipAnalysis?.length);
+
+  const handleDownload = async () => {
+    setDownloading(true);
+    try {
+      await downloadReportPdf(analysisId);
+    } catch {
+      toast.error("Não foi possível gerar o PDF do laudo.");
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div
@@ -54,9 +72,21 @@ function AnalysisDetailModal({ analysisId, onClose }) {
       >
         <div className="sticky top-0 bg-background border-b border-surface-border px-6 py-4 flex items-center justify-between z-10">
           <h2 className="text-lg font-bold text-foreground">Detalhes da análise</h2>
-          <button onClick={onClose} className="text-zinc-400 hover:text-foreground p-1">
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            {!loading && !error && (
+              <button
+                onClick={handleDownload}
+                disabled={downloading}
+                className="flex items-center gap-1.5 text-xs font-medium bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 disabled:opacity-50 px-3 py-1.5 rounded-lg transition-colors"
+              >
+                {downloading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                Baixar PDF
+              </button>
+            )}
+            <button onClick={onClose} className="text-zinc-400 hover:text-foreground p-1">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         <div className="p-6">
@@ -70,10 +100,22 @@ function AnalysisDetailModal({ analysisId, onClose }) {
 
           {!loading && !error && extracted && (
             <div className="space-y-4">
-              <div className="note" style={{ borderLeftColor: "var(--muted)", background: "rgba(133,149,168,0.07)" }}>
-                Esta é uma visão simplificada dos dados extraídos. O confronto geográfico completo (mapa e distâncias)
-                só é calculado no momento da análise — gere uma nova análise para obtê-lo.
-              </div>
+              {!hasForensics && (
+                <div className="note" style={{ borderLeftColor: "var(--muted)", background: "rgba(133,149,168,0.07)" }}>
+                  Este laudo foi gerado antes do confronto geográfico e dos hashes passarem a ser
+                  arquivados. Gere uma nova análise para obter o laudo completo com §5 e cadeia de custódia.
+                </div>
+              )}
+
+              {result?.hashes && (
+                <Section title="Integridade criptográfica do arquivo">
+                  <Row label="SHA-256" value={result.hashes.sha256} mono />
+                  <Row label="SHA-1" value={result.hashes.sha1} mono />
+                  {result.file?.sizeBytes && (
+                    <Row label="Tamanho do arquivo" value={`${(result.file.sizeBytes / 1024).toFixed(2)} KB`} />
+                  )}
+                </Section>
+              )}
 
               <Section title="Documento">
                 <Row label="Tipo de documento" value={extracted.tipo_documento} />
@@ -108,12 +150,49 @@ function AnalysisDetailModal({ analysisId, onClose }) {
                 <Row label="Hash do documento assinado" value={extracted.assinatura?.hash_documento_assinado} mono />
               </Section>
 
-              {extracted.ips?.length > 0 && (
-                <Section title={`Endereços IP encontrados (${extracted.ips.length})`}>
-                  {extracted.ips.map((ip, i) => (
-                    <Row key={i} label={`IP #${i + 1}`} value={`${ip.endereco}${ip.data_hora ? " · " + ip.data_hora : ""}`} mono />
+              {/* §5 — confronto geográfico persistido (Fase A) */}
+              {result?.contractGeo && (
+                <Section title="Geolocalização da assinatura · confronto geográfico">
+                  <Row label="Local declarado da assinatura" value={result.contractGeo.endereco || `${result.contractGeo.lat}, ${result.contractGeo.lon}`} />
+                  {result.home?.query && (
+                    <Row label={`Residência (${result.home.source})`} value={result.home.query} />
+                  )}
+                  {result.contractGeo.distance != null && (
+                    <div className="row">
+                      <span className="row-label">Distância assinatura → residência</span>
+                      <span className="row-value" style={{ color: riskFromDistance(result.contractGeo.distance).color, fontWeight: 700 }}>
+                        {result.contractGeo.distance.toFixed(2)} km · {riskFromDistance(result.contractGeo.distance).label}
+                      </span>
+                    </div>
+                  )}
+                </Section>
+              )}
+
+              {result?.ipAnalysis?.length > 0 ? (
+                <Section title={`Endereços IP · geolocalização (${result.ipAnalysis.length})`}>
+                  {result.ipAnalysis.map((ip, i) => (
+                    <div key={i} className="row">
+                      <span className="row-label" style={{ fontFamily: "monospace" }}>
+                        {ip.endereco}{ip.geo?.city ? ` · ${ip.geo.city}/${ip.geo.region || ""}` : ""}
+                      </span>
+                      {ip.distance != null ? (
+                        <span className="row-value" style={{ color: riskFromDistance(ip.distance).color, fontWeight: 700 }}>
+                          {ip.distance.toFixed(2)} km
+                        </span>
+                      ) : (
+                        <span className="row-value" style={{ color: "var(--muted)" }}>sem distância</span>
+                      )}
+                    </div>
                   ))}
                 </Section>
+              ) : (
+                extracted.ips?.length > 0 && (
+                  <Section title={`Endereços IP encontrados (${extracted.ips.length})`}>
+                    {extracted.ips.map((ip, i) => (
+                      <Row key={i} label={`IP #${i + 1}`} value={`${ip.endereco}${ip.data_hora ? " · " + ip.data_hora : ""}`} mono />
+                    ))}
+                  </Section>
+                )
               )}
 
               {metadata && (

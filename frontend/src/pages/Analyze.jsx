@@ -3,10 +3,10 @@ import { Link } from "react-router-dom";
 
 import "../styles/ForenseDoc.css";
 import { api } from "../lib/axios.js";
-import { geolocateIP, geocodeAddress } from "../utils/api.js";
-import { digestHash, classifyHashString } from "../utils/crypto.js";
-import { haversineKm, riskFromDistance } from "../utils/geo.js";
+import { classifyHashString } from "../utils/crypto.js";
+import { riskFromDistance } from "../utils/geo.js";
 import { exportReportPDF } from "../utils/pdfExport.js";
+import { downloadReportPdf } from "../utils/reportDownload.js";
 import { Row, Badge, Section } from "../components/UiComponents.jsx";
 import { DistanceBanner } from "../components/DistanceBanner.jsx";
 import { GeoMap } from "../components/GeoMap.jsx";
@@ -55,8 +55,21 @@ export default function Analyze() {
   const [dragging, setDragging] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [pdfDownload, setPdfDownload] = useState(null);
+  const [serverPdfBusy, setServerPdfBusy] = useState(false);
   const [homeAddr, setHomeAddr] = useState("");
   const fileRef = useRef();
+
+  const handleServerPdf = async () => {
+    if (!report?.analysisId) return;
+    setServerPdfBusy(true);
+    try {
+      await downloadReportPdf(report.analysisId);
+    } catch {
+      setError("Não foi possível gerar o laudo em PDF pelo servidor.");
+    } finally {
+      setServerPdfBusy(false);
+    }
+  };
 
   const analyze = useCallback(async (file) => {
     if (!file) return;
@@ -71,134 +84,81 @@ export default function Analyze() {
     setNoCredits(false);
 
     try {
-      setProgress({ label: "Lendo arquivo e calculando hashes criptográficos...", pct: 8 });
+      setProgress({ label: "Lendo arquivo...", pct: 8 });
       const buffer = await file.arrayBuffer();
-      const [sha256, sha1] = await Promise.all([
-        digestHash("SHA-256", buffer),
-        digestHash("SHA-1", buffer),
-      ]);
       const base64 = arrayBufferToBase64(buffer);
 
       setProgress({ label: "Enviando documento para o motor de análise...", pct: 18 });
-      let extracted = null;
-      let pdfMetadata = null;
-      let extractionError = "";
-      let processingNotice = "";
+      // Todo o processamento pesado — extração, hashes do arquivo e confronto
+      // geográfico (§5) — roda no servidor e fica persistido, para o laudo ser
+      // reproduzível. O cliente apenas envia o PDF e renderiza o resultado.
+      const { data: startData } = await api.post("/analyze", {
+        pdfBase64: base64,
+        filename: file.name,
+        homeAddress: (homeAddr || "").trim(),
+      });
 
-      try {
-        const { data: startData } = await api.post("/analyze", { pdfBase64: base64, filename: file.name });
+      setProgress({ label: "Extraindo dados, calculando hashes e geolocalizando...", pct: 34 });
+      const finalStatus = await pollAnalysisStatus(startData.analysisId, (pct) =>
+        setProgress({ label: "Extraindo dados, calculando hashes e geolocalizando...", pct })
+      );
 
-        setProgress({ label: "Extraindo dados do PDF e aplicando OCR quando necessário...", pct: 30 });
-        const finalStatus = await pollAnalysisStatus(startData.analysisId, (pct) =>
-          setProgress({ label: "Extraindo dados do PDF e aplicando OCR quando necessário...", pct })
+      if (finalStatus !== "COMPLETED") {
+        setError(
+          "O motor de análise não conseguiu processar o documento e o crédito foi estornado automaticamente. Tente novamente ou envie um PDF diferente."
         );
-
-        if (finalStatus === "COMPLETED") {
-          setProgress({ label: "Interpretando dados extraídos...", pct: 46 });
-          const { data: resultData } = await api.get(`/analyses/${startData.analysisId}/result`);
-          const apiData = resultData.result || {};
-          const rawText = apiData.text || "";
-          extracted = parseExtraction(rawText);
-          pdfMetadata = apiData.metadata || null;
-          if (!extracted) {
-            extractionError = "A extração automática não retornou dados estruturados válidos (resposta vazia ou JSON incompleto). O laudo foi gerado com os dados disponíveis; os campos extraídos podem ser preenchidos manualmente.";
-          }
-          if (apiData.warning) {
-            processingNotice = apiData.warning;
-          }
-        } else {
-          extractionError = "O motor de análise não conseguiu processar o documento e o crédito foi estornado automaticamente. Tente novamente ou envie um PDF diferente.";
-        }
-      } catch (apiErr) {
-        if (apiErr.response?.status === 402) {
-          setError("Você não tem créditos suficientes para realizar uma análise.");
-          setNoCredits(true);
-          setStage("error");
-          useAuthStore.getState().fetchBalance();
-          return;
-        }
-        const apiError = apiErr.response?.data?.error;
-        extractionError = typeof apiError === "string"
-          ? apiError
-          : "Falha ao consultar o motor de análise: " + (apiErr.message || "erro de rede.") + " O laudo foi gerado com os dados disponíveis.";
+        setStage("error");
+        useAuthStore.getState().fetchBalance();
+        return;
       }
+
+      setProgress({ label: "Compilando laudo técnico pericial...", pct: 88 });
+      const { data: resultData } = await api.get(`/analyses/${startData.analysisId}/result`);
+      const apiData = resultData.result || {};
+
+      let extracted = parseExtraction(apiData.text || "");
+      const extractionError = extracted
+        ? ""
+        : "A extração automática não retornou dados estruturados válidos. O laudo foi gerado com os dados disponíveis; os campos extraídos podem ser preenchidos manualmente.";
       if (!extracted) extracted = {};
 
       useAuthStore.getState().fetchBalance();
 
-      setProgress({ label: "Geolocalizando endereços IP...", pct: 58 });
-      const ipResults = [];
-      for (const ipInfo of extracted.ips || []) {
-        if (/^\d{1,3}(\.\d{1,3}){3}$/.test(ipInfo.endereco)) {
-          const geo = await geolocateIP(ipInfo.endereco);
-          ipResults.push({ ...ipInfo, geo });
-        }
-      }
-
-      // Ponto de referência: endereço residencial (o informado manualmente tem prioridade)
-      setProgress({ label: "Geocodificando endereço residencial do cliente...", pct: 70 });
-      const manual = (homeAddr || "").trim();
-      const c = extracted.cliente || {};
-      const extractedAddr = [c.endereco, c.bairro, c.cidade, c.estado, c.cep].filter(Boolean).join(", ");
-      const homeQuery = manual || extractedAddr || null;
-      const homeSource = manual ? "Informado manualmente" : (extractedAddr ? "Extraído do contrato" : null);
-      let homeGeo = null;
-      if (homeQuery) homeGeo = await geocodeAddress(homeQuery);
-
-      // Geolocalização declarada da assinatura (coordenadas GPS no log do contrato)
-      setProgress({ label: "Analisando geolocalização declarada da assinatura...", pct: 80 });
-      let contractGeo = null;
-      const g = extracted.geolocalizacao_assinatura;
-      if (g && g.presente) {
-        const plat = g.latitude != null ? parseFloat(String(g.latitude).replace(",", ".")) : NaN;
-        const plon = g.longitude != null ? parseFloat(String(g.longitude).replace(",", ".")) : NaN;
-        if (!isNaN(plat) && !isNaN(plon)) {
-          contractGeo = { lat: plat, lon: plon, endereco: g.endereco_declarado, fonte: g.fonte, precisao: g.precisao_metros, dataHora: g.data_hora, geocoded: false };
-        } else if (g.endereco_declarado) {
-          const gc = await geocodeAddress(g.endereco_declarado);
-          if (gc) contractGeo = { lat: gc.lat, lon: gc.lon, endereco: g.endereco_declarado, fonte: g.fonte, precisao: g.precisao_metros, dataHora: g.data_hora, geocoded: true };
-        }
-      }
-
-      setProgress({ label: "Calculando distâncias geográficas (Haversine)...", pct: 90 });
-      const ipWithDistance = ipResults.map((ip) => {
-        let distance = null;
-        if (homeGeo && ip.geo?.lat != null && ip.geo?.lon != null) {
-          distance = haversineKm(homeGeo.lat, homeGeo.lon, ip.geo.lat, ip.geo.lon);
-        }
-        return { ...ip, distance };
-      });
-
-      let contractToHomeKm = null;
-      if (contractGeo && homeGeo) {
-        contractToHomeKm = haversineKm(homeGeo.lat, homeGeo.lon, contractGeo.lat, contractGeo.lon);
-      }
-
-      setProgress({ label: "Compilando laudo técnico pericial...", pct: 96 });
-      const timestamp = new Date().toLocaleString("pt-BR", {
-        timeZone: "America/Fortaleza",
-        day: "2-digit", month: "2-digit", year: "numeric",
-        hour: "2-digit", minute: "2-digit", second: "2-digit",
-      });
-
+      // O servidor já entrega hashes, home, contractGeo e ipAnalysis prontos —
+      // basta montar o report na forma que o render espera.
       setReport({
-        timestamp,
-        file: { name: file.name, sizeKB: (buffer.byteLength / 1024).toFixed(2), sizeBytes: buffer.byteLength },
-        hashes: { sha256, sha1 },
-        metadata: pdfMetadata,
+        analysisId: startData.analysisId,
+        timestamp: apiData.generatedAt
+          ? new Date(apiData.generatedAt).toLocaleString("pt-BR", { timeZone: "America/Fortaleza" })
+          : new Date().toLocaleString("pt-BR", { timeZone: "America/Fortaleza" }),
+        file: {
+          name: apiData.file?.name || file.name,
+          sizeKB: ((apiData.file?.sizeBytes ?? buffer.byteLength) / 1024).toFixed(2),
+          sizeBytes: apiData.file?.sizeBytes ?? buffer.byteLength,
+        },
+        hashes: apiData.hashes || null,
+        metadata: apiData.metadata || null,
         extracted,
-        home: { query: homeQuery, source: homeSource, geo: homeGeo },
-        contractGeo: contractGeo ? { ...contractGeo, distance: contractToHomeKm } : null,
-        geoDeclaredPresent: !!(g && g.presente),
-        ipAnalysis: ipWithDistance,
-        processingNotice,
+        home: apiData.home || { query: null, source: null, geo: null },
+        contractGeo: apiData.contractGeo || null,
+        geoDeclaredPresent: !!apiData.geoDeclaredPresent,
+        ipAnalysis: apiData.ipAnalysis || [],
+        processingNotice: apiData.warning || "",
         extractionError,
       });
 
       setStage("done");
       setProgress({ label: "Concluído", pct: 100 });
     } catch (err) {
-      setError(err.message || "Erro inesperado durante a análise.");
+      if (err.response?.status === 402) {
+        setError("Você não tem créditos suficientes para realizar uma análise.");
+        setNoCredits(true);
+        setStage("error");
+        useAuthStore.getState().fetchBalance();
+        return;
+      }
+      const apiError = err.response?.data?.error;
+      setError(typeof apiError === "string" ? apiError : err.message || "Erro inesperado durante a análise.");
       setStage("error");
     }
   }, [homeAddr]);
@@ -806,14 +766,17 @@ export default function Analyze() {
 
               {/* Legal */}
               <div className="legal">
-                AVISO LEGAL: Este laudo foi gerado automaticamente pelo sistema ForenseDoc (Ronney Menezes Advocacia, OAB/PI 15.508 · OAB/MA 26.102-A) para fins de análise jurídica preliminar. Os hashes criptográficos SHA-256 e SHA-1 foram calculados localmente sobre o arquivo original via Web Crypto API (NIST FIPS 180-4). A geolocalização de IPs é fornecida por serviço de terceiros (ipapi.co) e possui margem de erro inerente; endereços de ISPs e VPNs podem não refletir a localização física real do usuário. A geolocalização declarada da assinatura é extraída do próprio documento e a geocodificação de endereços usa o serviço OpenStreetMap Nominatim. A fórmula de Haversine calcula a distância geodésica sobre a superfície esférica terrestre. A distância geográfica, isoladamente, não constitui prova de fraude e deve ser ponderada com o contexto fático. Este documento deve ser complementado por análise pericial humana qualificada antes de ser utilizado como prova técnica definitiva nos autos. Gerado em {report.timestamp}.
+                AVISO LEGAL: Este laudo foi gerado automaticamente pelo sistema ForenseDoc (Ronney Menezes Advocacia, OAB/PI 15.508 · OAB/MA 26.102-A) para fins de análise jurídica preliminar. Os hashes criptográficos SHA-256 e SHA-1 foram calculados pelo servidor sobre o arquivo original recebido (NIST FIPS 180-4). A geolocalização de IPs é fornecida por serviço de terceiros (ipapi.co) e possui margem de erro inerente; endereços de ISPs e VPNs podem não refletir a localização física real do usuário. A geolocalização declarada da assinatura é extraída do próprio documento e a geocodificação de endereços usa o serviço OpenStreetMap Nominatim. A fórmula de Haversine calcula a distância geodésica sobre a superfície esférica terrestre. A distância geográfica, isoladamente, não constitui prova de fraude e deve ser ponderada com o contexto fático. Este documento deve ser complementado por análise pericial humana qualificada antes de ser utilizado como prova técnica definitiva nos autos. Gerado em {report.timestamp}.
               </div>
 
               </div>
 
               <div style={{ display: "flex", justifyContent: "center", gap: 12, flexWrap: "wrap", marginTop: 36 }}>
-                <button className="btn btn-primary" onClick={() => exportReportPDF(setPdfBusy, setPdfDownload)} disabled={pdfBusy}>
-                  {pdfBusy ? "Gerando PDF..." : "Gerar relatório em PDF"}
+                <button className="btn btn-primary" onClick={handleServerPdf} disabled={serverPdfBusy || !report.analysisId}>
+                  {serverPdfBusy ? "Gerando laudo..." : "Baixar laudo (PDF)"}
+                </button>
+                <button className="btn" onClick={() => exportReportPDF(setPdfBusy, setPdfDownload)} disabled={pdfBusy}>
+                  {pdfBusy ? "Gerando prévia..." : "Prévia visual (navegador)"}
                 </button>
                 <button className="btn" onClick={reset} disabled={pdfBusy}>Analisar novo contrato</button>
               </div>
