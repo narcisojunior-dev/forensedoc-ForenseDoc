@@ -288,3 +288,39 @@ export async function listAnalyses(req, res) {
     return res.status(500).json({ error: "Erro interno no servidor." });
   }
 }
+
+/**
+ * Contadores do dashboard (L4).
+ *
+ * Endpoint próprio em vez de reaproveitar o total da paginação de
+ * `listAnalyses`: aquela rota carrega registros de análise só para descartar,
+ * e o dashboard precisa de recortes que ela não faz (concluídas no mês, em
+ * processamento). Aqui são três `count` — nenhuma linha sai do banco.
+ *
+ * Só conta `COMPLETED`: análise em `ERROR` ou `REFUNDED` não gerou laudo e não
+ * pode inflar o número que o cliente vê.
+ */
+export async function getAnalysisStats(req, res) {
+  try {
+    const tenantId = req.tenantId; // do JWT, nunca do body
+
+    const inicioDoMes = new Date();
+    inicioDoMes.setDate(1);
+    inicioDoMes.setHours(0, 0, 0, 0);
+
+    const [completedTotal, completedThisMonth, processing] = await Promise.all([
+      prisma.analysis.count({ where: { tenantId, status: "COMPLETED" } }),
+      prisma.analysis.count({
+        where: { tenantId, status: "COMPLETED", createdAt: { gte: inicioDoMes } },
+      }),
+      prisma.analysis.count({ where: { tenantId, status: "PROCESSING" } }),
+    ]);
+
+    return res.json({
+      stats: { completedTotal, completedThisMonth, processing },
+    });
+  } catch (error) {
+    console.error("[Analyze] Erro ao calcular estatísticas:", error);
+    return res.status(500).json({ error: "Erro interno no servidor." });
+  }
+}

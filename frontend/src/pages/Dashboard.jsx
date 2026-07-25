@@ -1,14 +1,48 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { FileSearch, Clock, Zap, ArrowRight, Activity, Receipt } from "lucide-react";
+import { FileSearch, Clock, Zap, ArrowRight, Activity, Receipt, CalendarDays } from "lucide-react";
 import { api } from "../lib/axios";
 import { useAuthStore } from "../store/authStore";
 import toast from "react-hot-toast";
+
+/**
+ * Card de estatística do topo (L4).
+ *
+ * `value === null` significa "ainda carregando" e rende um placeholder — antes
+ * os cards mostravam `0` fixo durante o fetch, o que fazia um escritório com
+ * dezenas de laudos piscar "0" a cada visita.
+ */
+function StatCard({ icon: Icon, iconClass, label, value, suffix, hint }) {
+  return (
+    <div className="glass p-6 rounded-2xl border-surface-border">
+      <div className="flex items-center gap-4">
+        <div className={`w-12 h-12 rounded-full flex items-center justify-center ${iconClass}`}>
+          <Icon className="w-6 h-6" />
+        </div>
+        <div>
+          <p className="text-zinc-400 text-sm font-medium">{label}</p>
+          {value === null ? (
+            <div className="h-9 flex items-center">
+              <span className="inline-block w-12 h-6 rounded bg-surface-border/60 animate-pulse" />
+            </div>
+          ) : (
+            <p className="text-3xl font-bold text-foreground">
+              {value}
+              {suffix}
+            </p>
+          )}
+          {hint && <p className="text-xs text-zinc-500 mt-0.5">{hint}</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function Dashboard() {
   const { user, balance } = useAuthStore();
   const [transactions, setTransactions] = useState([]);
   const [loadingTx, setLoadingTx] = useState(true);
+  const [stats, setStats] = useState(null);
 
   useEffect(() => {
     const fetchTransactions = async () => {
@@ -22,7 +56,19 @@ export default function Dashboard() {
       }
     };
 
+    // Contadores reais de laudos. Falha aqui não merece toast: os cards
+    // seguem em estado de carregamento e o resto do dashboard funciona.
+    const fetchStats = async () => {
+      try {
+        const { data } = await api.get("/analyses/stats");
+        setStats(data.stats);
+      } catch {
+        /* silencioso de propósito */
+      }
+    };
+
     fetchTransactions();
+    fetchStats();
   }, []);
 
   return (
@@ -41,46 +87,29 @@ export default function Dashboard() {
         </Link>
       </div>
 
-      {/* Grid de Estatísticas (Cards) */}
+      {/* Grid de Estatísticas (Cards) — todos os números vêm do banco. */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="glass p-6 rounded-2xl border-surface-border">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-full bg-accent/10 border border-accent/20 flex items-center justify-center">
-              <Zap className="w-6 h-6 text-accent" />
-            </div>
-            <div>
-              <p className="text-zinc-400 text-sm font-medium">Créditos Disponíveis</p>
-              <p className="text-3xl font-bold text-foreground">{balance?.total || 0}</p>
-            </div>
-          </div>
-        </div>
+        <StatCard
+          icon={Zap}
+          iconClass="bg-accent/10 border border-accent/20 text-accent"
+          label="Créditos Disponíveis"
+          value={balance?.total ?? null}
+        />
 
-        <div className="glass p-6 rounded-2xl border-surface-border">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center">
-              <FileSearch className="w-6 h-6 text-primary" />
-            </div>
-            <div>
-              <p className="text-zinc-400 text-sm font-medium">Laudos Gerados</p>
-              <p className="text-3xl font-bold text-foreground">
-                {/* Mock: TODO conectar com API de análises */}
-                0
-              </p>
-            </div>
-          </div>
-        </div>
+        <StatCard
+          icon={FileSearch}
+          iconClass="bg-primary/10 border border-primary/20 text-primary"
+          label="Laudos Gerados"
+          value={stats ? stats.completedTotal : null}
+          hint={stats?.processing > 0 ? `${stats.processing} em processamento` : null}
+        />
 
-        <div className="glass p-6 rounded-2xl border-surface-border">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-full bg-green-500/10 border border-green-500/20 flex items-center justify-center">
-              <Clock className="w-6 h-6 text-green-500" />
-            </div>
-            <div>
-              <p className="text-zinc-400 text-sm font-medium">Horas Economizadas</p>
-              <p className="text-3xl font-bold text-foreground">0h</p>
-            </div>
-          </div>
-        </div>
+        <StatCard
+          icon={CalendarDays}
+          iconClass="bg-green-500/10 border border-green-500/20 text-green-500"
+          label="Laudos Este Mês"
+          value={stats ? stats.completedThisMonth : null}
+        />
       </div>
 
       {/* Main Content Area */}

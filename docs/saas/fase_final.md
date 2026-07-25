@@ -36,12 +36,13 @@ O que resta são **lacunas de integração** — pontas soltas entre backend pro
 | L1 | ~~Fluxo Fundador inalcançável~~ | ✅ Feita | — |
 | L2 | ~~Aceite de convite de equipe sem UI~~ | ✅ Feita | — |
 | L3 | ~~Preços da Landing divergem do banco~~ | ✅ Feita | — |
-| L4 | Dashboard com métricas falsas (`0` hardcoded) | 🟠 Alta | Não, mas visível ao cliente |
+| L4 | ~~Dashboard com métricas falsas~~ | ✅ Feita | — |
 | L5 | Histórico de pagamentos não exposto | 🟡 Média | Não |
 | L6 | 3 templates de e-mail ausentes (bomba-relógio) | 🟡 Média | Não |
 | L7 | Rota `/v2` é código morto que dá 401 | 🟡 Média | Não |
 | L8 | Onboarding só em `localStorage` | 🟢 Baixa | Não |
 | L9 | Código morto e higiene (`geocodeAddress`, §6 do laudo, 404, error boundary) | 🟢 Baixa | Não |
+| L10 | PIX é o padrão da UI mas depende de aprovação da conta Asaas | 🔴 Crítica | **Sim** |
 | FL | Fase Final — Hardening & Launch (FL.1–FL.5) | 🔴 Crítica | **Sim** |
 | B1 | Programa de indicação (schema-only) | ⚪ Backlog | Não (Fase 3 PRD) |
 | B2 | ~~Excedente~~ → avulso com desconto p/ assinante | ✅ Feita | — |
@@ -96,10 +97,18 @@ Executada contra o Postgres de desenvolvimento (`forensedoc_dev`), backend na po
 - [x] **Falha na Asaas não queima o convite:** `usedAt` seguiu `null`, `founderSlotsRemaining` seguiu 25, nenhuma `Subscription` criada — o consumo do convite está dentro da transação, depois da chamada externa
 - [x] Dados de teste removidos do banco de dev ao final
 
-**Não verificado (bloqueado por ambiente):** o caminho feliz completo — `usedAt` preenchido, slot decrementado e `founderLockedUntil` em +12 meses. `ASAAS_API_KEY` no `.env` é placeholder (20 chars, prefixo `ASAAS_`), então nenhuma assinatura real pode ser criada localmente. Essa parte é código pré-existente (`billingController.js`, transação de `subscribe`) que não foi alterado nesta lacuna.
+**Caminho feliz — ✅ verificado em 25/07/2026** contra o sandbox real da Asaas, após a chave de homologação ser configurada:
 
-- [ ] **Pendente:** rodar o caminho feliz com chave de sandbox da Asaas válida → confirmar `FounderInvite.usedAt`, `Plan.founderSlotsRemaining` decrementado e `Subscription.founderLockedUntil` = +12 meses
-- [ ] **Pendente:** confirmar que o upgrade dentro do período travado é bloqueado (depende de uma assinatura fundador real)
+- [x] `POST /billing/subscribe` com código válido → assinatura `ACTIVE` criada, `asaasSubscriptionId` presente
+- [x] `FounderInvite.usedAt` preenchido e `tenantId` apontando para o assinante
+- [x] `Plan.founderSlotsRemaining` decrementado (25 → 24)
+- [x] `Subscription.founderLocked = true` e `founderLockedUntil` exatamente **+12 meses**
+- [x] `Tenant.asaasCustomerId` gravado
+- [x] Upgrade dentro da trava → 403 "Plano fundador travado até 2027-07-25"
+- [x] Convite já usado deixa de validar → 409 `FOUNDER_INVITE_USED`
+- [x] Tenant com assinatura tentando assinar de novo → 400
+- [x] `founderSlotsRemaining` atualizado no endpoint público
+- [x] Vaga de fundador **restaurada para 25** ao fim do teste — as 25 são estoque comercial, não podem ser gastas em teste
 
 ### Arquivos alterados
 
@@ -232,7 +241,7 @@ Backend na 8787 + Vite, inspeção visual no navegador:
 - [x] **Estado de erro validado derrubando o backend:** a seção mostra "Não foi possível carregar os planos agora" e nenhum valor
 - [x] Dados de teste removidos; preços do banco conferidos intactos ao final
 
-- [ ] **Pendente:** comparação com a fatura real do Asaas (depende de chave de sandbox válida — mesma limitação registrada na L1)
+- [x] **Comparação com a Asaas verificada (25/07/2026):** assinatura do plano Fundador criada no sandbox com o mesmo R$ 197,00 exibido na Landing e na tela de planos
 
 ### Correção adicional: e-mail anunciava preço errado *para quem tinha desconto*
 
@@ -254,7 +263,7 @@ Ao acessar `/#planos` por âncora direta, o título e o subtítulo da seção fi
 
 ---
 
-## L4 — Dashboard com métricas falsas 🟠
+## L4 — Dashboard com métricas falsas — ✅ RESOLVIDA (24/07/2026)
 
 **Sintoma:** o cliente paga e vê "Laudos Gerados: 0" e "Horas Economizadas: 0h" permanentemente, mesmo após gerar dezenas de laudos. É o único `TODO` literal do repositório.
 
@@ -265,18 +274,48 @@ Ao acessar `/#planos` por âncora direta, o título e o subtítulo da seção fi
 
 ### Checklist
 
-- [ ] Decidir a fonte do total de laudos: reaproveitar `GET /api/analyses?page=1&limit=1` e ler o total da paginação **ou** criar um endpoint enxuto `GET /api/analyses/stats` (preferível — evita puxar payload de análise para exibir um contador)
-- [ ] Se optar por endpoint novo: implementar em `backend/src/controllers/analyzeController.js` com `count` por `tenantId` e `status: COMPLETED`, escopado pelo `req.tenantId` do JWT (nunca do body)
-- [ ] Substituir o `0` hardcoded em `Dashboard.jsx:66` pelo valor real
-- [ ] Resolver "Horas Economizadas": ou derivar de uma constante declarada e honesta (ex.: `laudosConcluídos × 2h`, com rodapé "estimativa"), ou **remover o tile**. Número inventado sem lastro em produto forense é pior que tile a menos
-- [ ] Adicionar skeleton/loading nos tiles em vez de piscar `0` durante o fetch
-- [ ] Conferir que a contagem respeita isolamento multi-tenant
+- [x] **Endpoint novo `GET /api/analyses/stats`** — `getAnalysisStats` em `backend/src/controllers/analyzeController.js`. Escolhido em vez do total da paginação de `listAnalyses`: aquela rota carrega registros só para descartar, e o dashboard precisa de recortes que ela não faz. São três `count`, nenhuma linha sai do banco
+- [x] Escopado por `req.tenantId` do JWT, nunca do body; rota registrada **antes** das rotas `:id` para que "stats" não seja lido como um id
+- [x] `0` hardcoded de `Dashboard.jsx` substituído pelo valor real
+- [x] **"Horas Economizadas" removido.** No lugar entrou **"Laudos Este Mês"**, que é dado real. Manter três tiles preserva o layout sem inventar número — num produto forense, um valor sem lastro é o pior tipo de métrica
+- [x] Skeleton pulsante nos tiles enquanto carrega (componente `StatCard`), em vez de piscar `0`. Aplicado também ao tile de créditos, que tinha o mesmo defeito
+- [x] Isolamento multi-tenant conferido (ver abaixo)
+- [x] Extra: `Laudos Gerados` mostra "N em processamento" como subtítulo quando há análises em curso
+- [x] Falha no fetch de stats não gera toast — os tiles ficam em carregamento e o resto do dashboard segue funcionando
+
+**Decisão registrada — o que conta como "laudo gerado":** apenas `status: COMPLETED`. Análise em `ERROR` ou `REFUNDED` não produziu laudo e não pode inflar o número que o cliente vê.
 
 ### Verificação
 
-- [ ] Gerar 2 laudos em um tenant novo → contador exibe 2
-- [ ] Logar em outro tenant → contador não vaza o total do primeiro
-- [ ] Análise em `ERROR`/`REFUNDED` não deve entrar na contagem de "gerados"
+Dois tenants com dados controlados no banco de desenvolvimento:
+
+- Tenant A — 9 análises: 3 `COMPLETED` este mês, 2 `COMPLETED` no mês passado, 1 `ERROR`, 1 `REFUNDED`, 2 `PROCESSING`
+- Tenant B — 7 `COMPLETED` este mês
+
+- [x] A → `{ completedTotal: 5, completedThisMonth: 3, processing: 2 }` — `ERROR` e `REFUNDED` fora do total, mês passado fora do contador mensal
+- [x] B → `{ completedTotal: 7, completedThisMonth: 7, processing: 0 }` — **nada vaza de A para B**
+- [x] Sem token → 401
+- [x] `/analyses/stats/status` não é confundido com um id de análise
+- [x] **Conferência visual no dashboard:** "Laudos Gerados 5" com "2 em processamento", "Laudos Este Mês 3" — batendo com a API
+- [x] Dados de teste removidos ao final
+
+### 🔧 Nota de ambiente: porta 8787 disputada pelo Cursor
+
+Durante o teste, requisições ao backend passaram a responder `"Not found."` e `"Method not allowed."` — mensagens que **não existem neste código**.
+
+Causa: o **Cursor mantém um servidor em `127.0.0.1:8787`**, a mesma porta que `frontend/vite.config.js` usa como alvo do proxy (`"/api": "http://localhost:8787"`). Como o bind do Cursor é mais específico que o do backend (`*:8787`), ele intercepta o tráfego de `localhost` e o backend fica inalcançável pelo proxy.
+
+Não é bug da aplicação e nada foi alterado por isso — o teste seguiu com o backend em 8799 e `VITE_API_BASE=http://localhost:8799`. **Mas afeta o desenvolvimento local de qualquer pessoa que rode o Cursor**: o `npm run dev` do frontend simplesmente não encontra o backend, com erro que não aponta para a causa.
+
+- [ ] **Sugestão:** trocar a porta padrão do backend (ex.: 8788) ou tornar o alvo do proxy configurável por env em `vite.config.js`
+
+### Arquivos alterados
+
+| Arquivo | Mudança |
+|---|---|
+| `backend/src/controllers/analyzeController.js` | `getAnalysisStats` |
+| `backend/src/routes/index.js` | `GET /analyses/stats`, antes das rotas `:id` |
+| `frontend/src/pages/Dashboard.jsx` | componente `StatCard` com skeleton, contadores reais, tile de horas substituído |
 
 ---
 
@@ -395,6 +434,43 @@ Ao acessar `/#planos` por âncora direta, o título e o subtítulo da seção fi
 
 ---
 
+---
+
+## 🔴 L10 — PIX é o padrão da UI mas depende de aprovação da conta Asaas
+
+**Descoberto em 25/07/2026**, ao rodar o ciclo completo contra o sandbox. Não estava no levantamento inicial.
+
+**Sintoma:** toda cobrança via PIX falha enquanto a conta Asaas não estiver aprovada.
+
+- Assinatura com PIX → `"A forma de pagamento não é permitida para assinaturas."`
+- Avulso com PIX → `"O Pix não está disponível no momento. Para utilizá-lo, sua conta precisa estar aprovada."`
+- `GET /myAccount/status` na conta de homologação: `commercialInfo`, `bankAccountInfo`, `documentation` e `general` todos **`PENDING`**
+
+**Não é defeito de código** — o backend repassa o erro da Asaas corretamente como 502. É condição da conta.
+
+**Por que é crítico mesmo assim:** `frontend/src/pages/Plans.jsx` inicializa `billingType` como **`"PIX"`**, e a lista `BILLING_TYPES` põe Pix em primeiro. Ou seja, **o caminho padrão de pagamento é justamente o que falha**. Se a conta de produção não estiver com Pix aprovado no dia do launch, o primeiro fundador que clicar em "Assinar" leva um erro genérico.
+
+Boleto e cartão funcionam: a assinatura de teste foi criada com `BOLETO` sem nenhum problema.
+
+### Checklist
+
+- [ ] Confirmar na conta **de produção** da Asaas se o Pix está aprovado (`GET /myAccount/status` → `general: APPROVED`)
+- [ ] Enquanto não estiver: mudar o padrão de `Plans.jsx` para `BOLETO` e ocultar Pix da lista, em vez de oferecer um meio que erra
+- [ ] Tratar o erro de Pix indisponível com mensagem específica ("Pix temporariamente indisponível, use boleto ou cartão") em vez do 502 genérico
+- [ ] Considerar expor os meios de pagamento disponíveis a partir do status da conta, em vez de fixá-los no frontend
+
+---
+
+## Nota — validação de CPF é feita pela Asaas, não pelo ForenseDoc
+
+Também observado em 25/07: o cadastro aceita CPF com dígitos verificadores inválidos, e a falha só aparece **no momento da assinatura**, como 502 vindo da Asaas (`"O CPF/CNPJ informado é inválido."`).
+
+O cliente descobre que digitou o CPF errado só quando tenta pagar — depois de criar conta, verificar e-mail e escolher plano.
+
+- [ ] Validar dígitos verificadores de CPF/CNPJ no `registerSchema` (`authController.js`) e no formulário de cadastro, falhando cedo em vez de no checkout
+
+---
+
 # Bloco 3 — Fase Final: Hardening & Launch
 
 > Corresponde a FL.1–FL.5 de `implementation-plan.md`. Nenhum item foi executado.
@@ -418,7 +494,7 @@ Ao acessar `/#planos` por âncora direta, o título e o subtítulo da seção fi
 - [ ] Rate limiting: brute force em `POST /auth/login` → 429 após 10 tentativas/15min
 - [ ] Cabeçalhos de segurança validados em securityheaders.com (Helmet configurado em `backend/server.js`)
 - [ ] Confirmar que o PDF **nunca** é salvo em disco — auditar `pdfService.js`, `ocrService.js` (o `pdftoppm` grava temporários: verificar se são apagados no `finally`)
-- [ ] Webhook Asaas com token inválido → 401 (`backend/src/controllers/webhookController.js`)
+- [x] Webhook Asaas: sem token → 401; token errado → 401; token correto → 200 (verificado 25/07/2026 com o `ASAAS_WEBHOOK_TOKEN` de homologação)
 - [ ] **`ASAAS_WEBHOOK_IPS` está vazio em `.env.example`** e `backend/src/middleware/webhookIpAllowlist.js` **falha aberto** por design. Preencher com os IPs oficiais do Asaas **antes** de aceitar dinheiro real
 - [ ] Revisar o fail-open dos rate limiters quando o Redis cai (`backend/src/utils/rateLimitStore.js`) — decidir conscientemente entre disponibilidade e proteção contra brute force, e registrar a decisão
 - [ ] Confirmar que nenhum endpoint aceita `tenantId` vindo do body (regra §2.2 do plano)
@@ -569,11 +645,19 @@ O gradiente é proposital: plano melhor = avulso mais barato, para que subir de 
 # Ordem de execução sugerida
 
 ```
-BLOQUEADORES COMERCIAIS  (destrava a receita)
-├── L1  ✅ Fluxo Fundador end-to-end (24/07/2026)
-├── L2  ✅ Aceite de convite de equipe (24/07/2026)
-├── L3  ✅ Preços da Landing dinâmicos (24/07/2026)
-└── L4  Métricas reais no Dashboard        ← último bloqueador comercial
+BLOQUEADORES COMERCIAIS  ✅ CONCLUÍDOS (24/07/2026)
+├── L1  ✅ Fluxo Fundador end-to-end
+├── L2  ✅ Aceite de convite de equipe
+├── L3  ✅ Preços da Landing dinâmicos
+└── L4  ✅ Métricas reais no Dashboard
+
+⚠️  BUG CRÍTICO DESCOBERTO FORA DO LEVANTAMENTO (corrigido na L2)
+└── Zod 4 removeu `.errors`: 9 catch travavam a requisição sem resposta
+    em registro, reset de senha, assinatura e aceite de convite
+
+⚠️  L10 — PIX indisponível até a conta Asaas ser aprovada (25/07/2026)
+└── e a UI usa PIX como padrão → caminho de pagamento padrão falha
+    NÃO é código: boleto e cartão funcionam. Decisão de conta/ops.
 
 HARDENING  (pré-requisito de produção)
 ├── FL.1  Segurança — com foco em tenant isolation e ASAAS_WEBHOOK_IPS
