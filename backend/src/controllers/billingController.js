@@ -104,7 +104,9 @@ export async function getPlans(_req, res) {
       where: { isActive: true },
       orderBy: { priceBrl: "asc" },
     });
-    return res.json({ plans });
+    // O preço do avulso vai junto para que a landing e o dashboard não
+    // precisem repetir o número — ele mora só aqui (L3).
+    return res.json({ plans, avulso: { priceBrl: AVULSO_PRICE_BRL } });
   } catch (error) {
     console.error("[Billing] Erro ao listar planos:", error);
     return res.status(500).json({ error: "Erro interno no servidor." });
@@ -267,7 +269,7 @@ export async function subscribe(req, res) {
 
     return res.status(201).json({ subscription });
   } catch (error) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.issues[0].message });
     if (error.name === "AsaasError") return res.status(502).json({ error: error.message });
     console.error("[Billing] Erro ao assinar plano:", error);
     return res.status(500).json({ error: "Erro interno no servidor." });
@@ -349,7 +351,7 @@ export async function purchaseAvulso(req, res) {
       },
     });
   } catch (error) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.issues[0].message });
     if (error.name === "AsaasError") return res.status(502).json({ error: error.message });
     console.error("[Billing] Erro ao comprar crédito avulso:", error);
     return res.status(500).json({ error: "Erro interno no servidor." });
@@ -456,7 +458,7 @@ export async function upgradeSubscription(req, res) {
 
     return res.json({ subscription: updated });
   } catch (error) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.issues[0].message });
     if (error.name === "AsaasError") return res.status(502).json({ error: error.message });
     console.error("[Billing] Erro ao fazer upgrade de plano:", error);
     return res.status(500).json({ error: "Erro interno no servidor." });

@@ -142,8 +142,11 @@ export const EMAIL_TEMPLATES = {
       heading: "Seus laudos do ciclo acabaram",
       bodyHtml:
         p("Você usou todos os laudos mensais do seu plano. Novas análises ficam bloqueadas até a renovação do ciclo.") +
-        p("Precisa continuar hoje? Um laudo avulso sai por R$ 79 e fica disponível na hora, sem validade.") +
-        button("Recarregar agora", frontendUrl("/dashboard/plans")),
+        // Sem preço fixo no corpo: quem recebe este aviso é assinante, e
+        // assinante paga o avulso com desconto (valor varia por plano e pelo
+        // limite do ciclo). O valor real aparece na tela de planos.
+        p("Precisa continuar hoje? Um laudo avulso fica disponível na hora, não expira, e como assinante você paga menos que o preço de balcão.") +
+        button("Ver meu preço e recarregar", frontendUrl("/dashboard/plans")),
     }),
   }),
 

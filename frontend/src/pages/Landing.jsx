@@ -1,15 +1,73 @@
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
-import { FileSearch, Clock, ShieldCheck, Zap, ChevronRight, CheckCircle2 } from "lucide-react";
+import { FileSearch, Clock, ShieldCheck, Zap, ChevronRight, CheckCircle2, Loader2 } from "lucide-react";
 import Header from "../components/Layout/Header";
+import { api } from "../lib/axios";
 
 gsap.registerPlugin(useGSAP, ScrollTrigger);
 
+/**
+ * Preços e limites vêm sempre de `GET /billing/plans` (L3).
+ *
+ * Aqui ficam apenas os textos de marketing, que não têm equivalente no banco:
+ * o público-alvo e os diferenciais qualitativos. Tudo que é número — preço,
+ * laudos/mês, usuários — é lido da API, porque o admin pode alterar em runtime
+ * via `PATCH /admin/plans/:id` e qualquer valor fixo aqui viraria propaganda
+ * enganosa na primeira edição.
+ */
+const PLAN_COPY = {
+  inicial: {
+    tagline: "Para quem está começando a periciar.",
+    features: ["Histórico ilimitado", "Laudo em PDF assinado", "Suporte padrão"],
+  },
+  profissional: {
+    tagline: "Para advogados independentes.",
+    features: ["Histórico ilimitado", "Laudo em PDF assinado", "Suporte prioritário"],
+  },
+  escritorio: {
+    tagline: "Para bancas em crescimento.",
+    features: ["Equipe com saldo compartilhado", "Histórico ilimitado", "Suporte prioritário"],
+  },
+  massa: {
+    tagline: "Para litígio de massa.",
+    features: ["Equipe com saldo compartilhado", "Volume alto de laudos", "Suporte dedicado"],
+  },
+};
+
+// Plano-âncora da tabela 3.2 do PRD — recebe o destaque visual.
+const HIGHLIGHT_SLUG = "profissional";
+
+function formatBRL(value) {
+  return Number(value).toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  });
+}
+
 export default function Landing() {
   const container = useRef(null);
+
+  const [plans, setPlans] = useState([]);
+  const [avulsoPrice, setAvulsoPrice] = useState(null);
+  const [pricingState, setPricingState] = useState("loading"); // loading | ready | error
+
+  useEffect(() => {
+    api
+      .get("/billing/plans")
+      .then(({ data }) => {
+        // O plano fundador nunca entra na vitrine pública: só é alcançável
+        // pelo link com código de convite (ver L1).
+        setPlans(data.plans.filter((p) => !p.isFounder));
+        setAvulsoPrice(data.avulso?.priceBrl ?? null);
+        setPricingState("ready");
+      })
+      .catch(() => setPricingState("error"));
+  }, []);
 
   useGSAP(() => {
     // Hero Animations
@@ -182,76 +240,118 @@ export default function Landing() {
             Pague pelo que usar com nossos créditos avulsos, ou assine um plano mensal para garantir análises recorrentes com desconto.
           </p>
 
-          <div className="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto fade-up">
-            {/* Plano Profissional */}
-            <div className="glass p-8 rounded-3xl border-surface-border flex flex-col text-left">
-              <div className="mb-8">
-                <h3 className="text-2xl font-bold mb-2">Profissional</h3>
-                <p className="text-zinc-400 text-sm">Para advogados independentes.</p>
-              </div>
-              <div className="mb-8 flex items-baseline gap-2">
-                <span className="text-5xl font-bold">R$ 147</span>
-                <span className="text-zinc-500">/mês</span>
-              </div>
-              <ul className="space-y-4 mb-8 flex-1">
-                {["1 Usuário", "10 Análises Mensais", "Histórico Ilimitado", "Suporte Padrão"].map((feat, i) => (
-                  <li key={i} className="flex items-center gap-3 text-zinc-300">
-                    <CheckCircle2 className="w-5 h-5 text-primary shrink-0" /> {feat}
-                  </li>
-                ))}
-              </ul>
-              <Link to="/register" className="w-full py-3 rounded-full border border-surface-border hover:bg-surface text-center font-medium transition-colors">
-                Assinar Plano
-              </Link>
+          {pricingState === "loading" && (
+            <div className="flex justify-center py-16 fade-up">
+              <Loader2 className="w-8 h-8 text-primary animate-spin" />
             </div>
+          )}
 
-            {/* Plano Fundador (Destaque) */}
-            <div className="glass p-8 rounded-3xl border-primary/50 bg-primary/5 relative flex flex-col text-left shadow-[0_0_30px_rgba(59,130,246,0.15)] transform md:-translate-y-4">
-              <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-primary text-white text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wider">
-                Recomendado
-              </div>
-              <div className="mb-8">
-                <h3 className="text-2xl font-bold mb-2 text-primary">Escritório</h3>
-                <p className="text-zinc-400 text-sm">Para bancas em crescimento.</p>
-              </div>
-              <div className="mb-8 flex items-baseline gap-2">
-                <span className="text-5xl font-bold">R$ 397</span>
-                <span className="text-zinc-500">/mês</span>
-              </div>
-              <ul className="space-y-4 mb-8 flex-1">
-                {["Até 3 Usuários", "30 Análises Mensais", "Suporte Prioritário"].map((feat, i) => (
-                  <li key={i} className="flex items-center gap-3 text-zinc-300">
-                    <CheckCircle2 className="w-5 h-5 text-primary shrink-0" /> {feat}
-                  </li>
-                ))}
-              </ul>
-              <Link to="/register" className="w-full py-3 rounded-full bg-primary hover:bg-blue-600 text-white text-center font-medium transition-colors shadow-lg shadow-primary/25">
-                Assinar Plano
+          {/* Se a API falhar, nenhum preço é exibido. Mostrar um valor de
+              reserva seria pior que não mostrar: um número errado na vitrine
+              vira promessa que o checkout não cumpre. */}
+          {pricingState === "error" && (
+            <div className="max-w-md mx-auto glass rounded-2xl border border-surface-border p-8 fade-up">
+              <p className="text-zinc-300 font-medium">Não foi possível carregar os planos agora.</p>
+              <p className="text-zinc-500 text-sm mt-2">
+                Crie sua conta para ver os valores atualizados — o cadastro é gratuito e inclui 3 laudos.
+              </p>
+              <Link
+                to="/register"
+                className="inline-block mt-6 px-6 py-3 rounded-full bg-primary hover:bg-blue-600 text-white font-medium transition-colors"
+              >
+                Criar conta grátis
               </Link>
             </div>
+          )}
 
-            {/* Avulso */}
-            <div className="glass p-8 rounded-3xl border-surface-border flex flex-col text-left">
-              <div className="mb-8">
-                <h3 className="text-2xl font-bold mb-2">Créditos Avulsos</h3>
-                <p className="text-zinc-400 text-sm">Sem compromisso mensal.</p>
-              </div>
-              <div className="mb-8 flex items-baseline gap-2">
-                <span className="text-5xl font-bold">R$ 29</span>
-                <span className="text-zinc-500">/laudo</span>
-              </div>
-              <ul className="space-y-4 mb-8 flex-1">
-                {["Acesso à plataforma", "Compre quando precisar", "Créditos não expiram", "Suporte Básico"].map((feat, i) => (
-                  <li key={i} className="flex items-center gap-3 text-zinc-300">
-                    <CheckCircle2 className="w-5 h-5 text-zinc-500 shrink-0" /> {feat}
-                  </li>
-                ))}
-              </ul>
-              <Link to="/register" className="w-full py-3 rounded-full border border-surface-border hover:bg-surface text-center font-medium transition-colors">
-                Comprar Créditos
-              </Link>
+          {pricingState === "ready" && (
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8 max-w-5xl mx-auto fade-up">
+              {plans.map((plan) => {
+                const copy = PLAN_COPY[plan.slug] || { tagline: "", features: [] };
+                const destaque = plan.slug === HIGHLIGHT_SLUG;
+
+                return (
+                  <div
+                    key={plan.id}
+                    className={
+                      destaque
+                        ? "glass p-8 rounded-3xl border-primary/50 bg-primary/5 relative flex flex-col text-left shadow-[0_0_30px_rgba(59,130,246,0.15)]"
+                        : "glass p-8 rounded-3xl border-surface-border flex flex-col text-left"
+                    }
+                  >
+                    {destaque && (
+                      <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-primary text-white text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wider whitespace-nowrap">
+                        Recomendado
+                      </div>
+                    )}
+                    <div className="mb-8">
+                      <h3 className={`text-2xl font-bold mb-2 ${destaque ? "text-primary" : ""}`}>{plan.name}</h3>
+                      <p className="text-zinc-400 text-sm">{copy.tagline}</p>
+                    </div>
+                    <div className="mb-8 flex items-baseline gap-2">
+                      <span className="text-5xl font-bold">{formatBRL(plan.priceBrl)}</span>
+                      <span className="text-zinc-500">/mês</span>
+                    </div>
+                    <ul className="space-y-4 mb-8 flex-1">
+                      {/* Os dois primeiros itens são números do banco: nunca
+                          divergem do que o checkout cobra. */}
+                      <li className="flex items-center gap-3 text-zinc-300">
+                        <CheckCircle2 className="w-5 h-5 text-primary shrink-0" />
+                        {plan.creditsMonthly} laudos por mês
+                      </li>
+                      <li className="flex items-center gap-3 text-zinc-300">
+                        <CheckCircle2 className="w-5 h-5 text-primary shrink-0" />
+                        {plan.maxUsers === 1 ? "1 usuário" : `Até ${plan.maxUsers} usuários`}
+                      </li>
+                      {copy.features.map((feat, i) => (
+                        <li key={i} className="flex items-center gap-3 text-zinc-300">
+                          <CheckCircle2 className="w-5 h-5 text-primary shrink-0" /> {feat}
+                        </li>
+                      ))}
+                    </ul>
+                    <Link
+                      to="/register"
+                      className={
+                        destaque
+                          ? "w-full py-3 rounded-full bg-primary hover:bg-blue-600 text-white text-center font-medium transition-colors shadow-lg shadow-primary/25"
+                          : "w-full py-3 rounded-full border border-surface-border hover:bg-surface text-center font-medium transition-colors"
+                      }
+                    >
+                      Assinar Plano
+                    </Link>
+                  </div>
+                );
+              })}
+
+              {avulsoPrice != null && (
+                <div className="glass p-8 rounded-3xl border-surface-border flex flex-col text-left">
+                  <div className="mb-8">
+                    <h3 className="text-2xl font-bold mb-2">Laudo Avulso</h3>
+                    <p className="text-zinc-400 text-sm">Sem compromisso mensal.</p>
+                  </div>
+                  <div className="mb-8 flex items-baseline gap-2">
+                    <span className="text-5xl font-bold">{formatBRL(avulsoPrice)}</span>
+                    <span className="text-zinc-500">/laudo</span>
+                  </div>
+                  <ul className="space-y-4 mb-8 flex-1">
+                    {[
+                      "Compre quando precisar",
+                      "O crédito não expira",
+                      "Assinantes pagam menos",
+                      "Acesso à plataforma",
+                    ].map((feat, i) => (
+                      <li key={i} className="flex items-center gap-3 text-zinc-300">
+                        <CheckCircle2 className="w-5 h-5 text-zinc-500 shrink-0" /> {feat}
+                      </li>
+                    ))}
+                  </ul>
+                  <Link to="/register" className="w-full py-3 rounded-full border border-surface-border hover:bg-surface text-center font-medium transition-colors">
+                    Comprar Laudo
+                  </Link>
+                </div>
+              )}
             </div>
-          </div>
+          )}
         </div>
       </section>
 

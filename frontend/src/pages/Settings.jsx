@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { User, Lock, Users, Loader2, Trash2, UserPlus } from "lucide-react";
+import { User, Lock, Users, Loader2, Trash2, UserPlus, Clock, Send, X } from "lucide-react";
 import toast from "react-hot-toast";
 import { api } from "../lib/axios";
 import { useAuthStore } from "../store/authStore";
@@ -42,25 +42,33 @@ export default function Settings() {
   const [changingPassword, setChangingPassword] = useState(false);
 
   const [members, setMembers] = useState([]);
+  // Convites pendentes ocupam vaga do plano — sem exibi-los, o titular não
+  // entende por que o limite foi atingido com menos membros que o permitido.
+  const [pendingInvites, setPendingInvites] = useState([]);
+  const [seats, setSeats] = useState(null);
   const [loadingMembers, setLoadingMembers] = useState(true);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviting, setInviting] = useState(false);
   const [removingId, setRemovingId] = useState(null);
+  const [busyInviteId, setBusyInviteId] = useState(null);
 
   const isOwner = user?.role === "OWNER";
 
+  const loadTeam = async () => {
+    try {
+      const { data } = await api.get("/tenant/members");
+      setMembers(data.members);
+      setPendingInvites(data.pendingInvites || []);
+      setSeats(data.seats || null);
+    } catch {
+      toast.error("Erro ao carregar membros da equipe.");
+    } finally {
+      setLoadingMembers(false);
+    }
+  };
+
   useEffect(() => {
-    const loadMembers = async () => {
-      try {
-        const { data } = await api.get("/tenant/members");
-        setMembers(data.members);
-      } catch {
-        toast.error("Erro ao carregar membros da equipe.");
-      } finally {
-        setLoadingMembers(false);
-      }
-    };
-    loadMembers();
+    loadTeam();
   }, []);
 
   const handleSaveProfile = async (e) => {
@@ -99,10 +107,40 @@ export default function Settings() {
       await api.post("/tenant/invite", { email: inviteEmail });
       toast.success("Convite enviado com sucesso.");
       setInviteEmail("");
+      await loadTeam();
     } catch (error) {
       toast.error(error.response?.data?.error || "Erro ao enviar convite.");
     } finally {
       setInviting(false);
+    }
+  };
+
+  // Reenviar é o mesmo POST /tenant/invite: o backend detecta o convite
+  // pendente, renova o token e NÃO consome outra vaga (tenantController.js).
+  const handleResendInvite = async (email) => {
+    setBusyInviteId(email);
+    try {
+      await api.post("/tenant/invite", { email });
+      toast.success(`Convite reenviado para ${email}.`);
+      await loadTeam();
+    } catch (error) {
+      toast.error(error.response?.data?.error || "Erro ao reenviar convite.");
+    } finally {
+      setBusyInviteId(null);
+    }
+  };
+
+  const handleRevokeInvite = async (invite) => {
+    if (!window.confirm(`Revogar o convite de ${invite.email}? A vaga do plano será liberada.`)) return;
+    setBusyInviteId(invite.id);
+    try {
+      await api.delete(`/tenant/invites/${invite.id}`);
+      toast.success("Convite revogado.");
+      await loadTeam();
+    } catch (error) {
+      toast.error(error.response?.data?.error || "Erro ao revogar convite.");
+    } finally {
+      setBusyInviteId(null);
     }
   };
 
@@ -111,8 +149,8 @@ export default function Settings() {
     setRemovingId(memberId);
     try {
       await api.delete(`/tenant/members/${memberId}`);
-      setMembers((prev) => prev.filter((m) => m.id !== memberId));
       toast.success("Membro removido.");
+      await loadTeam();
     } catch (error) {
       toast.error(error.response?.data?.error || "Erro ao remover membro.");
     } finally {
@@ -183,11 +221,23 @@ export default function Settings() {
       </SectionCard>
 
       <SectionCard icon={Users} title="Equipe">
+        {seats && (
+          <div className="flex items-center justify-between mb-4 pb-3 border-b border-surface-border/50">
+            <span className="text-xs text-zinc-500">Vagas do plano</span>
+            <span className={`text-xs font-medium ${seats.total >= seats.maxUsers ? "text-amber-500" : "text-zinc-400"}`}>
+              {seats.total} de {seats.maxUsers} ocupada{seats.maxUsers > 1 ? "s" : ""}
+              {seats.pendingInvites > 0 && ` · ${seats.pendingInvites} aguardando aceite`}
+            </span>
+          </div>
+        )}
+
         {loadingMembers ? (
           <div className="flex justify-center p-6"><Loader2 className="w-6 h-6 animate-spin text-zinc-500" /></div>
         ) : (
           <div className="space-y-3 mb-6">
-            {members.map((member) => (
+            {/* Remoção é soft-delete (`active: false`): sem este filtro, o
+                ex-membro continuaria listado como se ainda tivesse acesso. */}
+            {members.filter((m) => m.active !== false).map((member) => (
               <div key={member.id} className="flex items-center justify-between py-2.5 border-b border-surface-border/50 last:border-0">
                 <div>
                   <div className="text-sm font-medium text-zinc-200">{member.name} {member.id === user?.id && <span className="text-xs text-zinc-500">(você)</span>}</div>
@@ -205,6 +255,64 @@ export default function Settings() {
                 )}
               </div>
             ))}
+
+            {pendingInvites.length > 0 && (
+              <div className="pt-3">
+                <p className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-2">
+                  Convites aguardando aceite
+                </p>
+                {pendingInvites.map((invite) => (
+                  <div
+                    key={invite.id}
+                    className="flex items-center justify-between py-2.5 border-b border-surface-border/50 last:border-0"
+                  >
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium text-zinc-300 flex items-center gap-2">
+                        <Clock className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                        <span className="truncate">{invite.email}</span>
+                      </div>
+                      <div className="text-xs text-zinc-500 mt-0.5">
+                        Expira em {new Date(invite.expiresAt).toLocaleString("pt-BR", {
+                          day: "2-digit",
+                          month: "2-digit",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}{" "}
+                        · ocupa uma vaga do plano
+                      </div>
+                    </div>
+                    {isOwner && (
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          onClick={() => handleResendInvite(invite.email)}
+                          disabled={busyInviteId === invite.email || busyInviteId === invite.id}
+                          className="text-zinc-400 hover:text-primary hover:bg-primary/10 p-2 rounded-lg transition-colors disabled:opacity-50"
+                          title="Reenviar convite (renova o prazo de 72h)"
+                        >
+                          {busyInviteId === invite.email ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Send className="w-4 h-4" />
+                          )}
+                        </button>
+                        <button
+                          onClick={() => handleRevokeInvite(invite)}
+                          disabled={busyInviteId === invite.email || busyInviteId === invite.id}
+                          className="text-red-400 hover:bg-red-400/10 p-2 rounded-lg transition-colors disabled:opacity-50"
+                          title="Revogar convite e liberar a vaga"
+                        >
+                          {busyInviteId === invite.id ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <X className="w-4 h-4" />
+                          )}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

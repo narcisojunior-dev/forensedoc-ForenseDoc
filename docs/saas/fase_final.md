@@ -34,8 +34,8 @@ O que resta são **lacunas de integração** — pontas soltas entre backend pro
 | # | Lacuna | Severidade | Bloqueia launch? |
 |---|---|---|---|
 | L1 | ~~Fluxo Fundador inalcançável~~ | ✅ Feita | — |
-| L2 | Aceite de convite de equipe sem UI | 🔴 Crítica | **Sim** (planos multi-usuário) |
-| L3 | Preços da Landing divergem do banco | 🟠 Alta | **Sim** (risco jurídico/comercial) |
+| L2 | ~~Aceite de convite de equipe sem UI~~ | ✅ Feita | — |
+| L3 | ~~Preços da Landing divergem do banco~~ | ✅ Feita | — |
 | L4 | Dashboard com métricas falsas (`0` hardcoded) | 🟠 Alta | Não, mas visível ao cliente |
 | L5 | Histórico de pagamentos não exposto | 🟡 Média | Não |
 | L6 | 3 templates de e-mail ausentes (bomba-relógio) | 🟡 Média | Não |
@@ -115,7 +115,7 @@ Executada contra o Postgres de desenvolvimento (`forensedoc_dev`), backend na po
 
 ---
 
-## L2 — Aceite de convite de equipe sem UI 🔴
+## L2 — Aceite de convite de equipe — ✅ RESOLVIDA (24/07/2026)
 
 **Sintoma:** o titular envia o convite, o colega recebe o e-mail com o botão "Aceitar convite", clica — e não existe página para receber esse link. Os planos Escritório (3 usuários) e Massa (5 usuários) vendem multi-usuário que não fecha.
 
@@ -128,53 +128,129 @@ Executada contra o Postgres de desenvolvimento (`forensedoc_dev`), backend na po
 
 ### Checklist
 
-- [ ] Criar `frontend/src/pages/AcceptInvite.jsx` (rota pública `/invite/:token` em `frontend/src/App.jsx`)
-- [ ] Ao montar, chamar `GET /api/tenant/invite/:token` e exibir nome do escritório + quem convidou
-- [ ] Tratar os estados de token: válido, expirado (72h), já utilizado, inexistente — cada um com mensagem e CTA próprios
-- [ ] Renderizar formulário de criação de conta do membro (nome, senha, OAB) e submeter em `POST /api/tenant/invite/:token/accept`
-- [ ] Após aceite, autenticar e redirecionar para `/dashboard` (reaproveitar o fluxo de `authStore.login`, não duplicar lógica de token)
-- [ ] Tratar o 4xx de "assentos esgotados" — pode ocorrer entre o envio e o aceite se o titular preencher as vagas nesse intervalo
-- [ ] Conferir se `inviteUrl` gerado no backend aponta para a rota nova (verificar a construção da URL em `tenantController.js` / `frontendUrl()` em `templates.js`)
-- [ ] Em `Settings.jsx`, listar convites **pendentes** com opção de reenviar/revogar (hoje só lista membros ativos)
+- [x] Criado `frontend/src/pages/AcceptInvite.jsx` (rota pública `/invite/:token` em `frontend/src/App.jsx`)
+- [x] Ao montar, chama `GET /api/tenant/invite/:token` e exibe escritório + quem convidou. **Precisou de backend:** `getInviteInfo` não devolvia o nome de quem convidou — adicionado `invitedByName` (via relação `invitedBy`) e `expiresAt`
+- [x] Estados do token tratados com CTA próprio: `INVITE_NOT_FOUND`, `INVITE_EXPIRED`, `INVITE_ALREADY_ACCEPTED` e `EMAIL_ALREADY_REGISTERED` (os dois últimos levam ao login). **Precisou de backend:** as recusas vinham só como texto — adicionados `code`s em `getInviteInfo` e `acceptInvite`
+- [x] Formulário de criação da conta — **nome e senha apenas**, com confirmação de senha. Divergência do checklist original: `acceptInviteSchema` não aceita OAB, e o e-mail é somente-leitura por vir do convite (deixá-lo editável permitiria resgatar convite alheio)
+- [x] Após o aceite, autentica via `authStore.login` e vai para `/dashboard`. `acceptInvite` responde 201 **sem token**, mas a conta nasce com `emailVerified: true`, então o login normal serve — sem duplicar lógica de sessão
+- [x] `PLAN_USER_LIMIT_REACHED` no aceite troca a tela inteira em vez de sugerir nova tentativa: se o titular preencheu as vagas no intervalo, insistir não resolve
+- [x] `inviteUrl` conferido — `tenantController.js` monta `${FRONTEND_URL}/invite/${inviteToken}`, que casa exatamente com a rota criada (validado no log do mailer)
+- [x] `Settings.jsx` lista convites **pendentes** com reenviar e revogar, mais contador de vagas do plano
+
+**Itens que o levantamento não previu e foram necessários:**
+
+- [x] **Não havia como revogar convite.** Um convite enviado por engano travava um assento por 72h — num plano de 3 usuários, um terço da capacidade parada. Criado `DELETE /api/tenant/invites/:id` (`revokeInvite`, OWNER, com checagem de tenant) + `auditLog` da ação
+- [x] **`GET /tenant/members` não expunha convites pendentes nem vagas.** Sem isso o titular não entendia por que atingia o limite com menos membros que o plano permite. Passou a devolver `pendingInvites` e `seats { maxUsers, users, pendingInvites, total }`
+- [x] **A lista de equipe mostrava ex-membros.** `removeMember` é soft-delete (`active: false`), mas `getMembers` não filtrava nem devolvia o campo — o removido continuava listado como se tivesse acesso. Campo `active` incluído e filtrado na UI
 
 ### Verificação
 
-- [ ] Convidar um e-mail → capturar o link no log do mailer (dev) → aceitar em janela anônima → confirmar `User` criado com `role: MEMBER` e `tenantId` correto
-- [ ] Confirmar que o novo membro consome créditos do **mesmo** `CreditBalance` do escritório
-- [ ] Confirmar que o membro **não** acessa rotas de OWNER (billing, remoção de membros → 403)
-- [ ] Estourar o limite de assentos do plano → aceite deve falhar com mensagem clara
+Executada contra o Postgres de desenvolvimento, backend na porta 8799, com um escritório no plano **Escritório** (3 usuários):
+
+- [x] Convite enviado → link capturado no log do mailer → `GET` do token retorna escritório, quem convidou e expiração
+- [x] Token inexistente → 404 `INVITE_NOT_FOUND`
+- [x] Aceite criou `User` com `role: MEMBER`, `emailVerified: true`, `active: true` e **mesmo `tenantId`** do titular
+- [x] `CreditBalance` do tenant continua **único** — o membro consome o saldo do escritório (confirmado: saldo de 3 visível para o membro)
+- [x] Token reutilizado → 400 `INVITE_ALREADY_ACCEPTED`; `GET` do mesmo token idem
+- [x] Login do membro funciona **sem** passar por verificação de e-mail (o convite já comprova posse)
+- [x] Membro recebe 403 em: convidar, comprar crédito, remover membro e revogar convite
+- [x] Limite de vagas: 3ª vaga aceita, 4ª bloqueada com `PLAN_USER_LIMIT_REACHED` detalhando 2 na equipe + 1 pendente
+- [x] Reenvio renova o convite **sem** consumir vaga adicional (total seguiu 3)
+- [x] Revogação liberou a vaga (total 3 → 2) e permitiu novo convite
+- [x] **Isolamento entre escritórios:** outro tenant tentando revogar convite alheio → 404, convite intacto, e não enxerga membros nem pendentes do vizinho
+- [x] Dados de teste removidos do banco ao final
+
+### 🐛 Bug pré-existente encontrado e corrigido: validação Zod travava a requisição
+
+Descoberto ao testar senha curta no aceite: **a requisição não respondia nada** — sem 400, sem 500, sem timeout do servidor.
+
+**Causa:** o projeto usa **Zod 4.4.3**, que removeu a propriedade `.errors` do `ZodError` (só existe `.issues`). Nove `catch` faziam `error.errors[0].message`, o que lança `TypeError: Cannot read properties of undefined` **dentro do próprio catch**. Como o Express 4 não captura rejeição de handler async, a resposta nunca era enviada e o cliente ficava pendurado.
+
+**Alcance — todos os fluxos com validação Zod nesses controllers:**
+
+| Arquivo | Ocorrências | Fluxos afetados |
+|---|---|---|
+| `backend/src/controllers/authController.js` | 5 | registro, reset de senha, troca de senha, atualização de perfil |
+| `backend/src/controllers/billingController.js` | 3 | assinar plano, comprar avulso, upgrade |
+| `backend/src/controllers/tenantController.js` | 1 | aceite de convite |
+
+- [x] Corrigido para `error.issues[0].message` nos 9 pontos — `adminController.js` e `adminMetricsController.js` já usavam a forma correta, o que explica por que o painel admin nunca manifestou o problema
+- [x] Verificado após a correção: senha curta → 400 "Senha deve ter no mínimo 8 caracteres"; nome curto → 400 "Nome muito curto"
+
+> **Vale um teste de regressão** cobrindo pelo menos um caminho de validação por controller. Um `TypeError` dentro de `catch` não aparece em log de erro HTTP — só como requisição que nunca volta.
+
+### Arquivos alterados
+
+| Arquivo | Mudança |
+|---|---|
+| `frontend/src/pages/AcceptInvite.jsx` | **novo** — tela de aceite |
+| `frontend/src/App.jsx` | rota pública `/invite/:token` |
+| `frontend/src/pages/Settings.jsx` | convites pendentes, reenviar, revogar, contador de vagas, filtro de inativos |
+| `backend/src/controllers/tenantController.js` | `invitedByName`/`expiresAt` e `code`s de erro; `getMembers` com pendentes e vagas; `revokeInvite`; correção Zod |
+| `backend/src/routes/tenantRoutes.js` | `DELETE /invites/:id` |
+| `backend/src/controllers/authController.js` | correção Zod (5×) |
+| `backend/src/controllers/billingController.js` | correção Zod (3×) |
 
 ---
 
-## L3 — Preços da Landing divergem do banco 🟠
+## L3 — Preços da Landing — ✅ RESOLVIDA (24/07/2026)
 
 **Sintoma:** a página pública anuncia preços que não existem. Cliente entra por R$ 147 e encontra R$ 197 no checkout — risco de reclamação e de discussão sobre publicidade enganosa.
 
-**Evidência:**
+**Evidência — o desvio era maior que o levantado.** Os cards não só tinham preço errado: os *rótulos* estavam trocados e faltavam dois planos.
 
-| Landing (`frontend/src/pages/Landing.jsx`) | Banco (`backend/prisma/seed.js`) |
-|---|---|
-| `:193` — R$ 147 | `inicial` = R$ 197,00 |
-| `:218` — R$ 397 | `profissional` = R$ 297,00 |
-| `:240` — R$ 29 | avulso = R$ 79,00 (`billingController.js` `AVULSO_PRICE_BRL`) |
-| — | `escritorio` R$ 597, `massa` R$ 1.990 (não anunciados) |
+| Card da Landing | O que anunciava | Realidade no banco |
+|---|---|---|
+| "Profissional" | R$ 147 · 10 análises · 1 usuário | Profissional = **R$ 297 · 40 laudos** |
+| "Escritório" (destaque) | R$ 397 · 30 análises · 3 usuários | Escritório = **R$ 597 · 120 laudos** |
+| "Créditos Avulsos" | R$ 29/laudo | Avulso = **R$ 79** |
+| — | não anunciados | **Inicial** (R$ 197) e **Massa** (R$ 1.990) |
 
-Agrava: `PATCH /api/admin/plans/:id` permite editar preços em runtime, então qualquer valor hardcoded volta a divergir na primeira alteração.
+Agravante: `PATCH /api/admin/plans/:id` edita preços em runtime, então qualquer valor fixo volta a divergir na primeira alteração.
 
 ### Checklist
 
-- [ ] Consumir `GET /api/billing/plans` (endpoint **público**, sem auth — confirmado em `backend/src/routes/index.js`) em `Landing.jsx`
-- [ ] Renderizar os cards a partir da resposta: nome, `priceBrl`, `monthlyCredits`, `maxUsers`
-- [ ] Filtrar `isFounder` da vitrine pública (o plano fundador só aparece via link com código — ver L1)
-- [ ] Definir a fonte da verdade das **features** de cada plano: adicionar coluna `features` (JSON) em `Plan` **ou** manter um mapa `slug → features[]` no frontend. Decidir e documentar; misturar preço dinâmico com feature estática é aceitável, preço estático não é
-- [ ] Exibir o preço do avulso a partir do backend — hoje `AVULSO_PRICE_BRL = 79.0` está hardcoded em `backend/src/controllers/billingController.js:29`; expor via `GET /billing/plans` ou config
-- [ ] Estado de loading/erro: se a API falhar, **não** renderizar preço algum (melhor omitir que mentir)
-- [ ] Revisar a mesma divergência em qualquer copy de e-mail (`backend/src/emails/templates.js:147` cita "R$ 79" — conferir se bate)
+- [x] `Landing.jsx` consome `GET /api/billing/plans` (público, sem auth)
+- [x] Cards renderizados da resposta: `name`, `priceBrl`, `creditsMonthly`, `maxUsers` — os quatro planos ativos, na ordem de preço
+- [x] `isFounder` filtrado da vitrine pública (só alcançável pelo link com código — L1)
+- [x] **Fonte da verdade das features decidida: mapa `slug → copy` no frontend** (`PLAN_COPY` em `Landing.jsx`), contendo apenas texto de marketing qualitativo (público-alvo, tipo de suporte). Todo número — preço, laudos/mês, usuários — vem da API e é renderizado como item da lista, então **não existe número no frontend que possa divergir do checkout**. Coluna JSON em `Plan` foi descartada: obrigaria o admin a editar copy de marketing numa tabela sem editor adequado, e features não são dado de cobrança
+- [x] Preço do avulso exposto pelo backend — `getPlans` passou a devolver `avulso: { priceBrl }`, lendo o `AVULSO_PRICE_BRL` que já existia em `billingController.js`. O número mora em um lugar só
+- [x] Estado de erro: API fora do ar → **nenhum preço é renderizado**; card explicativo com CTA de cadastro. Estado de loading com spinner
+- [x] Copy de e-mail revisada — ver abaixo, era pior que desatualizada
 
 ### Verificação
 
-- [ ] Alterar um preço via `PATCH /admin/plans/:id` → recarregar a Landing → valor novo aparece sem redeploy
-- [ ] Comparar lado a lado Landing × `/dashboard/plans` × fatura do Asaas — os três devem exibir o mesmo número
+Backend na 8787 + Vite, inspeção visual no navegador:
+
+- [x] `GET /billing/plans` responde **sem token** com os 5 planos + `avulso.priceBrl`
+- [x] Landing renderiza Inicial R$ 197/15, Profissional R$ 297/40, Escritório R$ 597/120/3, Massa R$ 1.990/500/5, Avulso R$ 79 — **todos batendo com o banco**
+- [x] Plano Fundador ausente da vitrine
+- [x] Destaque "Recomendado" no Profissional (plano-âncora da tabela 3.2 do PRD), não mais no Escritório
+- [x] **Preço alterado no admin aparece na Landing sem redeploy:** `PATCH /admin/plans/:id` mudando Profissional para R$ 349/50 laudos → endpoint público refletiu imediatamente → valores restaurados depois
+- [x] Layout com 5 cards: 3+2 no desktop, coluna única no mobile (420 px), sem overflow horizontal
+- [x] Console do navegador sem erros
+- [x] **Estado de erro validado derrubando o backend:** a seção mostra "Não foi possível carregar os planos agora" e nenhum valor
+- [x] Dados de teste removidos; preços do banco conferidos intactos ao final
+
+- [ ] **Pendente:** comparação com a fatura real do Asaas (depende de chave de sandbox válida — mesma limitação registrada na L1)
+
+### Correção adicional: e-mail anunciava preço errado *para quem tinha desconto*
+
+`CREDITS_EXHAUSTED` (`backend/src/emails/templates.js`) dizia *"Um laudo avulso sai por R$ 79"*. Esse e-mail vai justamente ao assinante que esgotou a franquia — ou seja, exatamente quem passou a pagar o **preço com desconto** (R$ 19–49 conforme o plano, ver B2). O texto não estava só desatualizado: **superfaturava o próprio cliente**.
+
+- [x] Número removido do corpo; a mensagem agora diz que o assinante paga menos que o preço de balcão e o CTA leva à tela de planos, onde `resolveAvulsoPricing` mostra o valor real daquele tenant
+
+### Observação (fora do escopo, não corrigida)
+
+Ao acessar `/#planos` por âncora direta, o título e o subtítulo da seção ficam translúcidos: o `ScrollTrigger` do GSAP não dispara o `fade-up` quando a página salta direto para a seção. É **pré-existente** (a classe já estava no HTML original) e puramente cosmético — registrado aqui para não se perder, mas não tocado por não pertencer à L3.
+
+### Arquivos alterados
+
+| Arquivo | Mudança |
+|---|---|
+| `frontend/src/pages/Landing.jsx` | preços/limites da API, `PLAN_COPY`, estados de loading e erro, destaque por slug |
+| `backend/src/controllers/billingController.js` | `getPlans` devolve `avulso: { priceBrl }` |
+| `backend/src/emails/templates.js` | `CREDITS_EXHAUSTED` sem preço fixo |
 
 ---
 
@@ -495,9 +571,9 @@ O gradiente é proposital: plano melhor = avulso mais barato, para que subir de 
 ```
 BLOQUEADORES COMERCIAIS  (destrava a receita)
 ├── L1  ✅ Fluxo Fundador end-to-end (24/07/2026)
-├── L2  Aceite de convite de equipe        ← sem isto Escritório/Massa não fecham
-├── L3  Preços da Landing dinâmicos        ← risco jurídico enquanto durar
-└── L4  Métricas reais no Dashboard
+├── L2  ✅ Aceite de convite de equipe (24/07/2026)
+├── L3  ✅ Preços da Landing dinâmicos (24/07/2026)
+└── L4  Métricas reais no Dashboard        ← último bloqueador comercial
 
 HARDENING  (pré-requisito de produção)
 ├── FL.1  Segurança — com foco em tenant isolation e ASAAS_WEBHOOK_IPS

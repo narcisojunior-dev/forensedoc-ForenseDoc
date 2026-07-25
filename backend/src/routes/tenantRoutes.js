@@ -1,5 +1,12 @@
 import { Router } from "express";
-import { getMembers, inviteMember, getInviteInfo, acceptInvite, removeMember } from "../controllers/tenantController.js";
+import {
+  getMembers,
+  inviteMember,
+  getInviteInfo,
+  acceptInvite,
+  removeMember,
+  revokeInvite,
+} from "../controllers/tenantController.js";
 import { requireAuth, requireRole } from "../middleware/auth.js";
 import { createLimiter } from "../utils/rateLimitStore.js";
 import { tenantLimiter } from "../middleware/rateLimiters.js";
@@ -21,5 +28,7 @@ router.use(requireAuth, tenantLimiter); // Demais rotas de tenant exigem autenti
 router.get("/members", getMembers);
 router.post("/invite", inviteMember);
 router.delete("/members/:id", requireRole("OWNER"), removeMember);
+// Antes de `/members/:id` não há conflito: o prefixo `/invites/` é distinto.
+router.delete("/invites/:id", requireRole("OWNER"), revokeInvite);
 
 export default router;

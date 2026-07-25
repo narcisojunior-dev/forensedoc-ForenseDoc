@@ -138,7 +138,7 @@ export async function register(req, res) {
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors[0].message });
+      return res.status(400).json({ error: error.issues[0].message });
     }
     console.error("[Auth] Erro no registro:", error);
     return res.status(500).json({ error: "Erro interno no servidor." });
@@ -339,7 +339,7 @@ export async function forgotPassword(req, res) {
     return res.json({ message: "Se o e-mail estiver cadastrado, você receberá instruções para redefinir sua senha." });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors[0].message });
+      return res.status(400).json({ error: error.issues[0].message });
     }
     console.error("[Auth] Erro no forgot-password:", error);
     return res.status(500).json({ error: "Erro interno no servidor." });
@@ -377,7 +377,7 @@ export async function resetPassword(req, res) {
     return res.json({ message: "Senha redefinida com sucesso." });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors[0].message });
+      return res.status(400).json({ error: error.issues[0].message });
     }
     console.error("[Auth] Erro no reset-password:", error);
     return res.status(500).json({ error: "Erro interno no servidor." });
@@ -460,7 +460,7 @@ export async function updateProfile(req, res) {
 
     return res.json({ user });
   } catch (error) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.issues[0].message });
     console.error("[Auth] Erro ao atualizar perfil:", error);
     return res.status(500).json({ error: "Erro interno no servidor." });
   }
@@ -496,7 +496,7 @@ export async function changePassword(req, res) {
 
     return res.json({ message: "Senha alterada com sucesso." });
   } catch (error) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.issues[0].message });
     console.error("[Auth] Erro ao trocar senha:", error);
     return res.status(500).json({ error: "Erro interno no servidor." });
   }

@@ -157,17 +157,33 @@ export async function getInviteInfo(req, res) {
     const { token } = req.params;
     const invite = await prisma.tenantInvite.findUnique({
       where: { tokenHash: hashToken(token) },
-      include: { tenant: { select: { name: true } } },
+      include: {
+        tenant: { select: { name: true } },
+        // Quem convidou aparece na tela de aceite pelo mesmo motivo que aparece
+        // no e-mail: o convidado precisa reconhecer de quem veio antes de criar
+        // uma senha.
+        invitedBy: { select: { name: true } },
+      },
     });
 
-    if (!invite) return res.status(404).json({ error: "Convite não encontrado." });
-    if (invite.acceptedAt) return res.status(400).json({ error: "Convite já foi aceito." });
-    if (new Date() > invite.expiresAt) return res.status(400).json({ error: "Convite expirado." });
+    // Os `code` acompanham cada recusa para a tela distinguir os casos sem
+    // depender do texto da mensagem.
+    if (!invite) {
+      return res.status(404).json({ error: "Convite não encontrado.", code: "INVITE_NOT_FOUND" });
+    }
+    if (invite.acceptedAt) {
+      return res.status(400).json({ error: "Convite já foi aceito.", code: "INVITE_ALREADY_ACCEPTED" });
+    }
+    if (new Date() > invite.expiresAt) {
+      return res.status(400).json({ error: "Convite expirado.", code: "INVITE_EXPIRED" });
+    }
 
     return res.json({
       email: invite.email,
       role: invite.role,
       tenantName: invite.tenant.name,
+      invitedByName: invite.invitedBy?.name || null,
+      expiresAt: invite.expiresAt,
     });
   } catch (error) {
     console.error("[Tenant] Erro ao buscar convite:", error);
@@ -182,12 +198,20 @@ export async function acceptInvite(req, res) {
 
     const invite = await prisma.tenantInvite.findUnique({ where: { tokenHash: hashToken(token) } });
 
-    if (!invite) return res.status(404).json({ error: "Convite não encontrado." });
-    if (invite.acceptedAt) return res.status(400).json({ error: "Convite já foi aceito." });
-    if (new Date() > invite.expiresAt) return res.status(400).json({ error: "Convite expirado." });
+    if (!invite) {
+      return res.status(404).json({ error: "Convite não encontrado.", code: "INVITE_NOT_FOUND" });
+    }
+    if (invite.acceptedAt) {
+      return res.status(400).json({ error: "Convite já foi aceito.", code: "INVITE_ALREADY_ACCEPTED" });
+    }
+    if (new Date() > invite.expiresAt) {
+      return res.status(400).json({ error: "Convite expirado.", code: "INVITE_EXPIRED" });
+    }
 
     const existing = await prisma.user.findUnique({ where: { email: invite.email } });
-    if (existing) return res.status(400).json({ error: "E-mail já cadastrado." });
+    if (existing) {
+      return res.status(400).json({ error: "E-mail já cadastrado.", code: "EMAIL_ALREADY_REGISTERED" });
+    }
 
     const passwordHash = await bcrypt.hash(password, 12);
 
@@ -239,7 +263,7 @@ export async function acceptInvite(req, res) {
 
     return res.status(201).json({ message: "Convite aceito. Você já pode fazer login." });
   } catch (error) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    if (error instanceof z.ZodError) return res.status(400).json({ error: error.issues[0].message });
     console.error("[Tenant] Erro ao aceitar convite:", error);
     return res.status(500).json({ error: "Erro interno no servidor." });
   }
@@ -287,20 +311,87 @@ export async function removeMember(req, res) {
 
 export async function getMembers(req, res) {
   try {
-    const users = await prisma.user.findMany({
-      where: { tenantId: req.tenantId },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        role: true,
-        lastLoginAt: true,
+    const tenantId = req.tenantId;
+
+    // Convites pendentes vão junto porque ocupam vaga do plano
+    // (`countOccupiedSeats`): sem vê-los, o titular não entende por que atingiu
+    // o limite com menos membros do que o plano permite.
+    const [users, pendingInvites, maxUsers] = await Promise.all([
+      prisma.user.findMany({
+        where: { tenantId },
+        select: { id: true, name: true, email: true, role: true, lastLoginAt: true, active: true },
+      }),
+      prisma.tenantInvite.findMany({
+        where: { tenantId, acceptedAt: null, expiresAt: { gt: new Date() } },
+        select: { id: true, email: true, expiresAt: true, createdAt: true },
+        orderBy: { createdAt: "desc" },
+      }),
+      getMaxUsers(tenantId),
+    ]);
+
+    const activeUsers = users.filter((u) => u.active);
+
+    return res.json({
+      members: users,
+      pendingInvites,
+      seats: {
+        maxUsers,
+        users: activeUsers.length,
+        pendingInvites: pendingInvites.length,
+        total: activeUsers.length + pendingInvites.length,
       },
     });
-
-    return res.json({ members: users });
   } catch (error) {
     console.error("[Tenant] Erro ao listar membros:", error);
+    return res.status(500).json({ error: "Erro interno no servidor." });
+  }
+}
+
+/**
+ * Revoga um convite pendente, liberando a vaga que ele ocupava.
+ *
+ * Sem isto, um convite enviado por engano trava um assento do plano por 72h —
+ * e num plano de 3 usuários isso é um terço da capacidade parada.
+ */
+export async function revokeInvite(req, res) {
+  try {
+    const { id } = req.params;
+    const tenantId = req.tenantId;
+
+    if (req.auth.role !== "OWNER") {
+      return res.status(403).json({ error: "Apenas o proprietário pode revogar convites." });
+    }
+
+    const invite = await prisma.tenantInvite.findUnique({ where: { id } });
+    // A checagem de tenant é o que impede revogar convite de outro escritório
+    // com um id adivinhado.
+    if (!invite || invite.tenantId !== tenantId) {
+      return res.status(404).json({ error: "Convite não encontrado.", code: "INVITE_NOT_FOUND" });
+    }
+    if (invite.acceptedAt) {
+      return res.status(400).json({
+        error: "Este convite já foi aceito. Remova o membro pela lista de equipe.",
+        code: "INVITE_ALREADY_ACCEPTED",
+      });
+    }
+
+    await prisma.$transaction([
+      prisma.tenantInvite.delete({ where: { id } }),
+      prisma.auditLog.create({
+        data: {
+          tenantId,
+          userId: req.auth.userId,
+          action: "member_invite_revoked",
+          ipAddress: req.ip,
+          userAgent: req.headers["user-agent"],
+          metadata: { email: invite.email },
+        },
+      }),
+    ]);
+
+    return res.json({ message: "Convite revogado." });
+  } catch (error) {
+    console.error("[Tenant] Erro ao revogar convite:", error);
     return res.status(500).json({ error: "Erro interno no servidor." });
   }
 }
