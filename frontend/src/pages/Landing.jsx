@@ -219,7 +219,7 @@ export default function Landing() {
                 <span className="text-zinc-500">/mês</span>
               </div>
               <ul className="space-y-4 mb-8 flex-1">
-                {["Até 3 Usuários", "30 Análises Mensais", "R$ 13 por laudo excedente", "Suporte Prioritário"].map((feat, i) => (
+                {["Até 3 Usuários", "30 Análises Mensais", "Suporte Prioritário"].map((feat, i) => (
                   <li key={i} className="flex items-center gap-3 text-zinc-300">
                     <CheckCircle2 className="w-5 h-5 text-primary shrink-0" /> {feat}
                   </li>

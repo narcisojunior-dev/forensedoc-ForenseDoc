@@ -104,7 +104,7 @@ async function handlePaymentReceived(payment) {
       });
     }
   } else {
-    // AVULSO ou EXCESS
+    // AVULSO
     await creditService.addAvulsoCredit(tenant.id, updated.id);
 
     await notify({

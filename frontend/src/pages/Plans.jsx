@@ -1,8 +1,20 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, Loader2, Zap, Receipt } from "lucide-react";
+import { CheckCircle2, Loader2, Zap, Receipt, Award, AlertTriangle } from "lucide-react";
 import toast from "react-hot-toast";
 import { api } from "../lib/axios";
 import { useAuthStore } from "../store/authStore";
+import { getFounderCode, clearFounderCode } from "../utils/founderInvite";
+
+// Mensagens dos erros que o backend devolve ao validar o convite de fundador.
+// Cada caso tem tratamento próprio: "inválido" pede conferência do link,
+// "usado" e "esgotado" são definitivos e o card não deve aparecer.
+const FOUNDER_ERRORS = {
+  FOUNDER_INVITE_INVALID: "Este código de convite de fundador não é válido. Confira o link recebido.",
+  FOUNDER_INVITE_USED: "Este convite de fundador já foi utilizado.",
+  FOUNDER_SLOTS_EXHAUSTED: "As 25 vagas de fundador se esgotaram.",
+  FOUNDER_PLAN_UNAVAILABLE: "O plano de fundador não está disponível no momento.",
+  FOUNDER_INVITE_RATE_LIMITED: "Muitas tentativas de validação. Aguarde alguns minutos.",
+};
 
 const BILLING_TYPES = [
   { value: "PIX", label: "Pix" },
@@ -23,6 +35,9 @@ function formatBRL(value) {
 export default function Plans() {
   const [plans, setPlans] = useState([]);
   const [subscription, setSubscription] = useState(null);
+  // Preço do avulso já resolvido pelo backend para este tenant (com ou sem o
+  // desconto de assinante). Nunca calcular no frontend: quem cobra é o backend.
+  const [avulso, setAvulso] = useState(null);
   const [pendingInvoice, setPendingInvoice] = useState(null);
   const [loading, setLoading] = useState(true);
   const [billingType, setBillingType] = useState("PIX");
@@ -30,6 +45,11 @@ export default function Plans() {
   const [busyPlanId, setBusyPlanId] = useState(null);
   const [busyAvulso, setBusyAvulso] = useState(false);
   const [busyCancel, setBusyCancel] = useState(false);
+  // Convite de fundador: `founder` só é preenchido depois que o backend
+  // confirma o código. `founderError` guarda o motivo da recusa, para explicar
+  // ao convidado em vez de simplesmente não mostrar o plano.
+  const [founder, setFounder] = useState(null);
+  const [founderError, setFounderError] = useState(null);
 
   const fetchAll = async () => {
     setLoading(true);
@@ -38,8 +58,11 @@ export default function Plans() {
         api.get("/billing/plans"),
         api.get("/billing/subscription"),
       ]);
+      // O plano fundador nunca entra na vitrine geral — só aparece pelo card
+      // dedicado, e apenas para quem chegou com um código válido.
       setPlans(plansRes.data.plans.filter((p) => !p.isFounder));
       setSubscription(subRes.data.subscription);
+      setAvulso(subRes.data.avulso);
 
       try {
         const invoiceRes = await api.get("/billing/subscription/invoice");
@@ -54,19 +77,57 @@ export default function Plans() {
     }
   };
 
+  // Valida o código antes de qualquer submit: descobrir que o convite é
+  // inválido só na hora de assinar já teria criado o cliente na Asaas.
+  const checkFounderCode = async () => {
+    const code = getFounderCode();
+    if (!code) return;
+
+    try {
+      const { data } = await api.get(`/billing/founder-invite/${encodeURIComponent(code)}`);
+      setFounder(data);
+      setFounderError(null);
+    } catch (error) {
+      const apiCode = error.response?.data?.code;
+      setFounder(null);
+      setFounderError(FOUNDER_ERRORS[apiCode] || error.response?.data?.error || "Não foi possível validar o convite de fundador.");
+      // Código queimado ou vagas esgotadas não voltam a valer: descarta para
+      // não reexibir o aviso a cada visita da sessão.
+      if (apiCode === "FOUNDER_INVITE_USED" || apiCode === "FOUNDER_SLOTS_EXHAUSTED") {
+        clearFounderCode();
+      }
+    }
+  };
+
   useEffect(() => {
     fetchAll();
+    checkFounderCode();
   }, []);
 
-  const handleSubscribe = async (plan) => {
+  const handleSubscribe = async (plan, { isFounderPlan = false } = {}) => {
     setBusyPlanId(plan.id);
     try {
-      await api.post("/billing/subscribe", { planId: plan.id, billingType, isAnnual });
+      const payload = { planId: plan.id, billingType, isAnnual };
+      // O backend exige o código para qualquer plano `isFounder` e rejeita a
+      // assinatura sem ele (billingController.js).
+      if (isFounderPlan) payload.founderInviteCode = founder.code;
+
+      await api.post("/billing/subscribe", payload);
       toast.success("Assinatura criada! Finalize o pagamento para ativar os créditos.");
+
+      if (isFounderPlan) {
+        // Convite consumido: não deve reaparecer nas próximas telas.
+        clearFounderCode();
+        setFounder(null);
+      }
+
       await fetchAll();
       await useAuthStore.getState().fetchBalance();
     } catch (error) {
       toast.error(error.response?.data?.error || "Erro ao assinar plano.");
+      // Se o convite caiu entre a validação e o submit (outro convidado tomou
+      // a última vaga), revalida para a tela refletir o estado real.
+      if (isFounderPlan) await checkFounderCode();
     } finally {
       setBusyPlanId(null);
     }
@@ -103,7 +164,10 @@ export default function Plans() {
     setBusyAvulso(true);
     try {
       const { data } = await api.post("/billing/avulso", { billingType });
-      toast.success("Cobrança gerada! Finalize o pagamento para receber o crédito.");
+      // O valor entra na mensagem porque o preço do avulso varia com o plano e
+      // com o limite do ciclo — o cliente precisa ver quanto foi cobrado.
+      const valor = data.pricing ? formatBRL(data.pricing.amountBrl) : "";
+      toast.success(`Cobrança de ${valor} gerada! Finalize o pagamento para receber o crédito.`);
       if (data.invoiceUrl) window.open(data.invoiceUrl, "_blank");
       await fetchAll();
     } catch (error) {
@@ -123,6 +187,70 @@ export default function Plans() {
         <h1 className="text-2xl font-bold text-foreground">Planos & Créditos</h1>
         <p className="text-zinc-400">Escolha uma assinatura mensal ou compre créditos avulsos.</p>
       </div>
+
+      {/* Convite recusado: explica o motivo em vez de simplesmente omitir o
+          plano, senão o convidado acha que o link está quebrado. */}
+      {founderError && (
+        <div className="glass rounded-2xl border border-amber-500/30 bg-amber-500/5 p-5 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+          <div>
+            <div className="font-bold text-foreground text-sm">Convite de fundador</div>
+            <p className="text-sm text-zinc-400 mt-0.5">{founderError}</p>
+            <p className="text-xs text-zinc-500 mt-2">
+              Os planos abaixo seguem disponíveis normalmente.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {founder && (
+        <div className="glass rounded-2xl border-2 border-amber-500/40 bg-amber-500/[0.04] p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <Award className="w-5 h-5 text-amber-500" />
+            <span className="text-xs font-bold uppercase tracking-wider text-amber-500">
+              Convite de fundador
+            </span>
+            <span className="text-xs text-zinc-500 font-mono ml-auto">{founder.code}</span>
+          </div>
+
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+            <div>
+              <div className="text-xl font-bold text-foreground">{founder.plan.name}</div>
+              <div className="text-3xl font-bold text-amber-500 mt-1">
+                {formatBRL(founder.plan.priceBrl)}
+                <span className="text-sm text-zinc-500 font-normal">/mês</span>
+              </div>
+              <div className="text-sm text-zinc-400 mt-2">
+                {founder.plan.creditsMonthly} laudos/mês · preço travado por 12 meses
+              </div>
+              <div className="text-xs text-amber-500/80 mt-1">
+                {founder.plan.founderSlotsRemaining} de {founder.plan.founderSlotsTotal} vagas restantes
+              </div>
+            </div>
+
+            <div className="shrink-0">
+              {subscription ? (
+                // O backend recusa `subscribe` quando já existe assinatura, e o
+                // upgrade não aceita código de fundador. Dizer isso é melhor que
+                // oferecer um botão que vai falhar.
+                <p className="text-sm text-zinc-500 max-w-xs">
+                  Este convite vale apenas para contas sem assinatura. Cancele a
+                  assinatura atual ou fale com o suporte para usá-lo.
+                </p>
+              ) : (
+                <button
+                  onClick={() => handleSubscribe(founder.plan, { isFounderPlan: true })}
+                  disabled={busyPlanId === founder.plan.id}
+                  className="inline-flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 text-zinc-950 px-6 py-3 rounded-lg font-bold transition-colors disabled:opacity-50"
+                >
+                  {busyPlanId === founder.plan.id && <Loader2 className="w-4 h-4 animate-spin" />}
+                  Assinar como fundador
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {subscription && (
         <div className="glass rounded-2xl border border-surface-border p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -212,9 +340,8 @@ export default function Plans() {
               <div className="text-sm text-zinc-400 mb-4">
                 {plan.creditsMonthly} laudos/mês · {plan.maxUsers} usuário{plan.maxUsers > 1 ? "s" : ""}
               </div>
-              <div className="text-xs text-zinc-500 mb-6 flex-1">
-                Excedente: {formatBRL(plan.excessPriceBrl)}/laudo
-              </div>
+              {/* Espaçador: mantém os botões alinhados na base dos cards. */}
+              <div className="mb-6 flex-1" />
               <button
                 onClick={() => (subscription && subscription.status !== "CANCELLED" ? handleUpgrade(plan) : handleSubscribe(plan))}
                 disabled={isCurrent || busy}
@@ -246,8 +373,26 @@ export default function Plans() {
             <Zap className="w-5 h-5 text-accent" />
           </div>
           <div>
-            <div className="font-bold text-foreground">Crédito avulso — {formatBRL(79)}</div>
-            <div className="text-xs text-zinc-500">1 laudo, sem assinatura, sem validade de expiração.</div>
+            <div className="font-bold text-foreground flex items-center gap-2 flex-wrap">
+              <span>Crédito avulso — {formatBRL(avulso ? avulso.price : 79)}</span>
+              {avulso?.discounted && (
+                <>
+                  <span className="text-sm font-normal text-zinc-500 line-through">{formatBRL(avulso.fullPrice)}</span>
+                  <span className="text-[11px] font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full">
+                    Preço de assinante
+                  </span>
+                </>
+              )}
+            </div>
+            <div className="text-xs text-zinc-500">
+              1 laudo, sem validade de expiração.
+              {avulso?.discounted && (
+                <> Restam {avulso.remaining} com desconto neste ciclo; depois volta a {formatBRL(avulso.fullPrice)}.</>
+              )}
+              {avulso && !avulso.discounted && avulso.limit > 0 && (
+                <> Você já usou {avulso.used} de {avulso.limit} com desconto neste ciclo — o benefício volta na renovação.</>
+              )}
+            </div>
           </div>
         </div>
         <button

@@ -135,7 +135,12 @@ const updatePlanSchema = z
     priceBrl: z.number({ error: "Preço inválido." }).nonnegative("Preço não pode ser negativo.").optional(),
     creditsMonthly: z.number({ error: "Créditos inválidos." }).int().nonnegative().optional(),
     maxUsers: z.number({ error: "Limite de usuários inválido." }).int().min(1, "O plano deve permitir ao menos 1 usuário.").optional(),
-    excessPriceBrl: z.number().nonnegative().nullable().optional(),
+    // Preço do avulso para quem já assina o plano. null desliga o desconto:
+    // o assinante volta a pagar o preço cheio.
+    avulsoPriceBrl: z.number({ error: "Preço do avulso inválido." }).nonnegative("Preço do avulso não pode ser negativo.").nullable().optional(),
+    // Quantos avulsos com desconto por ciclo. 0 desliga o benefício mantendo o
+    // preço cadastrado para quando o limite voltar a subir.
+    avulsoDiscountLimit: z.number({ error: "Limite de avulsos inválido." }).int().nonnegative("O limite não pode ser negativo.").optional(),
     isActive: z.boolean().optional(),
     founderSlotsRemaining: z.number().int().nonnegative().nullable().optional(),
   })

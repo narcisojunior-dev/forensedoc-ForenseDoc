@@ -1,5 +1,11 @@
 import { Routes, Route } from "react-router-dom";
 import { Toaster } from "react-hot-toast";
+import { captureFounderCode } from "./utils/founderInvite.js";
+
+// Guarda o `?founder=` da URL antes de qualquer roteamento: o link do convite
+// aponta para uma rota protegida e o convidado deslogado passa pelo login,
+// que não preserva a query string.
+captureFounderCode();
 
 // Rotas Públicas
 import Landing from "./pages/Landing.jsx";

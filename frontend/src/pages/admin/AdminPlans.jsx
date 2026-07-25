@@ -10,6 +10,9 @@ function PlanRow({ plan, onSaved }) {
     priceBrl: Number(plan.priceBrl),
     creditsMonthly: plan.creditsMonthly,
     maxUsers: plan.maxUsers,
+    // Campo vazio = sem desconto de avulso para este plano.
+    avulsoPriceBrl: plan.avulsoPriceBrl == null ? "" : Number(plan.avulsoPriceBrl),
+    avulsoDiscountLimit: plan.avulsoDiscountLimit,
     isActive: plan.isActive,
   });
 
@@ -20,6 +23,8 @@ function PlanRow({ plan, onSaved }) {
         priceBrl: Number(form.priceBrl),
         creditsMonthly: Number(form.creditsMonthly),
         maxUsers: Number(form.maxUsers),
+        avulsoPriceBrl: form.avulsoPriceBrl === "" ? null : Number(form.avulsoPriceBrl),
+        avulsoDiscountLimit: Number(form.avulsoDiscountLimit),
         isActive: form.isActive,
       });
       toast.success(`Plano ${data.plan.name} atualizado.`);
@@ -46,6 +51,18 @@ function PlanRow({ plan, onSaved }) {
         <td className={`${cell} text-right`}>R$ {Number(plan.priceBrl).toFixed(2)}</td>
         <td className={`${cell} text-right`}>{plan.creditsMonthly}</td>
         <td className={`${cell} text-right`}>{plan.maxUsers}</td>
+        <td className={`${cell} text-right`}>
+          {plan.avulsoPriceBrl == null ? (
+            <span className="text-zinc-600">—</span>
+          ) : (
+            <span className="text-foreground">R$ {Number(plan.avulsoPriceBrl).toFixed(2)}</span>
+          )}
+        </td>
+        <td className={`${cell} text-right`}>
+          <span className={plan.avulsoDiscountLimit > 0 ? "text-zinc-400" : "text-zinc-600"}>
+            {plan.avulsoDiscountLimit}
+          </span>
+        </td>
         <td className={`${cell} text-center`}>
           <span className={plan.isActive ? "text-emerald-400" : "text-zinc-500"}>
             {plan.isActive ? "Ativo" : "Inativo"}
@@ -74,6 +91,27 @@ function PlanRow({ plan, onSaved }) {
       </td>
       <td className={`${cell} text-right`}>
         <input type="number" className={input} value={form.maxUsers} onChange={(e) => setForm({ ...form, maxUsers: e.target.value })} />
+      </td>
+      <td className={`${cell} text-right`}>
+        <input
+          type="number"
+          step="0.01"
+          placeholder="sem desconto"
+          title="Preço do laudo avulso para quem já assina este plano. Vazio = paga o preço cheio."
+          className={input}
+          value={form.avulsoPriceBrl}
+          onChange={(e) => setForm({ ...form, avulsoPriceBrl: e.target.value })}
+        />
+      </td>
+      <td className={`${cell} text-right`}>
+        <input
+          type="number"
+          min="0"
+          title="Quantos avulsos com desconto o assinante pode comprar por ciclo. 0 desliga o benefício."
+          className={input}
+          value={form.avulsoDiscountLimit}
+          onChange={(e) => setForm({ ...form, avulsoDiscountLimit: e.target.value })}
+        />
       </td>
       <td className={`${cell} text-center`}>
         <input type="checkbox" checked={form.isActive} onChange={(e) => setForm({ ...form, isActive: e.target.checked })} />
@@ -119,6 +157,12 @@ export default function AdminPlans() {
                 <th className="px-4 py-3 font-medium text-zinc-400 text-right">Preço/mês</th>
                 <th className="px-4 py-3 font-medium text-zinc-400 text-right">Créditos</th>
                 <th className="px-4 py-3 font-medium text-zinc-400 text-right">Usuários</th>
+                <th className="px-4 py-3 font-medium text-zinc-400 text-right" title="Preço do laudo avulso para quem já assina este plano">
+                  Avulso assinante
+                </th>
+                <th className="px-4 py-3 font-medium text-zinc-400 text-right" title="Quantos avulsos com desconto por ciclo de faturamento">
+                  Limite/ciclo
+                </th>
                 <th className="px-4 py-3 font-medium text-zinc-400 text-center">Status</th>
                 <th className="px-4 py-3 font-medium text-zinc-400 text-right">Assinantes</th>
                 <th className="px-4 py-3"></th>

@@ -53,7 +53,6 @@ enum AnalysisStatus {
 enum PaymentType {
   SUBSCRIPTION
   AVULSO
-  EXCESS
 }
 
 enum PaymentStatus {
@@ -83,16 +82,16 @@ enum NotificationType {
 // ─────────────────────────────────────────────
 
 model Tenant {
-  id           String       @id @default(uuid())
-  name         String
-  cpfCnpj      String       @unique
-  oabNumber    String?
-  oabState     String?      @db.Char(2)
-  status       TenantStatus @default(TRIAL)
-  referralCode String       @unique @default(cuid())
-  asaasCustomerId String?   // ID do cliente no Asaas
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  id              String       @id @default(uuid())
+  name            String
+  cpfCnpj         String       @unique
+  oabNumber       String?
+  oabState        String?      @db.Char(2)
+  status          TenantStatus @default(TRIAL)
+  referralCode    String       @unique @default(cuid())
+  asaasCustomerId String? // ID do cliente no Asaas
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
 
   users         User[]
   subscription  Subscription?
@@ -105,8 +104,8 @@ model Tenant {
   invites       TenantInvite[]
 
   // Programa de indicação
-  referredBy       String?  // referralCode de quem indicou
-  referralBonuses  Int      @default(0) // meses gratuitos já ganhos
+  referredBy      String? // referralCode de quem indicou
+  referralBonuses Int     @default(0) // meses gratuitos já ganhos
 
   @@map("tenants")
 }
@@ -116,29 +115,29 @@ model Tenant {
 // ─────────────────────────────────────────────
 
 model User {
-  id            String    @id @default(uuid())
-  tenantId      String
-  email         String    @unique
-  name          String
-  passwordHash  String
-  role          UserRole  @default(MEMBER)
-  oabNumber     String?
-  emailVerified Boolean   @default(false)
-  isPlatformAdmin Boolean @default(false)
-  active        Boolean   @default(true)
-  lastLoginAt   DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id              String    @id @default(uuid())
+  tenantId        String
+  email           String    @unique
+  name            String
+  passwordHash    String
+  role            UserRole  @default(MEMBER)
+  oabNumber       String?
+  emailVerified   Boolean   @default(false)
+  isPlatformAdmin Boolean   @default(false)
+  active          Boolean   @default(true)
+  lastLoginAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
-  tenant            Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  analyses          Analysis[]
-  creditTx          CreditTransaction[]
-  notifications     Notification[]
-  refreshTokens     RefreshToken[]
+  tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  analyses           Analysis[]
+  creditTx           CreditTransaction[]
+  notifications      Notification[]
+  refreshTokens      RefreshToken[]
   emailVerifications EmailVerification[]
-  passwordResets    PasswordReset[]
-  auditLogs         AuditLog[]
-  sentInvites       TenantInvite[]
+  passwordResets     PasswordReset[]
+  auditLogs          AuditLog[]
+  sentInvites        TenantInvite[]
 
   @@index([tenantId])
   @@map("users")
@@ -163,12 +162,12 @@ model RefreshToken {
 }
 
 model EmailVerification {
-  id        String   @id @default(uuid())
+  id        String    @id @default(uuid())
   userId    String
-  tokenHash String   @unique // SHA-256 do token de verificação
+  tokenHash String    @unique // SHA-256 do token de verificação
   expiresAt DateTime
   usedAt    DateTime?
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -215,17 +214,21 @@ model TenantInvite {
 // ─────────────────────────────────────────────
 
 model Plan {
-  id                    String  @id @default(uuid())
-  name                  String  @unique
-  slug                  String  @unique // 'inicial', 'profissional', 'escritorio', 'massa', 'fundador'
-  priceBrl              Decimal @db.Decimal(10, 2)
+  id                    String   @id @default(uuid())
+  name                  String   @unique
+  slug                  String   @unique // 'inicial', 'profissional', 'escritorio', 'massa', 'fundador'
+  priceBrl              Decimal  @db.Decimal(10, 2)
   creditsMonthly        Int
-  maxUsers              Int     @default(1)
-  isActive              Boolean @default(true)
-  isFounder             Boolean @default(false)
+  maxUsers              Int      @default(1)
+  isActive              Boolean  @default(true)
+  isFounder             Boolean  @default(false)
   founderSlotsTotal     Int?
   founderSlotsRemaining Int?
-  excessPriceBrl        Decimal? @db.Decimal(10, 2) // preço do excedente por laudo
+  // Laudo avulso com desconto para quem já assina este plano. null = sem
+  // desconto (paga o preço cheio). O limite é por ciclo de faturamento e
+  // zera junto com a renovação.
+  avulsoPriceBrl        Decimal? @db.Decimal(10, 2)
+  avulsoDiscountLimit   Int      @default(1)
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 
@@ -241,8 +244,8 @@ model Plan {
 model FounderInvite {
   id        String    @id @default(uuid())
   code      String    @unique
-  email     String?   // e-mail para quem o convite foi enviado (opcional)
-  tenantId  String?   // preenchido quando o convite é aceito
+  email     String? // e-mail para quem o convite foi enviado (opcional)
+  tenantId  String? // preenchido quando o convite é aceito
   usedAt    DateTime?
   createdAt DateTime  @default(now())
 
@@ -264,7 +267,7 @@ model Subscription {
   isAnnual            Boolean            @default(false)
   founderLocked       Boolean            @default(false) // plano fundador travado por 12 meses
   founderLockedUntil  DateTime?
-  emergencyGrantedAt  DateTime?          // última vez que créditos de emergência foram concedidos
+  emergencyGrantedAt  DateTime? // última vez que créditos de emergência foram concedidos
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
 
@@ -280,15 +283,15 @@ model Subscription {
 // ─────────────────────────────────────────────
 
 model CreditBalance {
-  id               String   @id @default(uuid())
-  tenantId         String   @unique
-  creditsMonthly   Int      @default(0)   // expira na renovação do ciclo
-  creditsAvulso    Int      @default(0)   // sem validade — persiste indefinidamente
-  creditsEmergency Int      @default(0)   // expira ao regularizar o pagamento
-  creditsManual    Int      @default(0)   // concedidos pelo admin
+  id               String    @id @default(uuid())
+  tenantId         String    @unique
+  creditsMonthly   Int       @default(0) // expira na renovação do ciclo
+  creditsAvulso    Int       @default(0) // sem validade — persiste indefinidamente
+  creditsEmergency Int       @default(0) // expira ao regularizar o pagamento
+  creditsManual    Int       @default(0) // concedidos pelo admin
   cycleStart       DateTime?
   cycleEnd         DateTime?
-  updatedAt        DateTime @updatedAt
+  updatedAt        DateTime  @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
@@ -304,9 +307,9 @@ model CreditTransaction {
   tenantId   String
   userId     String?
   type       CreditTransactionType
-  amount     Int                   // positivo = entrada, negativo = saída
-  creditType String                // 'monthly', 'avulso', 'emergency', 'manual'
-  source     String                // 'subscription_renewal', 'avulso_purchase', 'payment_failure', 'admin', 'analysis', 'refund'
+  amount     Int // positivo = entrada, negativo = saída
+  creditType String // 'monthly', 'avulso', 'emergency', 'manual'
+  source     String // 'subscription_renewal', 'avulso_purchase', 'payment_failure', 'admin', 'analysis', 'refund'
   // NÃO pode ser @unique: uma análise que falha gera duas transações — o
   // SPEND e o REFUND correspondente. Com a restrição de unicidade o estorno
   // quebrava e o cliente perdia o crédito de toda análise com erro.
@@ -331,15 +334,15 @@ model Analysis {
   id                    String         @id @default(uuid())
   tenantId              String
   userId                String
-  filenameHash          String         // hash SHA-256 do nome do arquivo (não do conteúdo)
+  filenameHash          String // hash SHA-256 do nome do arquivo (não do conteúdo)
   status                AnalysisStatus @default(PROCESSING)
-  result                Json?          // laudo estruturado (JSONB) — sem dados binários do PDF
+  result                Json? // laudo estruturado (JSONB) — sem dados binários do PDF
   processingStartedAt   DateTime?
   processingCompletedAt DateTime?
   createdAt             DateTime       @default(now())
 
-  tenant            Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user              User                @relation(fields: [userId], references: [id])
+  tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user               User                @relation(fields: [userId], references: [id])
   // Uma análise tem o gasto e, se falhar, também o estorno.
   creditTransactions CreditTransaction[]
 
@@ -358,7 +361,11 @@ model Payment {
   type             PaymentType
   status           PaymentStatus @default(PENDING)
   asaasPaymentId   String?       @unique // idempotência — nunca processar 2x
-  asaasBillingType String?       // 'PIX', 'BOLETO', 'CREDIT_CARD'
+  asaasBillingType String? // 'PIX', 'BOLETO', 'CREDIT_CARD'
+  // Marca a compra que consumiu uma vaga do desconto de assinante no ciclo.
+  // Guardado explicitamente em vez de inferido do valor: o preço do plano muda
+  // com o tempo e a contagem do limite não pode depender disso.
+  avulsoDiscounted Boolean       @default(false)
   dueDate          DateTime?
   paidAt           DateTime?
   createdAt        DateTime      @default(now())
@@ -375,15 +382,15 @@ model Payment {
 // ─────────────────────────────────────────────
 
 model Notification {
-  id       String           @id @default(uuid())
-  tenantId String
-  userId   String?          // null = para todos do tenant
-  type     NotificationType
-  title    String
-  body     String
-  read     Boolean          @default(false)
-  readAt   DateTime?
-  createdAt DateTime        @default(now())
+  id        String           @id @default(uuid())
+  tenantId  String
+  userId    String? // null = para todos do tenant
+  type      NotificationType
+  title     String
+  body      String
+  read      Boolean          @default(false)
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   user   User?  @relation(fields: [userId], references: [id])
@@ -400,10 +407,10 @@ model AuditLog {
   id        String   @id @default(uuid())
   tenantId  String?
   userId    String?
-  action    String   // 'login', 'logout', 'register', 'analysis_started', 'credit_spent', 'payment_received', 'admin_credit_added', etc.
+  action    String // 'login', 'logout', 'register', 'analysis_started', 'credit_spent', 'payment_received', 'admin_credit_added', etc.
   ipAddress String?
   userAgent String?
-  metadata  Json?    // dados adicionais do evento
+  metadata  Json? // dados adicionais do evento
   createdAt DateTime @default(now())
 
   tenant Tenant? @relation(fields: [tenantId], references: [id])

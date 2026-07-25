@@ -3,6 +3,7 @@ import { Loader2, Copy, Check, Ticket, Plus } from "lucide-react";
 import toast from "react-hot-toast";
 import { api } from "../../lib/axios";
 import { cn } from "../../utils/cn";
+import { buildFounderLink } from "../../utils/founderInvite";
 
 function formatDate(value) {
   if (!value) return "—";
@@ -67,13 +68,16 @@ export default function AdminFounders() {
     }
   };
 
+  // Copia o link completo, não o código solto: o convidado abre e cai direto
+  // no card de fundador já validado, sem digitar nada.
   const copyCode = async (code) => {
     try {
-      await navigator.clipboard.writeText(code);
+      await navigator.clipboard.writeText(buildFounderLink(code));
       setCopiedCode(code);
+      toast.success("Link do convite copiado.");
       setTimeout(() => setCopiedCode(null), 2000);
     } catch {
-      toast.error("Não foi possível copiar. Selecione o código manualmente.");
+      toast.error("Não foi possível copiar. Selecione o link manualmente.");
     }
   };
 
@@ -131,8 +135,9 @@ export default function AdminFounders() {
         </div>
 
         <p className="text-xs text-zinc-500">
-          O código é entregue ao convidado, que o informa na assinatura do plano Fundador. Cada
-          código vale uma vez e trava o preço por 12 meses.
+          Envie ao convidado o <strong>link</strong> gerado abaixo (clique no código para copiá-lo):
+          ele abre direto no plano Fundador já validado. Cada código vale uma vez e trava o preço
+          por 12 meses. O convite só pode ser usado por conta sem assinatura.
         </p>
       </form>
 
@@ -168,7 +173,7 @@ export default function AdminFounders() {
                         onClick={() => copyCode(invite.code)}
                         disabled={!!invite.usedAt}
                         className="flex items-center gap-2 font-mono text-foreground hover:text-primary disabled:hover:text-foreground disabled:cursor-default transition-colors"
-                        title={invite.usedAt ? "Convite já utilizado" : "Copiar código"}
+                        title={invite.usedAt ? "Convite já utilizado" : "Copiar link do convite"}
                       >
                         {invite.code}
                         {!invite.usedAt &&
@@ -178,6 +183,11 @@ export default function AdminFounders() {
                             <Copy className="w-3.5 h-3.5 opacity-50" />
                           ))}
                       </button>
+                      {!invite.usedAt && (
+                        <p className="text-[11px] text-zinc-600 mt-1 font-mono break-all max-w-xs">
+                          {buildFounderLink(invite.code)}
+                        </p>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-zinc-400">{invite.email || "—"}</td>
                     <td className="px-4 py-3">

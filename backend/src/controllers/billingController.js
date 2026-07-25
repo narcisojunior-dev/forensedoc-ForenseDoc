@@ -2,6 +2,7 @@ import { z } from "zod";
 import { prisma } from "../utils/prisma.js";
 import * as asaasService from "../services/asaasService.js";
 import { countOccupiedSeats } from "./tenantController.js";
+import { acquireLock, releaseLock, avulsoLockKey } from "../utils/lock.js";
 
 // Guard reutilizado nas rotas financeiras: o titular contrata e paga, os
 // membros convidados apenas consomem os créditos do escritório.
@@ -26,7 +27,76 @@ const avulsoSchema = z.object({
   billingType: billingTypeSchema,
 });
 
+// Preço cheio do laudo avulso — o que paga quem não tem assinatura ativa.
 const AVULSO_PRICE_BRL = 79.0;
+
+// TTL do mutex de compra: cobre a ida e volta à Asaas com folga, e se o
+// processo morrer no meio o lock se solta sozinho.
+const AVULSO_LOCK_TTL = 30;
+
+/**
+ * Resolve quanto este tenant paga por um laudo avulso agora.
+ *
+ * Assinante ativo leva o preço promocional do próprio plano, limitado a
+ * `avulsoDiscountLimit` compras por ciclo de faturamento; esgotado o limite,
+ * volta ao preço cheio. Sem assinatura, ou com o plano sem preço promocional
+ * cadastrado, paga sempre o cheio.
+ *
+ * Usada tanto na compra (para cobrar) quanto na leitura da assinatura (para a
+ * tela mostrar o preço certo antes do clique) — as duas precisam concordar.
+ */
+export async function resolveAvulsoPricing(tenantId) {
+  const subscription = await prisma.subscription.findUnique({
+    where: { tenantId },
+    include: { plan: true },
+  });
+
+  const semDesconto = {
+    price: AVULSO_PRICE_BRL,
+    fullPrice: AVULSO_PRICE_BRL,
+    discountPrice: null,
+    discounted: false,
+    limit: 0,
+    used: 0,
+    remaining: 0,
+  };
+
+  // OVERDUE fica de fora de propósito: o benefício acompanha a assinatura em
+  // dia. Quem está inadimplente já recebe créditos de emergência pelo fluxo de
+  // cobrança e não deve ganhar desconto por cima disso.
+  if (!subscription || subscription.status !== "ACTIVE") return semDesconto;
+  if (subscription.plan.avulsoPriceBrl == null) return semDesconto;
+
+  const limit = subscription.plan.avulsoDiscountLimit;
+
+  // Conta tudo que não foi cancelado — PENDING inclusive. Se só PAID contasse,
+  // o titular poderia abrir N cobranças promocionais antes de pagar a primeira
+  // e furar o limite; a cobrança cancelada devolve a vaga.
+  const used = await prisma.payment.count({
+    where: {
+      tenantId,
+      type: "AVULSO",
+      avulsoDiscounted: true,
+      status: { not: "CANCELLED" },
+      createdAt: { gte: subscription.currentPeriodStart },
+    },
+  });
+
+  const remaining = Math.max(0, limit - used);
+  const discountPrice = Number(subscription.plan.avulsoPriceBrl);
+
+  return {
+    price: remaining > 0 ? discountPrice : AVULSO_PRICE_BRL,
+    fullPrice: AVULSO_PRICE_BRL,
+    discountPrice,
+    discounted: remaining > 0,
+    limit,
+    used,
+    remaining,
+    planName: subscription.plan.name,
+    periodEnd: subscription.currentPeriodEnd,
+  };
+}
 
 export async function getPlans(_req, res) {
   try {
@@ -37,6 +107,66 @@ export async function getPlans(_req, res) {
     return res.json({ plans });
   } catch (error) {
     console.error("[Billing] Erro ao listar planos:", error);
+    return res.status(500).json({ error: "Erro interno no servidor." });
+  }
+}
+
+/**
+ * Valida um código de convite de fundador ANTES da assinatura (L1).
+ *
+ * Sem isto, o único jeito de descobrir que o código é inválido seria tentar
+ * assinar — e nesse ponto `subscribe` já teria criado o cliente na Asaas. A
+ * rota é pública porque o convidado precisa conferir o código antes mesmo de
+ * ter conta; ela só revela se o código serve, nunca a quem pertence.
+ */
+export async function getFounderInvite(req, res) {
+  try {
+    const code = String(req.params.code || "").trim().toUpperCase();
+    if (!code) return res.status(400).json({ error: "Código não informado." });
+
+    const plan = await prisma.plan.findFirst({ where: { isFounder: true, isActive: true } });
+    if (!plan) {
+      return res.status(404).json({
+        error: "O plano de fundador não está disponível no momento.",
+        code: "FOUNDER_PLAN_UNAVAILABLE",
+      });
+    }
+
+    const invite = await prisma.founderInvite.findUnique({ where: { code } });
+    if (!invite) {
+      return res.status(404).json({
+        error: "Código de convite inválido.",
+        code: "FOUNDER_INVITE_INVALID",
+      });
+    }
+    if (invite.usedAt) {
+      return res.status(409).json({
+        error: "Este convite já foi utilizado.",
+        code: "FOUNDER_INVITE_USED",
+      });
+    }
+    if (!plan.founderSlotsRemaining || plan.founderSlotsRemaining <= 0) {
+      return res.status(409).json({
+        error: "As vagas de fundador se esgotaram.",
+        code: "FOUNDER_SLOTS_EXHAUSTED",
+      });
+    }
+
+    return res.json({
+      valid: true,
+      code: invite.code,
+      plan: {
+        id: plan.id,
+        name: plan.name,
+        priceBrl: plan.priceBrl,
+        creditsMonthly: plan.creditsMonthly,
+        maxUsers: plan.maxUsers,
+        founderSlotsRemaining: plan.founderSlotsRemaining,
+        founderSlotsTotal: plan.founderSlotsTotal,
+      },
+    });
+  } catch (error) {
+    console.error("[Billing] Erro ao validar convite de fundador:", error);
     return res.status(500).json({ error: "Erro interno no servidor." });
   }
 }
@@ -145,25 +275,41 @@ export async function subscribe(req, res) {
 }
 
 export async function purchaseAvulso(req, res) {
+  let lockToken = null;
+  const tenantId = req.tenantId;
+
   try {
     if (!ensureOwner(req, res, "comprar créditos")) return;
     const { billingType } = avulsoSchema.parse(req.body);
-    const tenantId = req.tenantId;
+
+    // Serializa as compras do tenant: o preço depende de quantos avulsos
+    // promocionais já foram comprados no ciclo, e essa contagem não pode ser
+    // lida por duas requisições ao mesmo tempo.
+    lockToken = await acquireLock(avulsoLockKey(tenantId), AVULSO_LOCK_TTL);
+    if (!lockToken) {
+      return res.status(409).json({
+        error: "Já existe uma compra de laudo avulso em andamento. Aguarde a conclusão.",
+        code: "AVULSO_PURCHASE_IN_PROGRESS",
+      });
+    }
+
+    const pricing = await resolveAvulsoPricing(tenantId);
 
     const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
     const asaasCustomerId = await ensureAsaasCustomer(tenant);
 
-    const asaasPayment = await asaasService.createAvulsoPayment(asaasCustomerId, AVULSO_PRICE_BRL, billingType);
+    const asaasPayment = await asaasService.createAvulsoPayment(asaasCustomerId, pricing.price, billingType);
 
     const payment = await prisma.$transaction(async (tx) => {
       const created = await tx.payment.create({
         data: {
           tenantId,
-          amountBrl: AVULSO_PRICE_BRL,
+          amountBrl: pricing.price,
           type: "AVULSO",
           status: "PENDING",
           asaasPaymentId: asaasPayment.id,
           asaasBillingType: billingType,
+          avulsoDiscounted: pricing.discounted,
           dueDate: asaasPayment.dueDate ? new Date(asaasPayment.dueDate) : undefined,
         },
       });
@@ -175,7 +321,17 @@ export async function purchaseAvulso(req, res) {
           action: "avulso_purchase_created",
           ipAddress: req.ip,
           userAgent: req.headers["user-agent"],
-          metadata: { paymentId: created.id, billingType },
+          metadata: {
+            paymentId: created.id,
+            billingType,
+            amountBrl: pricing.price,
+            discounted: pricing.discounted,
+            // Registra o estado do limite no momento da compra: se o admin
+            // mudar preço ou limite depois, o log continua explicando por que
+            // este valor foi cobrado.
+            discountLimit: pricing.limit,
+            discountUsedBefore: pricing.used,
+          },
         },
       });
 
@@ -185,12 +341,20 @@ export async function purchaseAvulso(req, res) {
     return res.status(201).json({
       payment,
       invoiceUrl: asaasPayment.invoiceUrl,
+      pricing: {
+        amountBrl: pricing.price,
+        discounted: pricing.discounted,
+        fullPrice: pricing.fullPrice,
+        remainingAfter: pricing.discounted ? pricing.remaining - 1 : 0,
+      },
     });
   } catch (error) {
     if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
     if (error.name === "AsaasError") return res.status(502).json({ error: error.message });
     console.error("[Billing] Erro ao comprar crédito avulso:", error);
     return res.status(500).json({ error: "Erro interno no servidor." });
+  } finally {
+    await releaseLock(avulsoLockKey(tenantId), lockToken);
   }
 }
 
@@ -200,7 +364,10 @@ export async function getSubscription(req, res) {
       where: { tenantId: req.tenantId },
       include: { plan: true },
     });
-    return res.json({ subscription });
+    // Vai junto para a tela poder anunciar o preço correto do avulso antes do
+    // clique — sem isso o cliente veria R$ 79 e seria cobrado outro valor.
+    const avulso = await resolveAvulsoPricing(req.tenantId);
+    return res.json({ subscription, avulso });
   } catch (error) {
     console.error("[Billing] Erro ao buscar assinatura:", error);
     return res.status(500).json({ error: "Erro interno no servidor." });

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   getPlans,
+  getFounderInvite,
   subscribe,
   purchaseAvulso,
   getSubscription,
@@ -10,12 +11,15 @@ import {
   getInvoice,
 } from "../controllers/billingController.js";
 import { requireAuth } from "../middleware/auth.js";
-import { tenantLimiter } from "../middleware/rateLimiters.js";
+import { tenantLimiter, founderInviteLimiter } from "../middleware/rateLimiters.js";
 
 const router = Router();
 
 // Pública — precisa ser vista antes do login (landing page / onboarding).
 router.get("/plans", getPlans);
+
+// Pública pelo mesmo motivo: o convidado confere o código antes de ter conta.
+router.get("/founder-invite/:code", founderInviteLimiter, getFounderInvite);
 
 router.use(requireAuth, tenantLimiter);
 

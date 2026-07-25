@@ -22,6 +22,26 @@ export const tenantLimiter = createLimiter({
 });
 
 /**
+ * Validação de código de fundador: 30 consultas/hora por IP.
+ *
+ * A rota é pública (o convidado precisa validar o código antes de ter conta),
+ * então responde "existe / não existe" para quem perguntar. O código tem 8
+ * caracteres de um alfabeto de 31 (~8×10¹¹ combinações), o que já torna a
+ * enumeração inviável — o limite é a segunda camada, para que nem valha a
+ * pena tentar.
+ */
+export const founderInviteLimiter = createLimiter({
+  windowMs: 60 * 60 * 1000,
+  max: 30,
+  keyGenerator: (req) => `ip:${ipKeyGenerator(req.ip)}`,
+  message: {
+    error: "Muitas tentativas de validação de convite. Tente novamente mais tarde.",
+    code: "FOUNDER_INVITE_RATE_LIMITED",
+  },
+  prefix: "rl:founder:",
+});
+
+/**
  * Anti-duplo-clique na análise: 1 a cada 30s por tenant.
  *
  * Diferente do lock de concorrência (que serializa análises em andamento),

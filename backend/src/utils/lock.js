@@ -13,6 +13,13 @@ import { redis } from "./redis.js";
 export const analysisLockKey = (tenantId) => `analysis:${tenantId}`;
 
 /**
+ * Chave do mutex de compra de avulso. Sem ele, duas compras simultâneas do
+ * mesmo tenant contam o limite de desconto antes de qualquer uma gravar seu
+ * pagamento e as duas levam o preço promocional.
+ */
+export const avulsoLockKey = (tenantId) => `avulso:${tenantId}`;
+
+/**
  * Tenta adquirir o lock. Devolve um token de liberação, ou null se já travado.
  * O token evita que uma chamada libere o lock de outra que o readquiriu
  * depois de o TTL expirar.
