@@ -1,5 +1,6 @@
 import { prisma } from "../utils/prisma.js";
 import { getBalancePublic } from "../services/creditService.js";
+import { parsePagination } from "../utils/pagination.js";
 
 export async function getBalance(req, res) {
   try {
@@ -15,9 +16,7 @@ export async function getBalance(req, res) {
 export async function getTransactions(req, res) {
   try {
     const tenantId = req.tenantId;
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
-    const skip = (page - 1) * limit;
+    const { page, limit, skip } = parsePagination(req.query);
 
     const [transactions, total] = await Promise.all([
       prisma.creditTransaction.findMany({

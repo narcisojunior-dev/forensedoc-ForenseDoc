@@ -1,4 +1,5 @@
 import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
 import { v4 as uuidv4 } from "uuid";
 import crypto from "crypto";
 import { z } from "zod";
@@ -6,11 +7,18 @@ import { prisma } from "../utils/prisma.js";
 import { generateAccessToken } from "../utils/jwt.js";
 import { enqueueEmail } from "../services/notificationService.js";
 import { redis } from "../utils/redis.js";
+import { normalizeEmail } from "../utils/stringUtils.js";
 
 // ─── Schemas de Validação (Zod) ────────────────────────────────────────────────
+
+// Normaliza ANTES de validar: um endereço colado com espaço à direita ou com
+// maiúsculas é o mesmo endereço, e reprová-lo por formato só confunde o usuário.
+const emailField = (message = "E-mail inválido") =>
+  z.string().transform(normalizeEmail).pipe(z.string().email(message));
+
 const registerSchema = z.object({
   name: z.string().min(3, "Nome muito curto"),
-  email: z.string().email("E-mail inválido"),
+  email: emailField(),
   password: z.string().min(8, "Senha deve ter no mínimo 8 caracteres"),
   cpfCnpj: z.string().min(11, "CPF/CNPJ inválido"),
   oabNumber: z.string().optional(),
@@ -18,12 +26,12 @@ const registerSchema = z.object({
 });
 
 const loginSchema = z.object({
-  email: z.string().email(),
+  email: emailField(),
   password: z.string().min(1),
 });
 
 const forgotPasswordSchema = z.object({
-  email: z.string().email("E-mail inválido"),
+  email: emailField(),
 });
 
 const updateProfileSchema = z.object({
@@ -46,6 +54,39 @@ function hashToken(token) {
   return crypto.createHash("sha256").update(token).digest("hex");
 }
 
+/**
+ * Resposta do cadastro bem-sucedido. Reutilizada quando o e-mail já existe para
+ * que as duas situações fiquem indistinguíveis de fora — quem tenta descobrir
+ * se um endereço tem conta aqui recebe sempre o mesmo texto e o mesmo status.
+ */
+const REGISTER_OK = {
+  message: "Cadastro realizado. Verifique seu e-mail para ativar a conta.",
+};
+
+/**
+ * Hash descartável com o mesmo custo (12 rounds) dos hashes reais.
+ *
+ * O login precisa gastar o mesmo tempo existindo ou não o usuário: retornar
+ * antes do `bcrypt.compare` deixa a diferença mensurável de fora, e ela revela
+ * quais e-mails têm conta. Gerado uma vez no boot.
+ */
+const DUMMY_PASSWORD_HASH = bcrypt.hashSync("credenciais-invalidas", 12);
+
+/**
+ * Segundos restantes até o access token expirar — o tempo exato que ele precisa
+ * ficar na blacklist do logout. Devolve 0 para token ilegível ou já vencido,
+ * casos em que a blacklist não teria utilidade nenhuma.
+ */
+function accessTokenTtlSeconds(token) {
+  try {
+    const { exp } = jwt.decode(token) || {};
+    if (!exp) return 0;
+    return Math.max(0, exp - Math.floor(Date.now() / 1000));
+  } catch {
+    return 0;
+  }
+}
+
 // ─── Controllers ────────────────────────────────────────────────────────────────
 
 export async function register(req, res) {
@@ -53,8 +94,20 @@ export async function register(req, res) {
     const data = registerSchema.parse(req.body);
 
     // 1. Verificar unicidade (E-mail e CPF/CNPJ)
+    // E-mail duplicado responde como sucesso: dizer "E-mail já cadastrado."
+    // transformava esta rota pública num verificador de contas. O dono legítimo
+    // do endereço descobre a duplicidade pelo e-mail que recebe; quem está
+    // sondando, não. O CPF/CNPJ segue explícito — não é um identificador que se
+    // testa em massa e o erro claro evita um suporte desnecessário.
     const existingUser = await prisma.user.findUnique({ where: { email: data.email } });
-    if (existingUser) return res.status(400).json({ error: "E-mail já cadastrado." });
+    if (existingUser) {
+      await enqueueEmail({
+        to: existingUser.email,
+        template: "PASSWORD_RESET_HINT",
+        data: { name: existingUser.name, loginUrl: `${process.env.FRONTEND_URL}/login` },
+      }).catch(() => {});
+      return res.status(201).json(REGISTER_OK);
+    }
 
     const existingTenant = await prisma.tenant.findUnique({ where: { cpfCnpj: data.cpfCnpj } });
     if (existingTenant) return res.status(400).json({ error: "CPF/CNPJ já cadastrado." });
@@ -154,10 +207,16 @@ export async function login(req, res) {
       include: { tenant: true },
     });
 
-    if (!user) return res.status(401).json({ error: "Credenciais inválidas." });
-
-    const isValidPassword = await bcrypt.compare(password, user.passwordHash);
-    if (!isValidPassword) return res.status(401).json({ error: "Credenciais inválidas." });
+    // O compare roda mesmo sem usuário, contra um hash descartável de mesmo
+    // custo: sair antes dele deixava o "não existe" muito mais rápido que o
+    // "senha errada", e essa diferença de tempo revela quais e-mails têm conta.
+    const isValidPassword = await bcrypt.compare(
+      password,
+      user?.passwordHash || DUMMY_PASSWORD_HASH
+    );
+    if (!user || !isValidPassword) {
+      return res.status(401).json({ error: "Credenciais inválidas." });
+    }
 
     if (!user.emailVerified) return res.status(403).json({ error: "E-mail não confirmado.", code: "EMAIL_NOT_VERIFIED" });
     if (!user.active) return res.status(403).json({ error: "Conta desativada.", code: "ACCOUNT_DEACTIVATED" });
@@ -237,6 +296,22 @@ export async function refresh(req, res) {
 
     if (new Date() > storedToken.expiresAt) {
       return res.status(401).json({ error: "Refresh token expirado." });
+    }
+
+    // Revalidação do estado atual do usuário e do escritório.
+    //
+    // O refresh vale 30 dias e emite um access token novo a cada uso — sem
+    // reconferir aqui, uma conta desativada, um e-mail não confirmado ou um
+    // tenant suspenso continuariam renovando acesso indefinidamente, porque
+    // essas condições só eram checadas no login.
+    if (!storedToken.user.active) {
+      return res.status(403).json({ error: "Conta desativada.", code: "ACCOUNT_DEACTIVATED" });
+    }
+    if (!storedToken.user.emailVerified) {
+      return res.status(403).json({ error: "E-mail não confirmado.", code: "EMAIL_NOT_VERIFIED" });
+    }
+    if (storedToken.user.tenant.status === "SUSPENDED") {
+      return res.status(403).json({ error: "Conta suspensa.", code: "ACCOUNT_SUSPENDED" });
     }
 
     // Revogar token atual
@@ -397,8 +472,11 @@ export async function logout(req, res) {
     }
 
     if (accessToken) {
-      // Redis blacklist até o token expirar (15 min)
-      await redis.setex(`blacklist:${accessToken}`, 15 * 60, "1");
+      // TTL derivado do `exp` do próprio token, não de um 15 min fixo: aumentar
+      // JWT_ACCESS_EXPIRES fazia o token sair da blacklist antes de expirar e
+      // voltar a ser aceito depois do logout.
+      const ttl = accessTokenTtlSeconds(accessToken);
+      if (ttl > 0) await redis.setex(`blacklist:${accessToken}`, ttl, "1");
     }
 
     res.clearCookie("refreshToken");

@@ -10,10 +10,23 @@ export async function requireAuth(req, res, next) {
 
     const token = authHeader.split(" ")[1];
 
-    // Verificar se o token de acesso está na blacklist (após logout)
-    const isRevoked = await redis.get(`blacklist:${token}`);
-    if (isRevoked) {
-      return res.status(401).json({ error: "Token revogado." });
+    // Verificar se o token de acesso está na blacklist (após logout).
+    //
+    // Fail-open, pelo mesmo motivo documentado em utils/rateLimitStore.js: com
+    // o Redis fora do ar, a exceção caía no catch de baixo e TODA rota
+    // autenticada respondia 401 — o cache derrubava a aplicação inteira junto.
+    // A blacklist é proteção secundária (o access token vive 15 min e o refresh
+    // já foi revogado no logout), então degradá-la é melhor que negar acesso a
+    // todos os usuários legítimos.
+    try {
+      if (await redis.get(`blacklist:${token}`)) {
+        return res.status(401).json({ error: "Token revogado." });
+      }
+    } catch (redisError) {
+      console.error(
+        "[Auth] Redis indisponível — blacklist de logout não verificada nesta requisição:",
+        redisError.message
+      );
     }
 
     const payload = verifyAccessToken(token);

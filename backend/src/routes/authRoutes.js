@@ -26,13 +26,28 @@ const forgotPasswordLimiter = createLimiter({
   prefix: "rl:forgot:",
 });
 
+/**
+ * Rotas que consomem token (refresh, verificação de e-mail, redefinição).
+ *
+ * Os tokens são UUIDv4 e não se adivinham por força bruta, mas cada tentativa
+ * custa uma consulta ao banco — sem limite, dá para saturar o Postgres de fora.
+ * O teto é folgado de propósito: o refresh legítimo acontece a cada 15 minutos,
+ * e um limite apertado quebraria quem mantém várias abas abertas.
+ */
+const tokenLimiter = createLimiter({
+  windowMs: 15 * 60 * 1000,
+  max: 60,
+  message: { error: "Muitas tentativas. Tente novamente mais tarde." },
+  prefix: "rl:token:",
+});
+
 // Rotas Públicas
 router.post("/register", registerLimiter, register);
 router.post("/login", loginLimiter, login);
-router.post("/refresh", refresh);
-router.post("/verify-email", verifyEmail);
+router.post("/refresh", tokenLimiter, refresh);
+router.post("/verify-email", tokenLimiter, verifyEmail);
 router.post("/forgot-password", forgotPasswordLimiter, forgotPassword);
-router.post("/reset-password", resetPassword);
+router.post("/reset-password", tokenLimiter, resetPassword);
 
 // Rotas Protegidas
 router.post("/logout", requireAuth, logout);

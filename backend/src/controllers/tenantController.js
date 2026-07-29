@@ -4,9 +4,13 @@ import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import { prisma } from "../utils/prisma.js";
 import { enqueueEmail } from "../services/notificationService.js";
+import { normalizeEmail } from "../utils/stringUtils.js";
 
+// Normaliza antes de validar, igual ao authController: o e-mail gravado no
+// convite é o mesmo que vai virar chave do usuário no aceite, e as duas pontas
+// precisam concordar na forma canônica.
 const inviteSchema = z.object({
-  email: z.string().email(),
+  email: z.string().transform(normalizeEmail).pipe(z.string().email("E-mail inválido")),
 });
 
 const acceptInviteSchema = z.object({

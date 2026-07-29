@@ -1,4 +1,5 @@
 import { prisma } from "../utils/prisma.js";
+import { parsePagination } from "../utils/pagination.js";
 
 /**
  * Notificações visíveis ao usuário: as endereçadas a ele (userId) e as do
@@ -13,9 +14,7 @@ function visibilityFilter(req) {
 
 export async function listNotifications(req, res) {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = Math.min(parseInt(req.query.limit) || 20, 50);
-    const skip = (page - 1) * limit;
+    const { page, limit, skip } = parsePagination(req.query, { def: 20, max: 50 });
     const where = visibilityFilter(req);
 
     const [notifications, total, unreadCount] = await Promise.all([
