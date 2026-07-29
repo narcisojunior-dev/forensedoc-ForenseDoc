@@ -29,12 +29,12 @@ vi.mock("axios", async () => {
 });
 
 let axiosMod;
+let axiosLib;
 let onRejected;
 let apiInstance;
 
 beforeEach(async () => {
   vi.resetModules();
-  localStorage.clear();
 
   axiosMod = await import("axios");
   axiosMod.__post.mockReset();
@@ -42,7 +42,7 @@ beforeEach(async () => {
   axiosMod.__instance.interceptors.response.use.mockReset();
 
   // Importar o módulo registra os interceptors; capturamos o handler de erro.
-  await import("../lib/axios.js");
+  axiosLib = await import("../lib/axios.js");
   apiInstance = axiosMod.default.create.mock.results.at(-1).value;
   onRejected = apiInstance.interceptors.response.use.mock.calls[0][1];
 
@@ -88,7 +88,7 @@ describe("interceptor de refresh do access token", () => {
     const segunda = unauthorized("/analyses/stats");
     await Promise.all([onRejected(primeira), onRejected(segunda)]);
 
-    expect(localStorage.getItem("accessToken")).toBe("token-novo");
+    expect(axiosLib.getAccessToken()).toBe("token-novo");
     expect(primeira.config.headers.Authorization).toBe("Bearer token-novo");
     expect(segunda.config.headers.Authorization).toBe("Bearer token-novo");
   });
@@ -103,7 +103,7 @@ describe("interceptor de refresh do access token", () => {
     // A promise compartilhada precisa ser liberada ao fim: sem isso, uma
     // expiração posterior reusaria o token velho para sempre.
     expect(axiosMod.__post).toHaveBeenCalledTimes(2);
-    expect(localStorage.getItem("accessToken")).toBe("t2");
+    expect(axiosLib.getAccessToken()).toBe("t2");
   });
 
   it("não tenta renovar quando a própria rota de refresh responde 401", async () => {

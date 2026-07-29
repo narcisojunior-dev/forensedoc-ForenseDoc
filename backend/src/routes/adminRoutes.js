@@ -16,6 +16,7 @@ import {
   listAllPayments,
 } from "../controllers/adminMetricsController.js";
 import { requireAuth, requirePlatformAdmin } from "../middleware/auth.js";
+import { adminIpAllowlist } from "../middleware/adminIpAllowlist.js";
 import { createLimiter } from "../utils/rateLimitStore.js";
 
 const router = Router();
@@ -29,7 +30,9 @@ const adminLimiter = createLimiter({
   prefix: "rl:admin:",
 });
 
-router.use(requireAuth, requirePlatformAdmin, adminLimiter);
+// A allowlist vem DEPOIS do requirePlatformAdmin: quem não é admin recebe o 403
+// genérico de sempre e não descobre que existe restrição de origem no painel.
+router.use(requireAuth, requirePlatformAdmin, adminIpAllowlist, adminLimiter);
 
 // Convites do plano fundador
 router.get("/founder-invites", listFounderInvites);
