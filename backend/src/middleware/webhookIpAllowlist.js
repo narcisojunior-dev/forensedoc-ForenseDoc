@@ -62,7 +62,12 @@ const ALLOWED = (process.env.ASAAS_WEBHOOK_IPS || "")
   .filter(Boolean);
 
 if (ALLOWED.length === 0) {
-  console.warn(
+  // Em produção isso é um risco concreto, não um aviso de configuração: o
+  // endpoint credita pagamentos e ficaria com uma única camada de defesa.
+  // Sobe para console.error para aparecer no monitoramento, mas não derruba o
+  // boot — uma allowlist vazia não pode interromper o faturamento.
+  const log = process.env.NODE_ENV === "production" ? console.error : console.warn;
+  log(
     "[Webhook] ASAAS_WEBHOOK_IPS não configurada — allowlist de IP desativada. " +
       "Os webhooks continuam protegidos apenas pelo asaas-access-token."
   );

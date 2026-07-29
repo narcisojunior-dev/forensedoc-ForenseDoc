@@ -26,17 +26,68 @@ async function getTenantByAsaasCustomerId(asaasCustomerId) {
   return prisma.tenant.findFirst({ where: { asaasCustomerId } });
 }
 
-async function handlePaymentReceived(payment) {
-  if (!payment) return;
+/**
+ * Marca o pagamento como PAID e devolve a linha APENAS para quem realizou a
+ * transição — `null` para todos os outros.
+ *
+ * O par `findUnique` + `upsert` que existia aqui não era idempotente de fato:
+ * a Asaas envia PAYMENT_RECEIVED e PAYMENT_CONFIRMED para a mesma cobrança e a
+ * fila ainda tem `attempts: 5`, então duas execuções concorrentes liam o mesmo
+ * estado "ainda não pago", ambas passavam pelo guard e ambas creditavam.
+ *
+ * A reivindicação agora é atômica sem precisar subir o nível de isolamento:
+ *   - `updateMany` com `status: { not: "PAID" }` no WHERE resolve o caso da
+ *     linha já existente — o banco serializa as duas escritas na mesma linha e
+ *     só uma vê `count === 1`;
+ *   - o `create` cobre a cobrança gerada pela assinatura na Asaas, que não tem
+ *     linha local prévia (só a compra avulsa cria uma via /billing/avulso). Em
+ *     corrida, a constraint única de `asaasPaymentId` derruba a segunda com
+ *     P2002, que aqui significa "outra execução já reivindicou".
+ */
+async function claimPayment(payment, tenant) {
+  const paidAt = new Date();
 
-  // Idempotência: nunca processar o mesmo pagamento duas vezes.
+  const { count } = await prisma.payment.updateMany({
+    where: { asaasPaymentId: payment.id, status: { not: "PAID" } },
+    data: { status: "PAID", paidAt },
+  });
+
+  if (count === 1) {
+    return prisma.payment.findUnique({ where: { asaasPaymentId: payment.id } });
+  }
+
+  // count === 0: ou a linha já estava PAID, ou ela ainda não existe.
   const existing = await prisma.payment.findUnique({
     where: { asaasPaymentId: payment.id },
   });
-  if (existing?.status === "PAID") {
+  if (existing) {
     console.log(`[Webhook] Payment ${payment.id} já processado, ignorando.`);
-    return;
+    return null;
   }
+
+  try {
+    return await prisma.payment.create({
+      data: {
+        tenantId: tenant.id,
+        amountBrl: payment.value,
+        type: payment.subscription ? "SUBSCRIPTION" : "AVULSO",
+        status: "PAID",
+        asaasPaymentId: payment.id,
+        asaasBillingType: payment.billingType,
+        paidAt,
+      },
+    });
+  } catch (err) {
+    if (err.code === "P2002") {
+      console.log(`[Webhook] Payment ${payment.id} criado em paralelo, ignorando.`);
+      return null;
+    }
+    throw err;
+  }
+}
+
+async function handlePaymentReceived(payment) {
+  if (!payment) return;
 
   const tenant = await getTenantByAsaasCustomerId(payment.customer);
   if (!tenant) {
@@ -44,22 +95,10 @@ async function handlePaymentReceived(payment) {
     return;
   }
 
-  // Cobranças geradas automaticamente pela assinatura na Asaas não têm uma
-  // linha local pré-existente (só a compra avulsa cria uma via /billing/avulso
-  // antes do pagamento acontecer) — upsert cobre os dois casos.
-  const updated = await prisma.payment.upsert({
-    where: { asaasPaymentId: payment.id },
-    update: { status: "PAID", paidAt: new Date() },
-    create: {
-      tenantId: tenant.id,
-      amountBrl: payment.value,
-      type: payment.subscription ? "SUBSCRIPTION" : "AVULSO",
-      status: "PAID",
-      asaasPaymentId: payment.id,
-      asaasBillingType: payment.billingType,
-      paidAt: new Date(),
-    },
-  });
+  // Só quem reivindicou o pagamento credita. Sem isso, uma entrega duplicada
+  // gerava crédito duplicado sem pagamento correspondente.
+  const updated = await claimPayment(payment, tenant);
+  if (!updated) return;
 
   if (updated.type === "SUBSCRIPTION") {
     const subscription = await prisma.subscription.findUnique({
