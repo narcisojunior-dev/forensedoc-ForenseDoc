@@ -4,6 +4,7 @@ import { User, Lock, Users, Loader2, Trash2, UserPlus, Clock, Send, X } from "lu
 import toast from "react-hot-toast";
 import { api } from "../lib/axios";
 import { useAuthStore } from "../store/authStore";
+import { MIN_LENGTH } from "../utils/passwordRules";
 
 function SectionCard({ icon: Icon, title, children }) {
   return (
@@ -206,7 +207,7 @@ export default function Settings() {
             value={newPassword}
             onChange={(e) => setNewPassword(e.target.value)}
             required
-            minLength={8}
+            minLength={MIN_LENGTH}
           />
           <button
             type="submit"

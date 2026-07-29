@@ -45,7 +45,20 @@ function App() {
       }} />
       <Routes>
         <Route path="/" element={<Landing />} />
-        <Route path="/v2" element={<ForenseDocOld />} />
+        {/* A v2.2 continua acessível, mas atrás de login.
+            Como rota pública ela aceitava upload de contrato — documento com
+            dados pessoais do cliente — de qualquer visitante, e o enviava para
+            /api/analyze sem token. O backend recusava com 401, então nunca
+            houve análise de graça; o problema era o oposto: a tela pedia um PDF
+            sensível e não fazia nada com ele. */}
+        <Route
+          path="/v2"
+          element={
+            <ProtectedRoute>
+              <ForenseDocOld />
+            </ProtectedRoute>
+          }
+        />
         
         {/* Rotas de Autenticação */}
         <Route path="/login" element={<Login />} />

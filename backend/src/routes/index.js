@@ -57,8 +57,12 @@ router.use("/admin", adminRoutes);
 // Rotas de Análise (Módulo 4 — assíncrono via BullMQ, ver worker.js)
 router.post(
   "/analyze",
-  analyzeBodyParser, // única rota que aceita corpo acima do limite global
+  // requireAuth ANTES do parser: ele lê só o header Authorization, então não
+  // precisa do corpo. Na ordem inversa, uma requisição anônima fazia o servidor
+  // materializar até 42 MB de base64 na memória para só então devolver 401 —
+  // trabalho pesado concedido a quem sequer tem conta.
   requireAuth,
+  analyzeBodyParser, // única rota que aceita corpo acima do limite global
   analyzeLimiter, // anti-duplo-clique: 1 análise / 30s por tenant
   requireCredit,
   requestTimeout(ANALYZE_TIMEOUT_MS),

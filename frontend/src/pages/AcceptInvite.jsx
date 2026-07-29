@@ -4,6 +4,7 @@ import { Scale, Loader2, Users, AlertTriangle } from "lucide-react";
 import toast from "react-hot-toast";
 import { api } from "../lib/axios";
 import { useAuthStore } from "../store/authStore";
+import { MIN_LENGTH } from "../utils/passwordRules";
 
 /**
  * Tela de aceite de convite de equipe (L2).
@@ -223,8 +224,8 @@ export default function AcceptInvite() {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           required
-          minLength={8}
-          hint="Mínimo de 8 caracteres."
+          minLength={MIN_LENGTH}
+          hint={`Mínimo de ${MIN_LENGTH} caracteres, sem usar seu nome ou e-mail.`}
         />
         <Field
           label="Confirmar senha"
@@ -232,7 +233,7 @@ export default function AcceptInvite() {
           value={confirmPassword}
           onChange={(e) => setConfirmPassword(e.target.value)}
           required
-          minLength={8}
+          minLength={MIN_LENGTH}
         />
 
         <button

@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Scale, Loader2, CheckCircle2 } from "lucide-react";
 import toast from "react-hot-toast";
 import { useAuthStore } from "../store/authStore";
+import { MIN_LENGTH } from "../utils/passwordRules";
 
 export default function Register() {
   const [formData, setFormData] = useState({
@@ -115,10 +116,10 @@ export default function Register() {
 
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-zinc-300 mb-1">Senha Segura</label>
-                <input type="password" name="password" value={formData.password} onChange={handleChange} required minLength={8}
+                <input type="password" name="password" value={formData.password} onChange={handleChange} required minLength={MIN_LENGTH}
                   className="w-full px-4 py-3 bg-surface border border-surface-border rounded-xl text-foreground placeholder-zinc-500 focus:ring-2 focus:ring-primary focus:outline-none" 
                   placeholder="••••••••" />
-                <p className="text-xs text-zinc-500 mt-2">Mínimo de 8 caracteres.</p>
+                <p className="text-xs text-zinc-500 mt-2">Mínimo de {MIN_LENGTH} caracteres, sem usar seu nome ou e-mail.</p>
               </div>
             </div>
 

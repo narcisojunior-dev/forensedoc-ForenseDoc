@@ -83,7 +83,16 @@ app.use(
 // ele aplica o próprio parser (ver routes/index.js). Deixar 30 MB no global
 // dava a qualquer rota, inclusive /auth/login e o webhook, um corpo 30x maior
 // do que qualquer uma delas tem motivo para aceitar.
-app.use(express.json({ limit: "1mb" }));
+//
+// O `skip` de /api/analyze é obrigatório: este middleware roda ANTES do
+// roteador, então sem ele o teto de 1 MB derrubava o upload de PDF com 413
+// antes de a rota sequer ser escolhida — e o parser de 42 MB declarado lá nunca
+// chegava a ser usado.
+const jsonParser = express.json({ limit: "1mb" });
+app.use((req, res, next) => {
+  if (req.path === "/api/analyze") return next();
+  return jsonParser(req, res, next);
+});
 app.use(cookieParser());
 
 // ─── Rate limit global ────────────────────────────────────────────────────────

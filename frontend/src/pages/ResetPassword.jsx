@@ -3,14 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Scale, Loader2, ShieldAlert, Check, X } from "lucide-react";
 import toast from "react-hot-toast";
 import { api } from "../lib/axios";
-
-// Espelha o resetPasswordSchema do backend (mínimo 8 caracteres). Os demais
-// itens são orientação de força, não bloqueiam o envio.
-const rules = [
-  { label: "Ao menos 8 caracteres", test: (v) => v.length >= 8, required: true },
-  { label: "Uma letra maiúscula", test: (v) => /[A-Z]/.test(v) },
-  { label: "Um número", test: (v) => /\d/.test(v) },
-];
+import { passwordRules, checkPassword } from "../utils/passwordRules";
 
 export default function ResetPassword() {
   const [searchParams] = useSearchParams();
@@ -21,12 +14,13 @@ export default function ResetPassword() {
   const [confirm, setConfirm] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const meetsRequired = rules.filter((r) => r.required).every((r) => r.test(password));
+  const veredito = checkPassword(password);
+  const meetsRequired = veredito.ok;
   const matches = password.length > 0 && password === confirm;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!meetsRequired) return toast.error("A senha deve ter no mínimo 8 caracteres.");
+    if (!meetsRequired) return toast.error(veredito.error);
     if (!matches) return toast.error("As senhas não conferem.");
 
     setIsSubmitting(true);
@@ -100,11 +94,11 @@ export default function ResetPassword() {
 
               {password.length > 0 && (
                 <ul className="mt-3 space-y-1.5">
-                  {rules.map((rule) => {
+                  {passwordRules.map((rule) => {
                     const ok = rule.test(password);
                     return (
                       <li
-                        key={rule.label}
+                        key={rule.id}
                         className={`flex items-center gap-2 text-xs ${
                           ok ? "text-emerald-500" : "text-zinc-500"
                         }`}
