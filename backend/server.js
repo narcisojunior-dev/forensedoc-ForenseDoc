@@ -23,7 +23,7 @@ app.use(
         defaultSrc: ["'self'"],
         scriptSrc: ["'self'"],
         styleSrc: ["'self'", "'unsafe-inline'", "fonts.googleapis.com"],
-        fontSrc: ["fonts.gstatic.com"],
+        fontSrc: ["'self'", "fonts.gstatic.com"],
         imgSrc: ["'self'", "data:", "tile.openstreetmap.org", "*.tile.openstreetmap.org"],
         connectSrc: ["'self'"],
         frameSrc: ["'none'"],
@@ -69,7 +69,11 @@ app.use(
 );
 
 // ─── Body Parser ──────────────────────────────────────────────────────────────
-app.use(express.json({ limit: "30mb" }));
+// Limite apertado por padrão. Só /api/analyze recebe PDF e precisa dos 30 MB —
+// ele aplica o próprio parser (ver routes/index.js). Deixar 30 MB no global
+// dava a qualquer rota, inclusive /auth/login e o webhook, um corpo 30x maior
+// do que qualquer uma delas tem motivo para aceitar.
+app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser());
 
 // ─── Rotas ────────────────────────────────────────────────────────────────────
@@ -79,12 +83,12 @@ app.use("/api", routes);
 // Importante: o healthcheck NÃO deve consultar o banco de dados ou qualquer
 // dependência externa. Ele precisa responder rapidamente para que o Railway
 // não interprete o serviço como indisponível durante o deploy.
+// Resposta mínima de propósito: o endpoint é público e versão + ambiente só
+// ajudam quem está mapeando o alvo. O load balancer só precisa do 200.
 app.get("/health", (_req, res) => {
   return res.status(200).json({
     status: "ok",
-    version: "3.0.0",
     timestamp: new Date().toISOString(),
-    env: process.env.NODE_ENV || "development",
   });
 });
 
@@ -109,7 +113,6 @@ app.get("/health/ready", async (_req, res) => {
   return res.status(healthy ? 200 : 503).json({
     status: healthy ? "ok" : "degraded",
     ...checks,
-    version: "3.0.0",
     timestamp: new Date().toISOString(),
   });
 });

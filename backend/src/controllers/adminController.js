@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "../utils/prisma.js";
 import { addManualCredits, invalidateCreditCache } from "../services/creditService.js";
 import { notify } from "../services/notificationService.js";
+import { parsePagination } from "../utils/pagination.js";
 
 /**
  * Admin Panel — fatia mínima necessária para operar o lançamento com
@@ -133,14 +134,27 @@ export async function listFounderInvites(req, res) {
 // Tenants
 // ─────────────────────────────────────────────────────────────
 
+/**
+ * Filtros da listagem de tenants, coagidos a string antes de entrar no `where`.
+ *
+ * Express (qs) transforma `?status[not]=ACTIVE` num OBJETO, e o Prisma leria
+ * esse objeto como operador de consulta — o filtro do cliente viraria parte da
+ * query. O schema garante que só chega string, e o enum recusa valor fora da
+ * lista em vez de deixar o Prisma estourar 500.
+ */
+const listTenantsQuerySchema = z.object({
+  search: z.string().trim().max(200).optional(),
+  status: z.enum(["TRIAL", "ACTIVE", "SUSPENDED", "CANCELLED"]).optional(),
+  plan: z.string().trim().max(100).optional(),
+});
+
 export async function listTenants(req, res) {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = Math.min(parseInt(req.query.limit) || 20, 100);
-    const skip = (page - 1) * limit;
-    const search = (req.query.search || "").trim();
-    const status = req.query.status;
-    const planSlug = req.query.plan;
+    const { page, limit, skip } = parsePagination(req.query);
+    const filters = listTenantsQuerySchema.parse(req.query);
+    const search = filters.search || "";
+    const status = filters.status;
+    const planSlug = filters.plan;
 
     const where = {
       ...(status ? { status } : {}),
@@ -186,6 +200,9 @@ export async function listTenants(req, res) {
       pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
     });
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: "Filtro inválido." });
+    }
     console.error("[Admin] Erro ao listar tenants:", error);
     return res.status(500).json({ error: "Erro interno no servidor." });
   }

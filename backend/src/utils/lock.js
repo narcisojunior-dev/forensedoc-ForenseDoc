@@ -20,6 +20,14 @@ export const analysisLockKey = (tenantId) => `analysis:${tenantId}`;
 export const avulsoLockKey = (tenantId) => `avulso:${tenantId}`;
 
 /**
+ * Chave do mutex de resgate do convite de fundador. A chave é o CÓDIGO, não o
+ * tenant: a corrida que importa é a de dois tenants tentando o mesmo convite ao
+ * mesmo tempo — cada um passaria pela validação antes de o outro gravar
+ * `usedAt`, e `founderSlotsRemaining` seria decrementado duas vezes.
+ */
+export const founderLockKey = (code) => `founder:${code}`;
+
+/**
  * Tenta adquirir o lock. Devolve um token de liberação, ou null se já travado.
  * O token evita que uma chamada libere o lock de outra que o readquiriu
  * depois de o TTL expirar.

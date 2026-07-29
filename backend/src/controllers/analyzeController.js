@@ -1,11 +1,12 @@
 import crypto from "crypto";
 import { prisma } from "../utils/prisma.js";
-import { debitCredit, refundCredit } from "../services/creditService.js";
+import { debitCredit, refundCredit, afterDebitCommit } from "../services/creditService.js";
 import { saasQueue } from "../queues.js";
 import { acquireLock, releaseLock, analysisLockKey } from "../utils/lock.js";
 import { validatePdfPayload } from "../utils/pdfValidation.js";
 import { buildReportPdf } from "../services/reportPdfService.js";
 import { haversineKm } from "../utils/geoUtils.js";
+import { parsePagination } from "../utils/pagination.js";
 
 function hashFilename(filename) {
   return crypto.createHash("sha256").update(filename || "").digest("hex");
@@ -57,7 +58,7 @@ export async function analyzePdf(req, res) {
       });
     }
 
-    analysis = await prisma.$transaction(async (tx) => {
+    const debit = await prisma.$transaction(async (tx) => {
       const created = await tx.analysis.create({
         data: {
           tenantId,
@@ -68,10 +69,16 @@ export async function analyzePdf(req, res) {
         },
       });
 
-      await debitCredit(tenantId, userId, created.id, tx);
+      const { balanceBefore } = await debitCredit(tenantId, userId, created.id, tx);
 
-      return created;
+      return { created, balanceBefore };
     });
+
+    analysis = debit.created;
+
+    // Cache e alerta só depois do commit: dentro da transação, um rollback
+    // deixaria o cache invalidado e o alerta enviado por um débito desfeito.
+    await afterDebitCommit(tenantId, debit.balanceBefore);
 
     // Enfileira ANTES de responder: se a fila estiver fora do ar, o crédito
     // debitado precisa voltar em vez de deixar a análise presa em PROCESSING.
@@ -258,9 +265,7 @@ export async function getAnalysisPdf(req, res) {
 export async function listAnalyses(req, res) {
   try {
     const tenantId = req.tenantId;
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
-    const skip = (page - 1) * limit;
+    const { page, limit, skip } = parsePagination(req.query);
 
     const [analyses, total] = await Promise.all([
       prisma.analysis.findMany({

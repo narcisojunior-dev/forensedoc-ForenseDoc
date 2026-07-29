@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { prisma } from "../utils/prisma.js";
 import { countOccupiedSeats } from "./tenantController.js";
+import { parsePagination } from "../utils/pagination.js";
 
 /**
  * Métricas e gestão de planos do Admin Panel (Módulo 6 — RF-18/RF-20).
@@ -200,20 +201,33 @@ export async function updatePlan(req, res) {
 // Audit log (RF-19 apoio)
 // ─────────────────────────────────────────────────────────────
 
+/**
+ * Filtros do audit log, coagidos a string/data antes de entrar no `where`.
+ *
+ * `?action[not]=login` chega como objeto pelo qs e o Prisma o interpretaria
+ * como operador. As datas também passam a ser validadas: `new Date("qualquer
+ * coisa")` produzia `Invalid Date` e derrubava a consulta com 500.
+ */
+const auditLogQuerySchema = z.object({
+  action: z.string().trim().max(100).optional(),
+  tenantId: z.string().trim().max(100).optional(),
+  from: z.coerce.date().optional(),
+  to: z.coerce.date().optional(),
+});
+
 export async function listAuditLogs(req, res) {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = Math.min(parseInt(req.query.limit) || 30, 100);
-    const skip = (page - 1) * limit;
+    const { page, limit, skip } = parsePagination(req.query, { def: 30 });
+    const filters = auditLogQuerySchema.parse(req.query);
 
     const where = {
-      ...(req.query.action ? { action: req.query.action } : {}),
-      ...(req.query.tenantId ? { tenantId: req.query.tenantId } : {}),
-      ...(req.query.from || req.query.to
+      ...(filters.action ? { action: filters.action } : {}),
+      ...(filters.tenantId ? { tenantId: filters.tenantId } : {}),
+      ...(filters.from || filters.to
         ? {
             createdAt: {
-              ...(req.query.from ? { gte: new Date(req.query.from) } : {}),
-              ...(req.query.to ? { lte: new Date(req.query.to) } : {}),
+              ...(filters.from ? { gte: filters.from } : {}),
+              ...(filters.to ? { lte: filters.to } : {}),
             },
           }
         : {}),
@@ -241,6 +255,9 @@ export async function listAuditLogs(req, res) {
       pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
     });
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: "Filtro inválido." });
+    }
     console.error("[AdminMetrics] Erro ao listar audit logs:", error);
     return res.status(500).json({ error: "Erro interno no servidor." });
   }
@@ -252,10 +269,13 @@ export async function listAuditLogs(req, res) {
 
 export async function listAllPayments(req, res) {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = Math.min(parseInt(req.query.limit) || 30, 100);
-    const skip = (page - 1) * limit;
-    const where = req.query.status ? { status: req.query.status } : {};
+    const { page, limit, skip } = parsePagination(req.query, { def: 30 });
+    // Mesmo motivo do audit log: sem o enum, `?status[not]=PAID` entraria no
+    // where como operador do Prisma.
+    const { status } = z
+      .object({ status: z.enum(["PENDING", "PAID", "OVERDUE", "CANCELLED"]).optional() })
+      .parse(req.query);
+    const where = status ? { status } : {};
 
     const [payments, total] = await Promise.all([
       prisma.payment.findMany({
@@ -273,6 +293,9 @@ export async function listAllPayments(req, res) {
       pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
     });
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: "Filtro inválido." });
+    }
     console.error("[AdminMetrics] Erro ao listar pagamentos:", error);
     return res.status(500).json({ error: "Erro interno no servidor." });
   }

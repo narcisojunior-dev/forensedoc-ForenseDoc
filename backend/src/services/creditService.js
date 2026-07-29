@@ -51,6 +51,16 @@ export async function getBalancePublic(tenantId) {
   };
 }
 
+/**
+ * Debita um crédito. TODO o trabalho aqui usa `txClient` e nada mais — é o que
+ * permite ao chamador confiar que um rollback desfaz o débito por inteiro.
+ *
+ * Os efeitos colaterais que NÃO podem ser desfeitos por rollback (invalidar o
+ * cache do Redis, notificar o usuário) saem daqui de propósito: rodavam com o
+ * client global dentro da transação, então um rollback deixava o cache furado e
+ * um alerta de "créditos acabando" já enviado por um débito que não aconteceu.
+ * Quem chama executa `afterDebitCommit` depois do commit.
+ */
 export async function debitCredit(tenantId, userId, analysisId, txClient = prisma) {
   const balance = await txClient.creditBalance.findUnique({
     where: { tenantId },
@@ -96,8 +106,6 @@ export async function debitCredit(tenantId, userId, analysisId, txClient = prism
     })
   ]);
 
-  await invalidateCreditCache(tenantId);
-
   // Auditoria do gasto (Seção 2.8). Entra na mesma transação do débito para
   // que um rollback não deixe registro de um crédito que nunca saiu.
   await txClient.auditLog.create({
@@ -109,9 +117,27 @@ export async function debitCredit(tenantId, userId, analysisId, txClient = prism
     },
   });
 
-  await checkCreditAlerts(tenantId, balance);
+  // O saldo lido ANTES do decremento é o que `checkCreditAlerts` precisa para
+  // detectar a transição exata do limiar — por isso volta junto.
+  return { creditTx, balanceBefore: balance };
+}
 
-  return creditTx;
+/**
+ * Efeitos colaterais do débito que só valem depois do commit: invalidar o cache
+ * de saldo e disparar o alerta de créditos acabando.
+ *
+ * Nenhum dos dois pode ser desfeito por rollback, então rodar dentro da
+ * transação era arriscar cache furado e e-mail enviado por um débito revertido.
+ * As falhas são engolidas: o cache expira sozinho em 30s e um alerta perdido
+ * não justifica derrubar uma análise que já foi cobrada.
+ */
+export async function afterDebitCommit(tenantId, balanceBefore) {
+  await invalidateCreditCache(tenantId).catch((err) =>
+    console.error("[CreditService] Falha ao invalidar cache de saldo:", err.message)
+  );
+  await checkCreditAlerts(tenantId, balanceBefore).catch((err) =>
+    console.error("[CreditService] Falha ao emitir alerta de saldo:", err.message)
+  );
 }
 
 export async function getActiveSubscription(tenantId) {

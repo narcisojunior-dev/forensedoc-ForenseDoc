@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, json } from "express";
 import { analyzePdf, getAnalysisStatus, getAnalysisResult, getAnalysisPdf, correctAnalysisGeo, listAnalyses, getAnalysisStats } from "../controllers/analyzeController.js";
 import { geocode, ipLocation } from "../controllers/geoController.js";
 import authRoutes from "./authRoutes.js";
@@ -15,6 +15,17 @@ import { tenantLimiter, analyzeLimiter } from "../middleware/rateLimiters.js";
 const router = Router();
 
 const ANALYZE_TIMEOUT_MS = Number(process.env.ANALYZE_TIMEOUT_MS || 90_000);
+
+/**
+ * Parser exclusivo da rota de análise — a única que recebe PDF em base64.
+ *
+ * O limite global do server.js é 1 MB; aqui ele sobe para acomodar o
+ * MAX_PDF_MB (padrão 30), com folga para o inchaço de ~33% do base64 e para o
+ * resto do JSON. `validatePdfPayload` continua sendo quem recusa o arquivo
+ * grande com mensagem própria — este limite é só o teto bruto do transporte.
+ */
+const MAX_PDF_MB = Number(process.env.MAX_PDF_MB || 30);
+const analyzeBodyParser = json({ limit: `${Math.ceil(MAX_PDF_MB * 1.4) + 1}mb` });
 
 function requestTimeout(ms) {
   return (req, res, next) => {
@@ -46,6 +57,7 @@ router.use("/admin", adminRoutes);
 // Rotas de Análise (Módulo 4 — assíncrono via BullMQ, ver worker.js)
 router.post(
   "/analyze",
+  analyzeBodyParser, // única rota que aceita corpo acima do limite global
   requireAuth,
   analyzeLimiter, // anti-duplo-clique: 1 análise / 30s por tenant
   requireCredit,
