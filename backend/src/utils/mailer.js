@@ -1,9 +1,16 @@
 import nodemailer from "nodemailer";
 import "dotenv/config";
 
+const SMTP_PORT = Number(process.env.SMTP_PORT) || 587;
+
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
-  port: process.env.SMTP_PORT,
+  // Number, não string: o nodemailer usa a porta para decidir o modo de
+  // conexão, e "465" como texto não casa com a checagem de TLS implícito.
+  port: SMTP_PORT,
+  // 465 é TLS desde o handshake; 587 e 25 começam em claro e sobem via
+  // STARTTLS. Sem esta flag, configurar a porta 465 falha na conexão.
+  secure: SMTP_PORT === 465,
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,

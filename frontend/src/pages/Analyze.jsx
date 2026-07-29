@@ -12,6 +12,12 @@ import { DistanceBanner } from "../components/DistanceBanner.jsx";
 import { GeoMap } from "../components/GeoMap.jsx";
 import { useAuthStore } from "../store/authStore.js";
 
+// Espelha o MAX_PDF_MB do backend (utils/pdfValidation.js). Checar aqui evita
+// converter 100 MB para base64 na memória do navegador só para o servidor
+// recusar depois — e o 413 do express não traz mensagem legível para a tela.
+const MAX_PDF_MB = Number(import.meta.env.VITE_MAX_PDF_MB) || 30;
+const MAX_PDF_BYTES = MAX_PDF_MB * 1024 * 1024;
+
 function arrayBufferToBase64(buffer) {
   let binary = "";
   const bytes = new Uint8Array(buffer);
@@ -136,6 +142,15 @@ export default function Analyze() {
     if (!file) return;
     if (!file.name.match(/\.(pdf|PDF)$/)) {
       setError("Formato não suportado. Envie um arquivo em PDF.");
+      setStage("error");
+      return;
+    }
+
+    if (file.size > MAX_PDF_BYTES) {
+      setError(
+        `O arquivo tem ${(file.size / 1024 / 1024).toFixed(1)} MB e o limite é ${MAX_PDF_MB} MB. ` +
+          "Reduza o PDF (ex.: salve sem imagens em alta resolução) e envie novamente."
+      );
       setStage("error");
       return;
     }
