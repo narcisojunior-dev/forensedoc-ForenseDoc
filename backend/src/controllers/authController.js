@@ -8,6 +8,12 @@ import { generateAccessToken } from "../utils/jwt.js";
 import { enqueueEmail } from "../services/notificationService.js";
 import { redis } from "../utils/redis.js";
 import { normalizeEmail } from "../utils/stringUtils.js";
+import { validatePassword } from "../utils/passwordPolicy.js";
+import {
+  applyLoginBackoff,
+  registerLoginFailure,
+  clearLoginFailures,
+} from "../utils/loginBackoff.js";
 
 // ─── Schemas de Validação (Zod) ────────────────────────────────────────────────
 
@@ -19,7 +25,7 @@ const emailField = (message = "E-mail inválido") =>
 const registerSchema = z.object({
   name: z.string().min(3, "Nome muito curto"),
   email: emailField(),
-  password: z.string().min(8, "Senha deve ter no mínimo 8 caracteres"),
+  password: z.string().min(1, "Senha é obrigatória"),
   cpfCnpj: z.string().min(11, "CPF/CNPJ inválido"),
   oabNumber: z.string().optional(),
   oabState: z.string().length(2).optional(),
@@ -41,12 +47,12 @@ const updateProfileSchema = z.object({
 
 const changePasswordSchema = z.object({
   currentPassword: z.string().min(1, "Senha atual é obrigatória"),
-  newPassword: z.string().min(8, "Senha deve ter no mínimo 8 caracteres"),
+  newPassword: z.string().min(1, "Senha é obrigatória"),
 });
 
 const resetPasswordSchema = z.object({
   token: z.string().min(1, "Token ausente"),
-  newPassword: z.string().min(8, "Senha deve ter no mínimo 8 caracteres"),
+  newPassword: z.string().min(1, "Senha é obrigatória"),
 });
 
 // Helper para gerar hash do token de refresh e verificação
@@ -111,6 +117,11 @@ export async function register(req, res) {
 
     const existingTenant = await prisma.tenant.findUnique({ where: { cpfCnpj: data.cpfCnpj } });
     if (existingTenant) return res.status(400).json({ error: "CPF/CNPJ já cadastrado." });
+
+    // Política de senha depois da unicidade: não vale gastar uma chamada ao
+    // HIBP por um cadastro que já vai ser recusado.
+    const politica = await validatePassword(data.password, { email: data.email, name: data.name });
+    if (!politica.ok) return res.status(400).json({ error: politica.error, code: "WEAK_PASSWORD" });
 
     // 2. Hash da senha
     const passwordHash = await bcrypt.hash(data.password, 12);
@@ -215,8 +226,17 @@ export async function login(req, res) {
       user?.passwordHash || DUMMY_PASSWORD_HASH
     );
     if (!user || !isValidPassword) {
+      // Atraso proporcional às falhas já acumuladas por esta conta, aplicado
+      // antes da resposta. Chaveado pelo e-mail exista ou não a conta, para não
+      // desfazer a paridade de timing conquistada acima.
+      await registerLoginFailure(email);
+      await applyLoginBackoff(email);
       return res.status(401).json({ error: "Credenciais inválidas." });
     }
+
+    // Credencial correta zera o contador: o dono legítimo que errou a senha
+    // algumas vezes não deve arrastar atraso pelas próximas 30 min.
+    await clearLoginFailures(email);
 
     if (!user.emailVerified) return res.status(403).json({ error: "E-mail não confirmado.", code: "EMAIL_NOT_VERIFIED" });
     if (!user.active) return res.status(403).json({ error: "Conta desativada.", code: "ACCOUNT_DEACTIVATED" });
@@ -272,9 +292,13 @@ export async function login(req, res) {
 
 export async function refresh(req, res) {
   try {
-    // Para simplificar no dev local se cookies não estiverem configurados, podemos aceitar no header/body também,
-    // mas em prod sempre usar cookie
-    const refreshTokenString = req.cookies?.refreshToken || req.body.refreshToken;
+    // O fallback pelo body existe para facilitar o dev local (Postman, curl sem
+    // jar de cookie), mas em produção só vale o cookie httpOnly: aceitar o token
+    // no corpo contorna as proteções que o cookie carrega (httpOnly, Secure,
+    // SameSite) e permite que ele acabe num log de requisição ou num histórico.
+    const refreshTokenString =
+      req.cookies?.refreshToken ||
+      (process.env.NODE_ENV !== "production" ? req.body?.refreshToken : null);
     if (!refreshTokenString) return res.status(401).json({ error: "Refresh token ausente." });
 
     const hashedToken = hashToken(refreshTokenString);
@@ -432,6 +456,13 @@ export async function resetPassword(req, res) {
     if (reset.used) return res.status(400).json({ error: "Token já utilizado." });
     if (new Date() > reset.expiresAt) return res.status(400).json({ error: "Token expirado." });
 
+    const dono = await prisma.user.findUnique({
+      where: { id: reset.userId },
+      select: { email: true, name: true },
+    });
+    const politica = await validatePassword(newPassword, dono || {});
+    if (!politica.ok) return res.status(400).json({ error: politica.error, code: "WEAK_PASSWORD" });
+
     const passwordHash = await bcrypt.hash(newPassword, 12);
 
     await prisma.$transaction([
@@ -553,6 +584,9 @@ export async function changePassword(req, res) {
 
     const isValid = await bcrypt.compare(currentPassword, user.passwordHash);
     if (!isValid) return res.status(401).json({ error: "Senha atual incorreta." });
+
+    const politica = await validatePassword(newPassword, { email: user.email, name: user.name });
+    if (!politica.ok) return res.status(400).json({ error: politica.error, code: "WEAK_PASSWORD" });
 
     const passwordHash = await bcrypt.hash(newPassword, 12);
 

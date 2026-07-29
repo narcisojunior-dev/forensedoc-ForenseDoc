@@ -10,7 +10,7 @@ import notificationRoutes from "./notificationRoutes.js";
 import adminRoutes from "./adminRoutes.js";
 import { requireAuth } from "../middleware/auth.js";
 import { requireCredit } from "../middleware/creditGuard.js";
-import { tenantLimiter, analyzeLimiter } from "../middleware/rateLimiters.js";
+import { tenantLimiter, analyzeLimiter, externalApiLimiter } from "../middleware/rateLimiters.js";
 
 const router = Router();
 
@@ -73,8 +73,8 @@ router.patch("/analyses/:id/geo", requireAuth, tenantLimiter, correctAnalysisGeo
 router.get("/analyses", requireAuth, tenantLimiter, listAnalyses);
 
 // Rotas Utilitárias
-router.get("/geocode", requireAuth, tenantLimiter, geocode);
-router.get("/ip/:ip", requireAuth, tenantLimiter, ipLocation);
+router.get("/geocode", requireAuth, tenantLimiter, externalApiLimiter, geocode);
+router.get("/ip/:ip", requireAuth, tenantLimiter, externalApiLimiter, ipLocation);
 
 export default router;
 

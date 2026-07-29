@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { register, login, refresh, verifyEmail, logout, me, forgotPassword, resetPassword, updateProfile, changePassword } from "../controllers/authController.js";
 import { requireAuth } from "../middleware/auth.js";
+import { csrfGuard } from "../middleware/csrfGuard.js";
 import { createLimiter } from "../utils/rateLimitStore.js";
 import { normalizeEmail } from "../utils/stringUtils.js";
 
@@ -78,6 +79,11 @@ const tokenLimiter = createLimiter({
   message: { error: "Muitas tentativas. Tente novamente mais tarde." },
   prefix: "rl:token:",
 });
+
+// As rotas de auth autenticam por COOKIE (refresh/logout), então são as únicas
+// alcançáveis por uma requisição forjada de outro site. O guard de origem é a
+// segunda camada, independente do SameSite do navegador.
+router.use(csrfGuard);
 
 // Rotas Públicas
 router.post("/register", registerLimiter, register);

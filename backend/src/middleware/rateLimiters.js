@@ -2,6 +2,32 @@ import { ipKeyGenerator } from "express-rate-limit";
 import { createLimiter } from "../utils/rateLimitStore.js";
 
 /**
+ * Teto global por IP, aplicado antes do roteamento (N5 da auditoria).
+ *
+ * Os limitadores existentes cobriam rotas específicas, mas não havia piso: as
+ * rotas públicas sem limitador próprio (`/billing/plans`) e, principalmente, o
+ * handler de 404 aceitavam volume ilimitado. Marretar `/api/qualquer-coisa`
+ * inexistente consumia event loop e conexões do servidor sem esbarrar em nada.
+ *
+ * O valor é deliberadamente folgado — 300/min por IP. Ele não substitui os
+ * limites por rota (login, análise, admin), que continuam sendo a defesa
+ * afiada; serve só para que nenhum caminho fique com teto infinito. Um
+ * escritório inteiro atrás de um NAT precisa caber aqui sem atrito.
+ *
+ * O webhook da Asaas fica de fora: ela entrega notificações em rajada a partir
+ * de 4 IPs fixos, e um teto por IP transformaria um pico legítimo de cobrança
+ * em pagamento perdido. Aquela rota já tem allowlist de IP e limite próprio.
+ */
+export const globalLimiter = createLimiter({
+  windowMs: 60 * 1000,
+  max: 300,
+  keyGenerator: (req) => `ip:${ipKeyGenerator(req.ip)}`,
+  skip: (req) => req.path.startsWith("/webhooks/"),
+  message: { error: "Limite de requisições excedido. Aguarde um instante." },
+  prefix: "rl:global:",
+});
+
+/**
  * Limitadores das rotas autenticadas (Seção 2.4 do plano).
  *
  * A chave é o tenant, não o IP: um escritório inteiro atrás de um mesmo IP
@@ -39,6 +65,27 @@ export const founderInviteLimiter = createLimiter({
     code: "FOUNDER_INVITE_RATE_LIMITED",
   },
   prefix: "rl:founder:",
+});
+
+/**
+ * Rotas que consultam serviços externos por conta do servidor: 30/min por
+ * tenant (N11 da auditoria).
+ *
+ * `/geocode` e `/ip/:ip` são proxies para Nominatim e ipapi.co. Sob o limite
+ * geral de 200/min, um usuário autenticado conseguia disparar tráfego suficiente
+ * para queimar a cota gratuita ou fazer o IP do servidor ser banido por esses
+ * provedores — punindo todos os outros clientes por conta de um. Nominatim, em
+ * particular, exige no máximo 1 req/s por política de uso.
+ */
+export const externalApiLimiter = createLimiter({
+  windowMs: 60 * 1000,
+  max: 30,
+  keyGenerator: tenantKey,
+  message: {
+    error: "Muitas consultas de localização. Aguarde um instante.",
+    code: "GEO_RATE_LIMITED",
+  },
+  prefix: "rl:geo:",
 });
 
 /**

@@ -5,6 +5,7 @@ import bcrypt from "bcryptjs";
 import { prisma } from "../utils/prisma.js";
 import { enqueueEmail } from "../services/notificationService.js";
 import { normalizeEmail } from "../utils/stringUtils.js";
+import { validatePassword } from "../utils/passwordPolicy.js";
 
 // Normaliza antes de validar, igual ao authController: o e-mail gravado no
 // convite é o mesmo que vai virar chave do usuário no aceite, e as duas pontas
@@ -15,7 +16,7 @@ const inviteSchema = z.object({
 
 const acceptInviteSchema = z.object({
   name: z.string().min(3, "Nome muito curto"),
-  password: z.string().min(8, "Senha deve ter no mínimo 8 caracteres"),
+  password: z.string().min(1, "Senha é obrigatória"),
 });
 
 const INVITE_EXPIRES_MS = 72 * 60 * 60 * 1000; // 72h
@@ -216,6 +217,9 @@ export async function acceptInvite(req, res) {
     if (existing) {
       return res.status(400).json({ error: "E-mail já cadastrado.", code: "EMAIL_ALREADY_REGISTERED" });
     }
+
+    const politica = await validatePassword(password, { email: invite.email, name });
+    if (!politica.ok) return res.status(400).json({ error: politica.error, code: "WEAK_PASSWORD" });
 
     const passwordHash = await bcrypt.hash(password, 12);
 
