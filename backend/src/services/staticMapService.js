@@ -10,6 +10,13 @@
  * O mapa é um reforço visual, nunca um requisito para o laudo existir.
  */
 
+// O módulo lê GEOAPIFY_KEY do ambiente. `server.js` e `worker.js` já carregam o
+// dotenv antes de importá-lo, mas depender disso deixava o mapa silenciosamente
+// ausente em qualquer entrada que não passe por eles (script, teste, CLI) — e a
+// ausência do mapa não gera erro, só um laudo sem a peça visual. Mesma proteção
+// que utils/jwt.js e utils/mailer.js já adotam.
+import "dotenv/config";
+
 const FETCH_TIMEOUT_MS = 10_000;
 const BASE = "https://maps.geoapify.com/v1/staticmap";
 
