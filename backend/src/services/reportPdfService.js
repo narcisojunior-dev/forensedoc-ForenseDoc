@@ -616,6 +616,27 @@ function sectionIpTrace(ctx, result) {
     if (ip.data_hora) field(ctx, "   Data / hora do registro", ip.data_hora);
     if (ip.user_agent) field(ctx, "   Dispositivo declarado", ip.user_agent);
 
+    // Endereço de CGNAT não é ausência de dado nem falha de consulta: é um
+    // endereço que, por natureza, não localiza ninguém. Tratá-lo com a mesma
+    // frase de "o provedor não respondeu" seria impreciso, e a consequência
+    // probatória (o endereço sozinho não individualiza o assinante) é o ponto
+    // mais importante a registrar quando o documento traz IPv4.
+    if (ip.compartilhado) {
+      paragraph(
+        ctx,
+        "Este endereço pertence ao espaço compartilhado entre assinantes (CGNAT, RFC 6598, faixa 100.64.0.0/10). Trata-se de endereço interno da operadora, atribuído simultaneamente a um grande número de clientes, razão pela qual não corresponde a uma localização geográfica do usuário e não é possível confrontá-lo com a residência informada. A identificação de quem utilizava a conexão depende de requisição à operadora do conjunto endereço, PORTA LÓGICA e data e hora do acesso (Marco Civil da Internet, arts. 13 e 15, c/c art. 22). A ausência de qualquer um desses três elementos no documento inviabiliza a identificação, ainda que o endereço esteja registrado.",
+        { color: DANGER, size: 8.5 }
+      );
+      if (!ip.porta) {
+        paragraph(
+          ctx,
+          "Observa-se que o documento NÃO registra a porta lógica, elemento sem o qual a operadora não consegue individualizar o assinante em conexão sob CGNAT.",
+          { color: DANGER, size: 8.5 }
+        );
+      }
+      continue;
+    }
+
     if (!ip.geo) {
       // Distinção essencial num laudo: o documento trazia o dado, a CONSULTA
       // falhou. Tratar as duas ausências como iguais induziria a erro.

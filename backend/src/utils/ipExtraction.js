@@ -47,6 +47,22 @@ const IPV4_BRUTO = "(?:\\d{1,3}\\.){3}\\d{1,3}";
 const CONTEXTO_RUIDOSO =
   /(?:chrome|safari|firefox|edge|opera|applewebkit|webkit|gecko|mozilla|samsungbrowser|version|vers[ãa]o|build|sdk|android|ios|windows\s*nt)\s*\/?\s*$/i;
 
+/**
+ * Mesma família de ruído, mas SEPARADA do candidato por outras palavras:
+ * "Versão do aplicativo 2.14.0.1", "build do sistema 5.2.1.3".
+ *
+ * `CONTEXTO_RUIDOSO` exige adjacência (o "/" de "Chrome/130.0.0.0") e por isso
+ * não alcança esses casos. A distinção importa porque o dano é concreto e
+ * silencioso: "2.14.0.1" é endereço roteável de verdade, geolocaliza em
+ * Issy-les-Moulineaux (Orange S.A., França) e entraria no laudo como origem da
+ * assinatura. Um número de versão viraria prova de que o ato partiu do exterior.
+ *
+ * Só se aplica a candidatos SEM rótulo: quando o documento diz "Endereço de IP:",
+ * a declaração do próprio instrumento prevalece sobre a heurística.
+ */
+const VERSAO_PROXIMA =
+  /\b(?:vers[ãa]o|version|build|release|revis[ãa]o|patch|firmware|aplicativo|app|sistema|m[óo]dulo|plugin|biblioteca|v)\b[^.]{0,25}$/i;
+
 /** Faixas que não identificam um usuário na internet pública. */
 function ehIpUtilizavel(ip) {
   const v = isIP(ip);
@@ -72,12 +88,39 @@ function ehIpUtilizavel(ip) {
   return true;
 }
 
+/**
+ * Endereço de espaço COMPARTILHADO entre assinantes (CGNAT, RFC 6598).
+ *
+ * Faixa 100.64.0.0/10. É o que a operadora atribui ao cliente quando não há
+ * IPv4 público para todo mundo, e é comuníssimo em banda larga e móvel no
+ * Brasil — exatamente o cenário dos documentos que chegam a este laudo.
+ *
+ * A consequência pericial é específica e precisa aparecer no documento: esse
+ * endereço é interno da operadora, então (a) geolocalizá-lo não produz a
+ * posição do usuário, e (b) ele NÃO individualiza o assinante, porque centenas
+ * de clientes compartilham o mesmo endereço ao mesmo tempo. Só a tríade
+ * endereço + porta lógica + data/hora permite à operadora identificar quem
+ * estava usando a conexão (Marco Civil, art. 13).
+ *
+ * Sem essa marcação, o laudo trataria um endereço de CGNAT como se fosse a
+ * origem geográfica do ato, o que é falso.
+ */
+export function ehCompartilhado(ip) {
+  if (isIP(ip) !== 4) return false;
+  const o = ip.split(".").map(Number);
+  return o[0] === 100 && o[1] >= 64 && o[1] <= 127;
+}
+
 /** Remove a porta que os assinadores anexam ao endereço. */
 function separarPorta(bruto) {
   const texto = bruto.trim().replace(/[.,;]+$/, "");
 
-  // IPv4 com porta: "200.1.2.3:56256"
-  const v4 = texto.match(/^((?:\d{1,3}\.){3}\d{1,3}):(\d{2,5})$/);
+  // IPv4 com porta: "200.1.2.3:56256" ou "200.1.2.3: 56256".
+  // O espaço depois dos dois-pontos aparece quando o PDF quebra a linha ali, e
+  // sem ele a porta se perdia. Ela não é acessório: sob CGNAT, o endereço
+  // sozinho não individualiza o assinante, e é a porta que fecha a
+  // identificação junto da data e hora (Marco Civil, art. 13).
+  const v4 = texto.match(/^((?:\d{1,3}\.){3}\d{1,3}):\s*(\d{2,5})$/);
   if (v4) return { ip: v4[1], porta: v4[2] };
 
   if (isIP(texto)) return { ip: texto, porta: null };
@@ -131,6 +174,7 @@ export function extractIpAddresses(rawText) {
     achados.set(chave, {
       endereco: ip,
       versao: isIP(ip),
+      compartilhado: ehCompartilhado(ip),
       porta: porta || null,
       rotulo: rotulo || null,
       contexto: rotulo
@@ -144,7 +188,7 @@ export function extractIpAddresses(rawText) {
   // ─── 1ª passada: endereços precedidos de rótulo (alta confiança) ───────────
   for (const rotulo of ROTULOS) {
     const re = new RegExp(
-      `(${rotulo})\\s*[:\\-]?\\s*((?:${IPV6_BRUTO})(?::\\s*\\d{2,5})?|(?:${IPV4_BRUTO})(?::\\d{2,5})?)`,
+      `(${rotulo})\\s*[:\\-]?\\s*((?:${IPV6_BRUTO})(?::\\s*\\d{2,5})?|(?:${IPV4_BRUTO})(?::\\s*\\d{2,5})?)`,
       "gi"
     );
     for (const m of flat.matchAll(re)) {
@@ -158,6 +202,8 @@ export function extractIpAddresses(rawText) {
       // "Chrome/130.0.0.0" — o que vem imediatamente antes denuncia a origem.
       const antes = flat.slice(Math.max(0, m.index - 40), m.index);
       if (CONTEXTO_RUIDOSO.test(antes)) continue;
+      // "Versão do aplicativo 2.14.0.1" — o ruído está algumas palavras atrás.
+      if (VERSAO_PROXIMA.test(antes)) continue;
       registrar(m[0], m.index, null);
     }
   }

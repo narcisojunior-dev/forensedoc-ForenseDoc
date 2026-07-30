@@ -37,6 +37,19 @@ export async function enrichGeography(extracted, homeAddress, homeCoord = null) 
       ipResults.push({ ...ipInfo, geo: null, geoFailure: "endereço inválido" });
       continue;
     }
+    // CGNAT (100.64.0.0/10) é espaço interno da operadora. Consultar provedor
+    // devolveria, na melhor hipótese, nada e, na pior, o centroide de um bloco
+    // que não corresponde a lugar nenhum. Um laudo não pode apresentar isso como
+    // origem do ato: o correto é declarar por que o confronto não é possível.
+    if (ipInfo.compartilhado) {
+      ipResults.push({
+        ...ipInfo,
+        geo: null,
+        geoFailure:
+          "endereço de espaço compartilhado (CGNAT, RFC 6598): é interno da operadora e não corresponde a uma localização geográfica do usuário",
+      });
+      continue;
+    }
     const geo = await getIpInfo(ipInfo.endereco);
     ipResults.push({
       ...ipInfo,

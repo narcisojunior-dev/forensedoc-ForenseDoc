@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { extractIpAddresses } from "../src/utils/ipExtraction.js";
+import { extractIpAddresses, ehCompartilhado } from "../src/utils/ipExtraction.js";
 
 /**
  * Regressão do defeito relatado: "o endereço do IP não é verificado
@@ -141,5 +141,66 @@ describe("robustez", () => {
 
   it("tolera texto longo sem IP", () => {
     expect(extractIpAddresses("lorem ipsum ".repeat(500))).toEqual([]);
+  });
+});
+
+/**
+ * IPv4 é o caso com MAIS superfície de erro que o IPv6, não menos: números de
+ * versão e de seção têm o mesmo formato de um endereço IPv4, e vários deles são
+ * roteáveis de verdade. Um "2.14.0.1" solto no texto geolocaliza em Orange S.A.,
+ * França, e entraria no laudo como origem da assinatura.
+ */
+describe("extractIpAddresses — documentos com IPv4", () => {
+  it("captura endereço rotulado com porta separada por espaço", () => {
+    // A quebra de linha do PDF insere o espaço, e a porta se perdia.
+    const [ip] = extractIpAddresses("IP e Porta Lógica: 189.40.112.87: 44210");
+    expect(ip.endereco).toBe("189.40.112.87");
+    expect(ip.porta).toBe("44210");
+    expect(ip.versao).toBe(4);
+  });
+
+  it("captura endereço rotulado sem porta e endereço solto no texto", () => {
+    expect(extractIpAddresses("Endereço de IP: 200.155.8.42")[0].endereco).toBe("200.155.8.42");
+    expect(extractIpAddresses("acesso originado de 177.220.170.1 conforme registro")[0].endereco)
+      .toBe("177.220.170.1");
+  });
+
+  it("descarta número de versão separado do rótulo por outras palavras", () => {
+    // O caso que passava: CONTEXTO_RUIDOSO exigia adjacência ("Chrome/130.0.0.0").
+    for (const texto of [
+      "Versão do aplicativo 2.14.0.1 instalada",
+      "build do sistema 5.2.1.3",
+      "revisão do módulo 8.1.2.3",
+    ]) {
+      expect(extractIpAddresses(texto)).toEqual([]);
+    }
+  });
+
+  it("o rótulo explícito prevalece sobre a heurística de versão", () => {
+    // Se o documento DIZ que é IP, a declaração do instrumento vence.
+    const r = extractIpAddresses("Versão do app: IP de origem 191.5.60.10");
+    expect(r).toHaveLength(1);
+    expect(r[0].endereco).toBe("191.5.60.10");
+  });
+
+  it("continua descartando user-agent, cláusula e faixas privadas", () => {
+    expect(extractIpAddresses("AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36")).toEqual([]);
+    expect(extractIpAddresses("Cláusula 3.3.3.1 do instrumento")).toEqual([]);
+    expect(extractIpAddresses("IP do signatário: 192.168.0.15")).toEqual([]);
+    expect(extractIpAddresses("conexão local 127.0.0.1")).toEqual([]);
+  });
+
+  it("marca CGNAT, que é o padrão de IPv4 em banda larga e móvel no Brasil", () => {
+    const [ip] = extractIpAddresses("IP e Porta Lógica: 100.64.12.9: 31002");
+    expect(ip.endereco).toBe("100.64.12.9");
+    expect(ip.compartilhado).toBe(true);
+    // A porta é o que ainda permite identificar o assinante junto à operadora.
+    expect(ip.porta).toBe("31002");
+  });
+
+  it("não marca como compartilhado um IPv4 público nem um IPv6", () => {
+    expect(ehCompartilhado("189.40.112.87")).toBe(false);
+    expect(ehCompartilhado("100.128.0.1")).toBe(false); // fora da /10
+    expect(ehCompartilhado("2804:18::1")).toBe(false);
   });
 });

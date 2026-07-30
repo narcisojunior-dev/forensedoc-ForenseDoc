@@ -73,7 +73,30 @@ export default function IpTrace({ ipAnalysis, homeGeo }) {
             {ip.data_hora && <Row label="Data / hora do registro" value={ip.data_hora} />}
             {ip.user_agent && <Row label="Dispositivo declarado" value={ip.user_agent} />}
 
-            {ip.geo ? (
+            {ip.compartilhado ? (
+              /* CGNAT não é ausência de dado nem falha de consulta: é endereço
+                 que, por natureza, não localiza ninguém. A consequência
+                 probatória é o achado principal quando o documento traz IPv4. */
+              <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/[0.05] px-4 py-3">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+                <div className="text-[12.5px] leading-relaxed text-zinc-300">
+                  <p>
+                    Endereço de espaço compartilhado entre assinantes (CGNAT, RFC 6598, faixa
+                    100.64.0.0/10). É endereço interno da operadora, atribuído simultaneamente a
+                    muitos clientes: não corresponde a uma localização geográfica do usuário e não
+                    pode ser confrontado com a residência informada. Identificar quem usava a
+                    conexão exige requisitar da operadora o conjunto endereço,{" "}
+                    <b>porta lógica</b> e data/hora (Marco Civil, arts. 13 e 15, c/c art. 22).
+                  </p>
+                  {!ip.porta && (
+                    <p className="mt-1.5 text-amber-400/90">
+                      O documento não registra a porta lógica, sem a qual a operadora não consegue
+                      individualizar o assinante nessa modalidade de conexão.
+                    </p>
+                  )}
+                </div>
+              </div>
+            ) : ip.geo ? (
               <>
                 <Row
                   label="Origem da conexão"
