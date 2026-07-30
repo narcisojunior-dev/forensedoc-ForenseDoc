@@ -8,13 +8,11 @@ import {
 
 import { api } from "../lib/axios.js";
 import { classifyHashString } from "../utils/crypto.js";
-import { riskFromDistance } from "../utils/geo.js";
 import { exportReportPDF } from "../utils/pdfExport.js";
 import { downloadReportPdf } from "../utils/reportDownload.js";
 import {
   Row, Badge, Section, SubHead, Note, Flag, CompareGrid, CompareCard, Norm, TONES,
 } from "../components/UiComponents.jsx";
-import { DistanceBanner } from "../components/DistanceBanner.jsx";
 import { GeoMap } from "../components/GeoMap.jsx";
 import CadeiaCustodia from "../components/report/CadeiaCustodia.jsx";
 import IpTrace from "../components/report/IpTrace.jsx";
@@ -901,10 +899,51 @@ export default function Analyze() {
 
                   {report.contractGeo.distance !== null && report.contractGeo.distance !== undefined ? (
                     <div data-geo-visual className="mt-4 space-y-3">
-                      <DistanceBanner
-                        label="Distância: residência do cliente → local declarado da assinatura"
-                        km={report.contractGeo.distance}
-                      />
+                      {/* A classificação vem do servidor (`contractGeo.divergencia`).
+                          O `DistanceBanner` usava `riskFromDistance`, calibrada para
+                          geolocalização de IP: rotulava 1,47 km como "RISCO BAIXO"
+                          logo abaixo do texto que afirma o contrário, e daria o mesmo
+                          rótulo a 45 km entre o local declarado e a casa do cliente. */}
+                      {report.contractGeo.divergencia && (
+                        <div
+                          data-report-block
+                          className={`rounded-xl border px-5 py-4 ${
+                            (TONES[report.contractGeo.divergencia.tom] || TONES.neutral).bg
+                          }`}
+                          style={{
+                            borderColor: `${(TONES[report.contractGeo.divergencia.tom] || TONES.neutral).hex}55`,
+                          }}
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <span className="text-[12px] text-zinc-400">
+                              Distância: residência do cliente → local declarado da assinatura
+                            </span>
+                            <div className="flex items-center gap-2">
+                              <span
+                                className="text-[17px] font-bold tabular-nums"
+                                style={{
+                                  color: (TONES[report.contractGeo.divergencia.tom] || TONES.neutral)
+                                    .hex,
+                                }}
+                              >
+                                {report.contractGeo.divergencia.km.toFixed(2)} km
+                              </span>
+                              <Badge
+                                label={report.contractGeo.divergencia.rotulo}
+                                tone={report.contractGeo.divergencia.tom}
+                              />
+                            </div>
+                          </div>
+                          <p className="mt-2 text-[12.5px] leading-relaxed text-zinc-300">
+                            {report.contractGeo.divergencia.sintese}
+                          </p>
+                          {report.contractGeo.divergencia.ressalva && (
+                            <p className="mt-1 text-[11.5px] leading-relaxed text-zinc-500">
+                              {report.contractGeo.divergencia.ressalva}
+                            </p>
+                          )}
+                        </div>
+                      )}
                       {/* Confronto 2 — residência × geolocalização declarada.
                           Ambos os pontos têm precisão métrica, então a escala é
                           local e uma divergência pequena já é significativa. */}
@@ -923,7 +962,9 @@ export default function Analyze() {
                           titulo: "Geolocalização declarada no documento",
                         }}
                         distanceKm={report.contractGeo.distance}
-                        riskColor={riskFromDistance(report.contractGeo.distance).color}
+                        riskColor={
+                          (TONES[report.contractGeo.divergencia?.tom] || TONES.neutral).hex
+                        }
                         legenda={
                           <>
                             <b className="text-foreground">Mapa 2 — residência × local declarado.</b>{" "}
@@ -959,9 +1000,9 @@ export default function Analyze() {
               )}
             </Section>
 
-            {/* §6 */}
+            {/* § 5.3 — mesma numeração do PDF. */}
             <Section
-              title={`§ 6 · Endereços IP e geolocalização (${report.ipAnalysis.length} encontrado(s))`}
+              title={`§ 5.3 · Rastro de conexão · endereços IP (${report.ipAnalysis.length} encontrado(s))`}
             >
               {report.ipAnalysis.length === 0 ? (
                 <p className="py-6 text-center text-[13px] text-zinc-500">
@@ -991,26 +1032,34 @@ export default function Analyze() {
               )}
             </Section>
 
-            {/* §7 */}
-            {report.extracted.evidencias_irregularidade?.length > 0 && (
-              <Section title="§ 7 · Evidências de irregularidade" danger>
-                {report.extracted.evidencias_irregularidade.map((ev, i) => (
+            {/* §6 */}
+            <Section
+              title="§ 6 · Evidências de irregularidade"
+              danger={report.extracted.evidencias_irregularidade?.length > 0}
+            >
+              {report.extracted.evidencias_irregularidade?.length > 0 ? (
+                report.extracted.evidencias_irregularidade.map((ev, i) => (
                   <Flag key={i} tone="danger">{ev}</Flag>
-                ))}
-              </Section>
-            )}
+                ))
+              ) : (
+                <Note>
+                  A análise dos elementos extraídos deste documento não identificou evidência
+                  autônoma de irregularidade. A ausência de achado nesta seção não convalida o
+                  instrumento: as ressalvas dos §§ 4 e 5 subsistem e devem ser lidas em conjunto.
+                </Note>
+              )}
+            </Section>
+
+            {/* §7 */}
+            <Section title="§ 7 · Observações periciais complementares">
+              <p className="text-[13.5px] leading-relaxed text-zinc-300">
+                {report.extracted.observacoes_periciais ||
+                  "Não há observação complementar além do que já consta das seções anteriores."}
+              </p>
+            </Section>
 
             {/* §8 */}
-            {report.extracted.observacoes_periciais && (
-              <Section title="§ 8 · Observações periciais complementares">
-                <p className="text-[13.5px] leading-relaxed text-zinc-300">
-                  {report.extracted.observacoes_periciais}
-                </p>
-              </Section>
-            )}
-
-            {/* §9 */}
-            <Section title="§ 9 · Fundamentação normativa aplicável">
+            <Section title="§ 8 · Fundamentação normativa aplicável">
               {(() => {
                 const ctr = report.extracted.contrato || {};
                 const declaredHash = report.extracted.assinatura?.hash_documento_assinado;

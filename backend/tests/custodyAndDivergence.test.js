@@ -1,6 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { buildCustodyChain, ELEMENTOS_CADEIA } from "../src/reports/custodyChain.js";
-import { classifyIpDivergence, describeIpDivergence } from "../src/utils/geoDivergence.js";
+import {
+  classifyIpDivergence,
+  describeIpDivergence,
+  classifyDeclaredDivergence,
+} from "../src/utils/geoDivergence.js";
 
 /**
  * § 4.1 do laudo. Antes eram oito selos "PRESENTE / AUSENTE": o laudo concluía
@@ -134,5 +138,50 @@ describe("describeIpDivergence", () => {
 
   it("preserva a distância para o laudo imprimir", () => {
     expect(describeIpDivergence({ km: 274.004, referenciaConfirmada: true }).km).toBeCloseTo(274.004);
+  });
+});
+
+/**
+ * Régua do Confronto 2 (residência × geolocalização declarada no documento).
+ *
+ * O § 5.2 vinha usando `riskFromDistance`, calibrada para geolocalização de IP:
+ * rotulava 1,47 km como "RISCO BAIXO" imediatamente abaixo do parágrafo que
+ * afirma que poucos quilômetros já são significativos.
+ */
+describe("classifyDeclaredDivergence", () => {
+  it("trata a margem dos instrumentos como compatível", () => {
+    expect(classifyDeclaredDivergence(1.47).nivel).toBe("compativel");
+    expect(classifyDeclaredDivergence(0).nivel).toBe("compativel");
+  });
+
+  it("é uma ordem de grandeza mais estreita que a régua do IP", () => {
+    // O ponto de todo o ajuste: 45 km é irrelevante para o IP e central aqui.
+    expect(classifyIpDivergence(45).nivel).toBe("compativel");
+    expect(classifyDeclaredDivergence(45).nivel).toBe("relevante");
+  });
+
+  it("cobre as quatro faixas em ordem crescente de gravidade", () => {
+    const niveis = [1, 10, 45, 300].map((km) => classifyDeclaredDivergence(km).nivel);
+    expect(niveis).toEqual(["compativel", "atencao", "relevante", "grave"]);
+  });
+
+  it("nenhuma faixa afirma fraude", () => {
+    for (const km of [1, 10, 45, 300, 5000]) {
+      const c = classifyDeclaredDivergence(km);
+      expect(`${c.rotulo} ${c.sintese}`.toLowerCase()).not.toMatch(/fraude|falsific|golpe/);
+    }
+  });
+
+  it("ressalva a referência não confirmada pelo operador", () => {
+    expect(classifyDeclaredDivergence(5, { referenciaConfirmada: true }).ressalva).toBeNull();
+    expect(classifyDeclaredDivergence(5, { referenciaConfirmada: false }).ressalva).toMatch(
+      /geocodifica/i
+    );
+  });
+
+  it("devolve null sem distância", () => {
+    for (const v of [null, undefined, NaN, Infinity]) {
+      expect(classifyDeclaredDivergence(v)).toBeNull();
+    }
   });
 });

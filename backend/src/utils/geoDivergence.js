@@ -87,3 +87,77 @@ export function describeIpDivergence({ km, referenciaConfirmada, referenciaRotul
 
   return { ...c, ressalva };
 }
+
+/*
+ * ─── Confronto 2 precisa da sua própria régua ─────────────────────────────────
+ *
+ * O § 5.2 vinha usando `riskFromDistance` (faixas de 50 / 300 / 1000 km), que
+ * foi calibrada para a geolocalização por IP. Aplicada ao confronto entre a
+ * residência e o GPS declarado no documento, ela contradiz o próprio texto da
+ * seção: 1,47 km saía rotulado "RISCO BAIXO" ao lado da frase "uma divergência
+ * de poucos quilômetros já é significativa" — e 45 km entre o local declarado da
+ * assinatura e a casa do contratante também sairia como "RISCO BAIXO", quando é
+ * um achado central.
+ *
+ * Aqui os dois pontos têm precisão métrica: o GPS do log de assinatura e a
+ * coordenada confirmada pelo operador. Não existe a margem de dezenas de
+ * quilômetros que justifica a régua do IP, então as faixas são uma ordem de
+ * grandeza mais estreitas.
+ */
+const FAIXAS_DECLARADO = [
+  {
+    // Margem que absorve GPS de aparelho sob cobertura ruim e — quando a
+    // referência veio de geocodificação — o erro do próprio geocodificador,
+    // que em zona rural facilmente passa de 1 km.
+    ateKm: 2,
+    nivel: "compativel",
+    rotulo: "COMPATÍVEL",
+    tom: "ok",
+    sintese:
+      "O documento situa a assinatura praticamente no mesmo local da residência informada. A diferença está dentro da margem dos próprios instrumentos de medição.",
+  },
+  {
+    ateKm: 15,
+    nivel: "atencao",
+    rotulo: "ATENÇÃO",
+    tom: "warn",
+    sintese:
+      "O local declarado fica na mesma região da residência, mas não coincide com ela. É compatível com deslocamento cotidiano do contratante e, isoladamente, não sustenta conclusão.",
+  },
+  {
+    ateKm: 60,
+    nivel: "relevante",
+    rotulo: "DIVERGÊNCIA RELEVANTE",
+    tom: "warn",
+    sintese:
+      "O documento declara que o ato ocorreu em localidade distinta da residência do contratante. Como ambas as coordenadas têm precisão métrica, a diferença não se explica por imprecisão de medição e deve ser confrontada com a versão do cliente sobre onde esteve na data e hora do registro.",
+  },
+  {
+    ateKm: Infinity,
+    nivel: "grave",
+    rotulo: "DIVERGÊNCIA GRAVE",
+    tom: "danger",
+    sintese:
+      "O local que o próprio documento registra como o da assinatura é geograficamente incompatível com a residência do contratante. Diferentemente do confronto por IP, aqui não há margem de operadora a invocar: a coordenada foi registrada pelo instrumento de assinatura. Exige esclarecimento sobre as circunstâncias da contratação.",
+  },
+];
+
+/**
+ * Classifica a distância entre a residência informada e a geolocalização que o
+ * documento declara para a assinatura (§ 5.2).
+ *
+ * @param {number|null|undefined} km distância Haversine entre os dois pontos
+ * @param {{referenciaConfirmada?: boolean}} [opts]
+ */
+export function classifyDeclaredDivergence(km, { referenciaConfirmada = false } = {}) {
+  if (km == null || !Number.isFinite(km)) return null;
+  const faixa = FAIXAS_DECLARADO.find((f) => km <= f.ateKm);
+
+  // Sem coordenada confirmada pelo operador, a referência é um ponto
+  // geocodificado — e o laudo não pode afirmar precisão métrica dos DOIS lados.
+  const ressalva = referenciaConfirmada
+    ? null
+    : "A referência não foi confirmada pelo operador: foi obtida por geocodificação do endereço informado, cuja imprecisão pode responder por parte da diferença acima.";
+
+  return { ...faixa, km, ressalva };
+}

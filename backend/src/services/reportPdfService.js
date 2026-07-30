@@ -1,5 +1,5 @@
 import PDFDocument from "pdfkit";
-import { riskFromDistance } from "../utils/geoUtils.js";
+import { classifyDeclaredDivergence } from "../utils/geoDivergence.js";
 import { fetchStaticMap, mapPointsIpVsHome, mapPointsHomeVsDeclared } from "./staticMapService.js";
 import {
   FIRM,
@@ -150,6 +150,19 @@ function paragraph(ctx, text, { color = INK, size = 9.5, italic = false } = {}) 
     .fillColor(color)
     .text(text, MARGIN, doc.y, { width: contentWidth, align: "justify", lineGap: 1.5 });
   doc.moveDown(0.5);
+}
+
+/**
+ * Reserva espaço para um bloco que não deve ser partido pela quebra de página.
+ *
+ * Os guardas espalhados pelos helpers medem cada elemento isoladamente, então um
+ * veredito e a frase que o explica podiam caber "cada um" e ainda assim acabar em
+ * páginas diferentes: o § 5.2 saía com o rótulo COMPATÍVEL no pé de uma página e
+ * "O documento situa a assinatura praticamente no mesmo local" solto no topo da
+ * seguinte, sem o número a que se referia.
+ */
+function reserve(ctx, pontos) {
+  if (ctx.doc.y > ctx.doc.page.height - pontos) ctx.doc.addPage();
 }
 
 function badge(ctx, label, value, ok) {
@@ -375,11 +388,25 @@ function drawMap(ctx, mapBuffer, legenda) {
 }
 
 function sectionGeo(ctx, result, mapas = {}) {
+  // O § 5 abre sempre com o parágrafo de enquadramento e o bloco de referência.
+  // O guarda padrão do `heading` (140pt) deixava o título e a introdução órfãos
+  // no pé da página, com o resto da seção começando só na página seguinte.
+  if (ctx.doc.y > ctx.doc.page.height - 300) ctx.doc.addPage();
+
   heading(ctx, "§ 5 · Geolocalização da assinatura · confronto geográfico");
 
   const home = result.home?.geo;
   const cg = result.contractGeo;
   const ipRef = (result.ipAnalysis || []).find((ip) => ip.geo?.lat != null);
+  // Prefere a classificação persistida pelo enriquecimento; recalcula só para
+  // análises gravadas antes de `contractGeo.divergencia` existir.
+  const declarado =
+    cg?.divergencia ||
+    (cg?.distance != null
+      ? classifyDeclaredDivergence(cg.distance, {
+          referenciaConfirmada: home?.precision === "manual",
+        })
+      : null);
 
   // ─── Ponto de referência ───────────────────────────────────────────────────
   paragraph(
@@ -442,6 +469,7 @@ function sectionGeo(ctx, result, mapas = {}) {
     );
     const d = ipRef.divergenciaResidencia;
     if (d) {
+      reserve(ctx, 170); // mesmo motivo do § 5.2: veredito e síntese juntos
       badge(ctx, "Distância entre a origem do IP e a residência", `${d.km.toFixed(2)} km · ${d.rotulo}`, d.tom === "ok");
       paragraph(ctx, d.sintese, { size: 9, color: d.tom === "danger" ? DANGER : INK });
     } else if (!home) {
@@ -479,9 +507,20 @@ function sectionGeo(ctx, result, mapas = {}) {
     field(ctx, "   Origem da coordenada", `${cg.fonte || "não informada"} — precisão ${precisionText(cg)}`);
     if (cg.dataHora) field(ctx, "   Data / hora do registro", cg.dataHora);
 
-    if (cg.distance != null) {
-      const r = riskFromDistance(cg.distance);
-      badge(ctx, "Distância entre o local declarado e a residência", `${cg.distance.toFixed(2)} km · ${r.label}`, r.score <= 1);
+    // Régua PRÓPRIA deste confronto. `riskFromDistance` (50/300/1000 km) é
+    // calibrada para geolocalização de IP e rotulava 1,47 km como "RISCO BAIXO"
+    // logo abaixo do parágrafo que afirma o contrário — ver geoDivergence.js.
+    if (declarado) {
+      // Veredito + síntese + eventual ressalva formam um bloco só.
+      reserve(ctx, 170);
+      badge(
+        ctx,
+        "Distância entre o local declarado e a residência",
+        `${declarado.km.toFixed(2)} km · ${declarado.rotulo}`,
+        declarado.nivel === "compativel"
+      );
+      paragraph(ctx, declarado.sintese, { size: 9 });
+      if (declarado.ressalva) paragraph(ctx, declarado.ressalva, { color: MUTED, size: 8.5 });
     }
 
     if (mapas.mapaResidenciaDeclarado) {
@@ -496,13 +535,24 @@ function sectionGeo(ctx, result, mapas = {}) {
   // ─── Leitura conjunta ─────────────────────────────────────────────────────
   // O cruzamento dos dois confrontos é o achado que nenhum deles produz
   // isoladamente, e era exatamente o que o mapa único não permitia enxergar.
-  if (ipRef?.divergenciaResidencia && cg?.distance != null) {
+  // O gatilho segue a CLASSIFICAÇÃO dos dois confrontos, não um limite solto em
+  // km: o texto afirma "praticamente no mesmo local", e isso só é verdade na
+  // faixa compatível. O `< 30 km` anterior faria o laudo escrever essa frase
+  // para uma divergência de 29 km, que é justamente um achado relevante.
+  if (ipRef?.divergenciaResidencia && declarado) {
     const ipLonge = ipRef.divergenciaResidencia.nivel !== "compativel";
-    const declaradoPerto = cg.distance < 30;
-    if (ipLonge && declaradoPerto) {
+    if (ipLonge && declarado.nivel === "compativel") {
       paragraph(
         ctx,
-        `Leitura conjunta dos dois confrontos: o documento declara que a assinatura ocorreu a ${cg.distance.toFixed(2)} km da residência do contratante — praticamente no mesmo local —, mas a conexão que originou o ato partiu de ${ipRef.divergenciaResidencia.km.toFixed(2)} km de distância. A coordenada declarada e a origem real da conexão apontam regiões distintas. A divergência não comprova fraude e admite explicações legítimas (uso de rede de terceiro, imprecisão da base de geolocalização, roteamento da operadora), mas é ponto que exige esclarecimento da instituição financeira, a quem incumbe demonstrar a autenticidade do ato (STJ, Tema 1.061).`,
+        `Leitura conjunta dos dois confrontos: o documento declara que a assinatura ocorreu a ${declarado.km.toFixed(2)} km da residência do contratante — praticamente no mesmo local —, mas a conexão que originou o ato partiu de ${ipRef.divergenciaResidencia.km.toFixed(2)} km de distância. A coordenada declarada e a origem real da conexão apontam regiões distintas. A divergência não comprova fraude e admite explicações legítimas (uso de rede de terceiro, imprecisão da base de geolocalização, roteamento da operadora), mas é ponto que exige esclarecimento da instituição financeira, a quem incumbe demonstrar a autenticidade do ato (STJ, Tema 1.061).`,
+        { color: DANGER, size: 9 }
+      );
+    } else if (ipLonge && declarado.nivel !== "compativel") {
+      // Os dois confrontos divergem. Vale dizer isso explicitamente, senão o
+      // leitor precisa cruzar duas seções para perceber que nada fecha.
+      paragraph(
+        ctx,
+        `Leitura conjunta dos dois confrontos: nenhum dos dois pontos coincide com a residência informada — o local declarado no documento está a ${declarado.km.toFixed(2)} km e a origem da conexão a ${ipRef.divergenciaResidencia.km.toFixed(2)} km. As duas divergências são independentes e devem ser esclarecidas separadamente, confrontadas com a data e hora do registro, com a versão do contratante sobre onde esteve e com a localização do correspondente bancário.`,
         { color: DANGER, size: 9 }
       );
     }
@@ -601,10 +651,33 @@ function sectionIpTrace(ctx, result) {
   }
 }
 
+/*
+ * ─── Numeração contígua ───────────────────────────────────────────────────────
+ *
+ * O rastro de IP era o § 6 e passou a ser o § 5.3, mas as seções seguintes
+ * mantiveram 7, 8 e 9. Somado ao fato de que irregularidades e observações só
+ * eram impressas quando havia conteúdo, o laudo do documento de teste saía com a
+ * numeração pulando de § 5 para § 8 — o tipo de detalhe que faz um leitor
+ * técnico duvidar de que o documento esteja completo.
+ *
+ * As duas seções passam a ser SEMPRE impressas. Além de fechar o buraco, é a
+ * postura correta num laudo: afirmar que não se encontrou irregularidade é
+ * conclusão pericial; omitir a seção deixa o leitor sem saber se o exame foi
+ * feito.
+ */
 function sectionIrregularities(ctx, extracted) {
   const evs = extracted.evidencias_irregularidade || [];
-  if (!evs.length) return;
-  heading(ctx, "§ 7 · Evidências de irregularidade", { danger: true });
+  heading(ctx, "§ 6 · Evidências de irregularidade", { danger: evs.length > 0 });
+
+  if (!evs.length) {
+    paragraph(
+      ctx,
+      "A análise dos elementos extraídos deste documento não identificou evidência autônoma de irregularidade. A ausência de achado nesta seção não convalida o instrumento: as ressalvas dos §§ 4 e 5 subsistem e devem ser lidas em conjunto.",
+      { size: 9 }
+    );
+    return;
+  }
+
   for (const ev of evs) {
     const { doc, contentWidth } = ctx;
     if (doc.y > doc.page.height - 100) doc.addPage();
@@ -615,13 +688,16 @@ function sectionIrregularities(ctx, extracted) {
 }
 
 function sectionRemarks(ctx, extracted) {
-  if (!extracted.observacoes_periciais) return;
-  heading(ctx, "§ 8 · Observações periciais complementares");
-  paragraph(ctx, extracted.observacoes_periciais);
+  heading(ctx, "§ 7 · Observações periciais complementares");
+  paragraph(
+    ctx,
+    extracted.observacoes_periciais ||
+      "Não há observação complementar além do que já consta das seções anteriores."
+  );
 }
 
 function sectionLegal(ctx) {
-  heading(ctx, "§ 9 · Fundamentação normativa aplicável");
+  heading(ctx, "§ 8 · Fundamentação normativa aplicável");
   for (const { grupo, itens } of FUNDAMENTACAO) {
     const { doc, contentWidth } = ctx;
     if (doc.y > doc.page.height - 130) doc.addPage();

@@ -2,7 +2,7 @@ import { getIpInfo } from "./apiService.js";
 import { geocodeAddress } from "./geocodingService.js";
 import { haversineKm } from "../utils/geoUtils.js";
 import { isIP } from "node:net";
-import { describeIpDivergence } from "../utils/geoDivergence.js";
+import { describeIpDivergence, classifyDeclaredDivergence } from "../utils/geoDivergence.js";
 
 /**
  * Confronto geográfico do §5 do laudo (Módulo 4, Fase A).
@@ -157,7 +157,18 @@ export async function enrichGeography(extracted, homeAddress, homeCoord = null) 
 
   return {
     home: { query: homeQuery, source: homeSource, geo: homeGeo },
-    contractGeo: contractGeo ? { ...contractGeo, distance: contractToHomeKm } : null,
+    // A classificação do Confronto 2 é persistida junto com a distância, pelo
+    // mesmo motivo de `divergenciaResidencia`: PDF e tela leem a MESMA análise.
+    // Enquanto cada lado calculava a sua, as duas versões do laudo divergiam —
+    // e a tela ainda usava a régua do IP (50/300/1000 km) para um confronto de
+    // precisão métrica.
+    contractGeo: contractGeo
+      ? {
+          ...contractGeo,
+          distance: contractToHomeKm,
+          divergencia: classifyDeclaredDivergence(contractToHomeKm, { referenciaConfirmada }),
+        }
+      : null,
     geoDeclaredPresent: !!(g && g.presente),
     ipAnalysis,
   };
