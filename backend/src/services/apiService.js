@@ -1,10 +1,28 @@
 import { buildGeocodeQueries } from "../utils/geoUtils.js";
+import { cached, TTL } from "../utils/externalCache.js";
 
 const FETCH_TIMEOUT_MS = 8_000;
 
+/**
+ * Geocodifica um endereço, com cache.
+ *
+ * A chave é o texto normalizado, não cada variação que `buildGeocodeQueries`
+ * gera: o mesmo endereço consultado de novo tem que acertar o cache antes de
+ * chegar ao Nominatim, cuja política de uso proíbe consulta automatizada pesada
+ * e bloqueia por IP do servidor.
+ *
+ * Repetição é alta no domínio: os documentos de um mesmo cliente trazem o
+ * endereço da residência do contratante repetidas vezes.
+ */
 export async function geocodeAddress(q) {
   const queryText = (q || "").toString().trim();
   if (!queryText) return null;
+  return cached("geocode", queryText.toLowerCase(), TTL.geocode, () =>
+    geocodeAddressSemCache(queryText)
+  );
+}
+
+async function geocodeAddressSemCache(queryText) {
   for (const query of buildGeocodeQueries(queryText)) {
     const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1&accept-language=pt-BR`;
     const controller = new AbortController();
@@ -86,6 +104,13 @@ const PROVEDORES_GEOIP = [
  *   provedor respondeu. O chamador distingue os casos pelo campo `source`.
  */
 export async function getIpInfo(ip) {
+  // Dossiês de trilha repetem o mesmo endereço em vários eventos, e clientes de
+  // uma mesma operadora caem em blocos próximos. Sem cache, cada repetição
+  // consome uma consulta da cota diária.
+  return cached("geoip", ip, TTL.geoip, () => getIpInfoSemCache(ip));
+}
+
+async function getIpInfoSemCache(ip) {
   for (const provedor of PROVEDORES_GEOIP) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);

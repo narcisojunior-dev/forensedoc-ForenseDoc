@@ -16,6 +16,7 @@
 // ausência do mapa não gera erro, só um laudo sem a peça visual. Mesma proteção
 // que utils/jwt.js e utils/mailer.js já adotam.
 import "dotenv/config";
+import { cachedBuffer, TTL } from "../utils/externalCache.js";
 
 const FETCH_TIMEOUT_MS = 10_000;
 const BASE = "https://maps.geoapify.com/v1/staticmap";
@@ -90,22 +91,36 @@ export async function fetchStaticMap(points, opts = {}) {
     `&area=${encodeURIComponent(boundingArea(valid))}` +
     `&marker=${markers}${geometry}&apiKey=${key}`;
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  try {
-    const res = await fetch(url, { signal: controller.signal });
-    if (!res.ok) {
-      console.error(`[StaticMap] Geoapify respondeu ${res.status}`);
+  /*
+   * A imagem era buscada a CADA geração de PDF. O mesmo laudo baixado três vezes
+   * gastava seis créditos da cota diária do Geoapify (3.000 por dia, 2 por
+   * laudo), e o download repetido é comum: o advogado gera, confere, e gera de
+   * novo para anexar ao processo.
+   *
+   * A chave de cache é a URL SEM a chave de API. Incluí-la faria a rotação da
+   * credencial invalidar todo o cache de uma vez, e ainda gravaria o segredo
+   * dentro do nome da chave no Redis.
+   */
+  const chaveCache = url.replace(`&apiKey=${key}`, "");
+
+  return cachedBuffer("staticmap", chaveCache, TTL.staticMap, async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    try {
+      const res = await fetch(url, { signal: controller.signal });
+      if (!res.ok) {
+        console.error(`[StaticMap] Geoapify respondeu ${res.status}`);
+        return null;
+      }
+      const arrayBuffer = await res.arrayBuffer();
+      return Buffer.from(arrayBuffer);
+    } catch (err) {
+      console.error("[StaticMap] Falha ao buscar mapa:", err.message);
       return null;
+    } finally {
+      clearTimeout(timer);
     }
-    const arrayBuffer = await res.arrayBuffer();
-    return Buffer.from(arrayBuffer);
-  } catch (err) {
-    console.error("[StaticMap] Falha ao buscar mapa:", err.message);
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
+  });
 }
 
 /*
