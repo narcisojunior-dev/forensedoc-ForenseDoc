@@ -1,5 +1,6 @@
 import { ipKeyGenerator } from "express-rate-limit";
 import { createLimiter } from "../utils/rateLimitStore.js";
+import { getPlanLimits } from "../services/planLimitsService.js";
 
 /**
  * Teto global por IP, aplicado antes do roteamento (N5 da auditoria).
@@ -89,22 +90,36 @@ export const externalApiLimiter = createLimiter({
 });
 
 /**
- * Anti-duplo-clique na análise: 1 a cada 30s por tenant.
+ * Vazão de análises, POR PLANO.
  *
- * Diferente do lock de concorrência (que serializa análises em andamento),
- * este limite protege contra o usuário reenviando o mesmo PDF ao achar que
- * a página travou — cada reenvio queimaria um crédito.
+ * Era fixo em 1 a cada 30 segundos, o que impunha teto de 120 laudos por hora a
+ * qualquer cliente, independentemente da infraestrutura disponível e do que ele
+ * tivesse contratado. O propósito original era anti-duplo-clique: impedir que o
+ * usuário reenviasse o mesmo PDF ao achar que a página travou, queimando dois
+ * créditos.
+ *
+ * Esse propósito passou a ser atendido de forma direta pela idempotência por
+ * hash do arquivo (ver `analyzeController`), que reconhece o reenvio do MESMO
+ * documento e devolve a análise existente sem cobrar de novo. Isso liberou a
+ * janela para virar o que ela deveria ser: uma medida de vazão contratada, e não
+ * um pedágio que também pune o envio legítimo de documentos diferentes em lote.
+ *
+ * O limite é resolvido por requisição, a partir do plano do tenant.
  */
 export const analyzeLimiter = createLimiter({
-  windowMs: 30 * 1000,
-  max: 1,
+  windowMs: 60 * 1000,
+  limit: async (req) => {
+    const { analysesPerMinute } = await getPlanLimits(req.tenantId);
+    return analysesPerMinute;
+  },
   keyGenerator: tenantKey,
   // Só conta requisições que realmente iniciaram uma análise. Sem isto, um
-  // PDF inválido (400) ou saldo insuficiente (402) travariam o usuário por
-  // 30 segundos por uma tentativa que não chegou a custar nada.
+  // PDF inválido (400) ou saldo insuficiente (402) consumiriam a cota do
+  // cliente por uma tentativa que não chegou a custar nada.
   skipFailedRequests: true,
   message: {
-    error: "Aguarde 30 segundos entre análises.",
+    error:
+      "Limite de análises por minuto do seu plano atingido. Aguarde alguns instantes ou fale conosco sobre um plano com maior vazão.",
     code: "ANALYSIS_RATE_LIMITED",
   },
   prefix: "rl:analyze:",

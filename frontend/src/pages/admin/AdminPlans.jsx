@@ -12,6 +12,10 @@ function formFromPlan(plan) {
     // Campo vazio = sem desconto de avulso para este plano.
     avulsoPriceBrl: plan.avulsoPriceBrl == null ? "" : Number(plan.avulsoPriceBrl),
     avulsoDiscountLimit: plan.avulsoDiscountLimit,
+    // Capacidade operacional vendida no plano. Ver planLimitsService.js: eram
+    // constantes globais calibradas para escritório de um operador só.
+    maxConcurrentAnalyses: plan.maxConcurrentAnalyses,
+    analysesPerMinute: plan.analysesPerMinute,
     isActive: plan.isActive,
   };
 }
@@ -47,6 +51,8 @@ function PlanRow({ plan, onSaved }) {
       ["Créditos", form.creditsMonthly],
       ["Usuários", form.maxUsers],
       ["Limite/ciclo", form.avulsoDiscountLimit],
+      ["Simultâneas", form.maxConcurrentAnalyses],
+      ["Por minuto", form.analysesPerMinute],
     ];
     const vazio = obrigatorios.find(([, v]) => v === "" || v === null || v === undefined);
     if (vazio) return toast.error(`Preencha o campo "${vazio[0]}".`);
@@ -59,6 +65,8 @@ function PlanRow({ plan, onSaved }) {
         maxUsers: Number(form.maxUsers),
         avulsoPriceBrl: form.avulsoPriceBrl === "" ? null : Number(form.avulsoPriceBrl),
         avulsoDiscountLimit: Number(form.avulsoDiscountLimit),
+        maxConcurrentAnalyses: Number(form.maxConcurrentAnalyses),
+        analysesPerMinute: Number(form.analysesPerMinute),
         isActive: form.isActive,
       });
       toast.success(`Plano ${data.plan.name} atualizado.`);
@@ -97,6 +105,8 @@ function PlanRow({ plan, onSaved }) {
             {plan.avulsoDiscountLimit}
           </span>
         </td>
+        <td className={`${cell} text-right text-zinc-400`}>{plan.maxConcurrentAnalyses}</td>
+        <td className={`${cell} text-right text-zinc-400`}>{plan.analysesPerMinute}</td>
         <td className={`${cell} text-center`}>
           <span className={plan.isActive ? "text-emerald-400" : "text-zinc-500"}>
             {plan.isActive ? "Ativo" : "Inativo"}
@@ -145,6 +155,28 @@ function PlanRow({ plan, onSaved }) {
           className={input}
           value={form.avulsoDiscountLimit}
           onChange={(e) => setForm({ ...form, avulsoDiscountLimit: e.target.value })}
+        />
+      </td>
+      <td className={`${cell} text-right`}>
+        <input
+          type="number"
+          min="1"
+          max="50"
+          title="Análises que o cliente pode processar ao MESMO TEMPO. Cada uma ocupa um worker: valores altos aqui competem com os outros clientes."
+          className={input}
+          value={form.maxConcurrentAnalyses}
+          onChange={(e) => setForm({ ...form, maxConcurrentAnalyses: e.target.value })}
+        />
+      </td>
+      <td className={`${cell} text-right`}>
+        <input
+          type="number"
+          min="1"
+          max="600"
+          title="Análises que o cliente pode INICIAR por minuto. Controla a vazão contratada; o reenvio do mesmo arquivo já é tratado por idempotência e não consome a cota."
+          className={input}
+          value={form.analysesPerMinute}
+          onChange={(e) => setForm({ ...form, analysesPerMinute: e.target.value })}
         />
       </td>
       <td className={`${cell} text-center`}>
@@ -196,6 +228,12 @@ export default function AdminPlans() {
                 </th>
                 <th className="px-4 py-3 font-medium text-zinc-400 text-right" title="Quantos avulsos com desconto por ciclo de faturamento">
                   Limite/ciclo
+                </th>
+                <th className="px-4 py-3 font-medium text-zinc-400 text-right" title="Quantas análises o cliente pode processar ao mesmo tempo">
+                  Simultâneas
+                </th>
+                <th className="px-4 py-3 font-medium text-zinc-400 text-right" title="Quantas análises o cliente pode iniciar por minuto">
+                  Por minuto
                 </th>
                 <th className="px-4 py-3 font-medium text-zinc-400 text-center">Status</th>
                 <th className="px-4 py-3 font-medium text-zinc-400 text-right">Assinantes</th>

@@ -229,6 +229,19 @@ model Plan {
   // zera junto com a renovação.
   avulsoPriceBrl        Decimal? @db.Decimal(10, 2)
   avulsoDiscountLimit   Int      @default(1)
+
+  // ── Limites operacionais por plano ──────────────────────────────────────
+  //
+  // Os dois nasceram como constantes globais calibradas para escritório de um
+  // operador só: mutex de uma análise por vez e janela de 30s entre envios.
+  // Num cliente B2B com dez funcionários, os dez disputavam um único slot, e o
+  // teto de 120 laudos/hora valia independentemente da infraestrutura.
+  //
+  // Viram atributo comercial: o plano define quanta capacidade o cliente
+  // compra, e o default preserva o comportamento anterior para quem já assina.
+  maxConcurrentAnalyses Int      @default(1)
+  analysesPerMinute     Int      @default(2)
+
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 

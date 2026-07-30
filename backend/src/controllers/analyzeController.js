@@ -2,15 +2,42 @@ import crypto from "crypto";
 import { prisma } from "../utils/prisma.js";
 import { debitCredit, refundCredit, afterDebitCommit } from "../services/creditService.js";
 import { analysisQueue } from "../queues.js";
-import { acquireLock, releaseLock, analysisLockKey } from "../utils/lock.js";
+import { acquireSlot, releaseSlot, analysisLockKey } from "../utils/lock.js";
+import { getPlanLimits } from "../services/planLimitsService.js";
 import { ocrBudgetMs } from "../services/ocrService.js";
 import { validatePdfPayload } from "../utils/pdfValidation.js";
 import { buildReportPdf } from "../services/reportPdfService.js";
 import { haversineKm } from "../utils/geoUtils.js";
 import { parsePagination } from "../utils/pagination.js";
+import { redis } from "../utils/redis.js";
 
 function hashFilename(filename) {
   return crypto.createHash("sha256").update(filename || "").digest("hex");
+}
+
+/*
+ * ─── Anti-duplo-clique por CONTEÚDO, não por relógio ─────────────────────────
+ *
+ * A janela fixa de 30 segundos entre análises existia para impedir que o usuário
+ * reenviasse o mesmo PDF ao achar que a página travou, queimando dois créditos.
+ * Ela cumpria esse papel, mas cobrava o preço de bloquear também o envio
+ * legítimo de documentos DIFERENTES em sequência, que é exatamente o que um
+ * cliente B2B faz.
+ *
+ * Reconhecer o reenvio pelo conteúdo resolve o problema original de forma direta
+ * e sem efeito colateral: o mesmo arquivo, do mesmo tenant, dentro de uma janela
+ * curta, devolve a análise já criada em vez de criar outra e cobrar de novo.
+ * Arquivos diferentes seguem livremente, limitados apenas pela vazão do plano.
+ *
+ * O TTL é curto de propósito. Reanalisar o mesmo documento depois é legítimo (o
+ * operador pode ter corrigido a coordenada de referência, por exemplo), então a
+ * idempotência não pode virar bloqueio permanente.
+ */
+const IDEMPOTENCIA_TTL = Number(process.env.ANALYZE_IDEMPOTENCY_TTL) || 120;
+
+function idempotencyKey(tenantId, base64) {
+  const conteudo = crypto.createHash("sha256").update(base64).digest("hex").slice(0, 32);
+  return `analyze:idem:${tenantId}:${conteudo}`;
 }
 
 // Coordenada válida no Brasil (lat ~ -34..5, lon ~ -74..-34). Fora disso é
@@ -61,13 +88,47 @@ export async function analyzePdf(req, res) {
     // vence a geocodificação automática.
     const homeCoord = parseCoord(homeLat, homeLon);
 
-    // Uma análise por vez por tenant (M4.4). O lock é liberado pelo worker
-    // ao concluir o job — não aqui, que retorna 202 antes do processamento.
-    lockToken = await acquireLock(analysisLockKey(tenantId), ANALYSIS_LOCK_TTL);
+    // Reenvio do MESMO arquivo dentro da janela curta devolve a análise que já
+    // existe, sem criar outra nem cobrar de novo. Verificado antes do semáforo e
+    // do débito: um duplo-clique não deve nem ocupar slot.
+    const chaveIdem = idempotencyKey(tenantId, validation.base64);
+    try {
+      const existente = await redis.get(chaveIdem);
+      if (existente) {
+        return res.status(202).json({
+          analysisId: existente,
+          status: "PROCESSING",
+          reaproveitada: true,
+        });
+      }
+    } catch (err) {
+      // Fail-open: sem Redis, o pior caso é o comportamento de antes da
+      // idempotência, que é criar uma segunda análise.
+      console.error("[Analyze] Verificação de idempotência falhou:", err.message);
+    }
+
+    /*
+     * Análises simultâneas por tenant, conforme o PLANO.
+     *
+     * Era um mutex de slot único, calibrado para escritório com um operador. Num
+     * cliente com dez funcionários, os dez disputavam a mesma vaga e o segundo
+     * recebia 409 com a plataforma ociosa. O semáforo concede N vagas, e N = 1
+     * (o default) reproduz exatamente o comportamento anterior.
+     */
+    const { maxConcurrentAnalyses } = await getPlanLimits(tenantId);
+    lockToken = await acquireSlot(
+      analysisLockKey(tenantId),
+      maxConcurrentAnalyses,
+      ANALYSIS_LOCK_TTL
+    );
     if (!lockToken) {
       return res.status(409).json({
-        error: "Já existe uma análise em andamento. Aguarde a conclusão para iniciar outra.",
+        error:
+          maxConcurrentAnalyses === 1
+            ? "Já existe uma análise em andamento. Aguarde a conclusão para iniciar outra."
+            : `Seu plano permite ${maxConcurrentAnalyses} análises simultâneas, e todas estão em uso. Aguarde a conclusão de uma delas.`,
         code: "ANALYSIS_IN_PROGRESS",
+        limite: maxConcurrentAnalyses,
       });
     }
 
@@ -110,6 +171,12 @@ export async function analyzePdf(req, res) {
       { attempts: 1, removeOnComplete: true, removeOnFail: true }
     );
 
+    // Só depois de a análise estar enfileirada: gravar antes faria um envio que
+    // falhou no meio devolver um analysisId que nunca vai ser processado.
+    await redis
+      .setex(chaveIdem, IDEMPOTENCIA_TTL, analysis.id)
+      .catch((err) => console.error("[Analyze] Falha ao gravar idempotência:", err.message));
+
     // Trilha de auditoria do evento (Seção 2.8). Nunca registra o conteúdo do
     // PDF — só o tamanho e o hash do nome do arquivo.
     await prisma.auditLog
@@ -127,7 +194,7 @@ export async function analyzePdf(req, res) {
 
     return res.status(202).json({ analysisId: analysis.id, status: "PROCESSING" });
   } catch (error) {
-    await releaseLock(analysisLockKey(tenantId), lockToken);
+    await releaseSlot(analysisLockKey(tenantId), lockToken);
 
     if (error.message === "INSUFFICIENT_CREDITS") {
       return res.status(402).json({

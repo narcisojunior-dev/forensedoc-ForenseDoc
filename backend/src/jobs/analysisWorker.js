@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { prisma } from "../utils/prisma.js";
 import { refundCredit } from "../services/creditService.js";
 import { notify } from "../services/notificationService.js";
-import { releaseLock, analysisLockKey } from "../utils/lock.js";
+import { releaseSlot, analysisLockKey } from "../utils/lock.js";
 import { extractPdfTextWithOcr } from "../services/ocrService.js";
 import { extractPdfMetadata } from "../services/pdfService.js";
 import { heuristicExtractionFromText } from "../services/extractionService.js";
@@ -114,8 +114,9 @@ export async function processAnalysis(job) {
       emailData: { reason: error.message },
     });
   } finally {
-    // Libera o mutex de "uma análise por vez" tanto no sucesso quanto na
-    // falha — sem isso o tenant ficaria bloqueado até o TTL do lock expirar.
-    await releaseLock(analysisLockKey(tenantId), lockToken);
+    // Devolve o slot do semáforo tanto no sucesso quanto na falha. Sem isto o
+    // tenant perderia uma vaga até o TTL expirar, e num plano de vaga única isso
+    // é o bloqueio total que o mutex antigo já causava.
+    await releaseSlot(analysisLockKey(tenantId), lockToken);
   }
 }

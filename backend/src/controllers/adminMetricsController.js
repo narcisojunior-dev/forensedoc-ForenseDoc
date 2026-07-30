@@ -145,6 +145,28 @@ const updatePlanSchema = z
     avulsoDiscountLimit: z.number({ error: "Limite de avulsos inválido." }).int().nonnegative("O limite não pode ser negativo.").optional(),
     isActive: z.boolean().optional(),
     founderSlotsRemaining: z.number().int().nonnegative().nullable().optional(),
+
+    // ── Capacidade operacional vendida no plano ──────────────────────────
+    //
+    // Mínimo 1 nos dois: zero bloquearia o cliente por completo, e um zero
+    // gravado por engano aqui viraria um incidente difícil de diagnosticar
+    // (o cliente vê 409 em tudo, sem erro no servidor).
+    //
+    // Os tetos existem para que um valor digitado errado no painel não
+    // consiga esgotar a infraestrutura: quatro análises simultâneas por
+    // tenant já ocupam todos os workers de um host típico.
+    maxConcurrentAnalyses: z
+      .number({ error: "Limite de análises simultâneas inválido." })
+      .int()
+      .min(1, "O plano deve permitir ao menos 1 análise simultânea.")
+      .max(50, "Acima de 50 simultâneas por cliente, avalie a infraestrutura antes.")
+      .optional(),
+    analysesPerMinute: z
+      .number({ error: "Vazão por minuto inválida." })
+      .int()
+      .min(1, "O plano deve permitir ao menos 1 análise por minuto.")
+      .max(600, "Acima de 600 por minuto, avalie a infraestrutura antes.")
+      .optional(),
   })
   .refine((d) => Object.keys(d).length > 0, "Nenhum campo para atualizar.");
 
