@@ -5,6 +5,7 @@ import toast from "react-hot-toast";
 import { api } from "../lib/axios";
 import { useAuthStore } from "../store/authStore";
 import { MIN_LENGTH } from "../utils/passwordRules";
+import ConfirmDialog from "../components/ConfirmDialog";
 
 function SectionCard({ icon: Icon, title, children }) {
   return (
@@ -52,6 +53,9 @@ export default function Settings() {
   const [inviting, setInviting] = useState(false);
   const [removingId, setRemovingId] = useState(null);
   const [busyInviteId, setBusyInviteId] = useState(null);
+  // Guardam o alvo da confirmação; null = diálogo fechado.
+  const [inviteToRevoke, setInviteToRevoke] = useState(null);
+  const [memberToRemove, setMemberToRemove] = useState(null);
 
   const isOwner = user?.role === "OWNER";
 
@@ -132,11 +136,11 @@ export default function Settings() {
   };
 
   const handleRevokeInvite = async (invite) => {
-    if (!window.confirm(`Revogar o convite de ${invite.email}? A vaga do plano será liberada.`)) return;
     setBusyInviteId(invite.id);
     try {
       await api.delete(`/tenant/invites/${invite.id}`);
       toast.success("Convite revogado.");
+      setInviteToRevoke(null);
       await loadTeam();
     } catch (error) {
       toast.error(error.response?.data?.error || "Erro ao revogar convite.");
@@ -146,11 +150,11 @@ export default function Settings() {
   };
 
   const handleRemoveMember = async (memberId) => {
-    if (!window.confirm("Remover este membro da equipe? Ele perderá o acesso imediatamente.")) return;
     setRemovingId(memberId);
     try {
       await api.delete(`/tenant/members/${memberId}`);
       toast.success("Membro removido.");
+      setMemberToRemove(null);
       await loadTeam();
     } catch (error) {
       toast.error(error.response?.data?.error || "Erro ao remover membro.");
@@ -246,7 +250,7 @@ export default function Settings() {
                 </div>
                 {isOwner && member.id !== user?.id && (
                   <button
-                    onClick={() => handleRemoveMember(member.id)}
+                    onClick={() => setMemberToRemove(member)}
                     disabled={removingId === member.id}
                     className="text-red-400 hover:bg-red-400/10 p-2 rounded-lg transition-colors disabled:opacity-50"
                     title="Remover membro"
@@ -297,7 +301,7 @@ export default function Settings() {
                           )}
                         </button>
                         <button
-                          onClick={() => handleRevokeInvite(invite)}
+                          onClick={() => setInviteToRevoke(invite)}
                           disabled={busyInviteId === invite.email || busyInviteId === invite.id}
                           className="text-red-400 hover:bg-red-400/10 p-2 rounded-lg transition-colors disabled:opacity-50"
                           title="Revogar convite e liberar a vaga"
@@ -342,6 +346,34 @@ export default function Settings() {
           <p className="text-xs text-zinc-500">Apenas o proprietário do escritório pode convidar ou remover membros.</p>
         )}
       </SectionCard>
+
+      <ConfirmDialog
+        open={!!inviteToRevoke}
+        title="Revogar este convite?"
+        message={
+          inviteToRevoke
+            ? `O convite de ${inviteToRevoke.email} deixa de valer e a vaga do plano é liberada.`
+            : ""
+        }
+        confirmLabel="Revogar convite"
+        busy={busyInviteId === inviteToRevoke?.id}
+        onConfirm={() => handleRevokeInvite(inviteToRevoke)}
+        onCancel={() => setInviteToRevoke(null)}
+      />
+
+      <ConfirmDialog
+        open={!!memberToRemove}
+        title="Remover este membro?"
+        message={
+          memberToRemove
+            ? `${memberToRemove.name} perde o acesso imediatamente e as sessões dele são encerradas. A vaga do plano é liberada.`
+            : ""
+        }
+        confirmLabel="Remover membro"
+        busy={removingId === memberToRemove?.id}
+        onConfirm={() => handleRemoveMember(memberToRemove.id)}
+        onCancel={() => setMemberToRemove(null)}
+      />
     </div>
   );
 }

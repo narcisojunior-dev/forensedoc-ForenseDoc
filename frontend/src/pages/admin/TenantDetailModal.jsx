@@ -3,6 +3,7 @@ import { X, Loader2, Zap, Ban, CheckCircle2, Mail, FileText } from "lucide-react
 import toast from "react-hot-toast";
 import { api } from "../../lib/axios";
 import { StatusBadge } from "./AdminTenants";
+import ConfirmDialog from "../../components/ConfirmDialog";
 
 function formatDate(value) {
   if (!value) return "—";
@@ -35,6 +36,7 @@ export default function TenantDetailModal({ tenantId, onClose, onChanged }) {
   const [creditNotes, setCreditNotes] = useState("");
   const [granting, setGranting] = useState(false);
   const [statusChanging, setStatusChanging] = useState(false);
+  const [confirmSuspend, setConfirmSuspend] = useState(false);
 
   const load = async () => {
     try {
@@ -50,11 +52,18 @@ export default function TenantDetailModal({ tenantId, onClose, onChanged }) {
 
   useEffect(() => {
     load();
-    const onKey = (e) => e.key === "Escape" && onClose();
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenantId]);
+
+  // Escape fecha o modal — exceto quando a confirmação de suspensão está
+  // aberta, caso em que ela tem prioridade e trata a tecla por conta própria.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape" && !confirmSuspend && !statusChanging) onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [confirmSuspend, statusChanging, onClose]);
 
   const handleGrantCredits = async (e) => {
     e.preventDefault();
@@ -83,15 +92,12 @@ export default function TenantDetailModal({ tenantId, onClose, onChanged }) {
     }
   };
 
-  const handleSuspend = async () => {
-    const reason = window.prompt("Motivo da suspensão (fica registrado na auditoria e é enviado ao cliente):");
-    if (reason === null) return;
-    if (reason.trim().length < 3) return toast.error("Informe um motivo válido.");
-
+  const handleSuspend = async (reason) => {
     setStatusChanging(true);
     try {
-      await api.post(`/admin/tenants/${tenantId}/suspend`, { reason: reason.trim() });
+      await api.post(`/admin/tenants/${tenantId}/suspend`, { reason });
       toast.success("Conta suspensa. As sessões ativas foram encerradas.");
+      setConfirmSuspend(false);
       await load();
       onChanged?.();
     } catch (error) {
@@ -295,7 +301,7 @@ export default function TenantDetailModal({ tenantId, onClose, onChanged }) {
                 </button>
               ) : (
                 <button
-                  onClick={handleSuspend}
+                  onClick={() => setConfirmSuspend(true)}
                   disabled={statusChanging}
                   className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 disabled:opacity-50 transition-colors"
                 >
@@ -311,6 +317,19 @@ export default function TenantDetailModal({ tenantId, onClose, onChanged }) {
           </>
         )}
       </div>
+
+      <ConfirmDialog
+        open={confirmSuspend}
+        title="Suspender esta conta?"
+        message="O escritório perde acesso imediatamente e as sessões ativas são encerradas. O motivo fica registrado na auditoria e é enviado ao cliente por e-mail."
+        confirmLabel="Suspender conta"
+        requireReason
+        reasonLabel="Motivo da suspensão"
+        reasonPlaceholder="Ex.: inadimplência após 3 tentativas de cobrança"
+        busy={statusChanging}
+        onConfirm={handleSuspend}
+        onCancel={() => setConfirmSuspend(false)}
+      />
     </div>
   );
 }

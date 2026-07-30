@@ -16,5 +16,10 @@ export async function downloadReportPdf(analysisId) {
   document.body.appendChild(link);
   link.click();
   link.remove();
-  URL.revokeObjectURL(url);
+
+  // O revoke NÃO pode ser síncrono. `click()` apenas ENFILEIRA o download; o
+  // navegador lê o blob depois, de forma assíncrona. Revogar na mesma tarefa
+  // invalida a URL antes da leitura e produz download falho ou arquivo de 0
+  // byte — o Chrome costuma tolerar, o Firefox e o Safari não.
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }

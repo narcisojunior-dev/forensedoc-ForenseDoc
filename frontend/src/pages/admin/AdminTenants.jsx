@@ -42,26 +42,42 @@ export default function AdminTenants() {
   const [total, setTotal] = useState(0);
   const [selectedId, setSelectedId] = useState(null);
 
-  const load = useCallback(async () => {
+  /**
+   * `signal` descarta respostas obsoletas.
+   *
+   * O debounce reduz o número de requisições, mas não impede que duas fiquem em
+   * voo: uma busca lenta disparada antes podia responder DEPOIS de uma rápida
+   * disparada depois, sobrescrevendo a lista com o resultado do filtro antigo.
+   * O AbortController cancela a anterior sempre que os filtros mudam.
+   */
+  const load = useCallback(async (signal) => {
     setLoading(true);
     try {
       const { data } = await api.get("/admin/tenants", {
         params: { page, search: search || undefined, status: status || undefined },
+        signal,
       });
       setTenants(data.tenants);
       setTotalPages(data.pagination.totalPages);
       setTotal(data.pagination.total);
     } catch (error) {
+      // Requisição cancelada não é erro do usuário — não vira toast nem
+      // interrompe o loading, que a requisição seguinte já assumiu.
+      if (error.code === "ERR_CANCELED" || error.name === "CanceledError") return;
       toast.error(error.response?.data?.error || "Erro ao carregar contas.");
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   }, [page, search, status]);
 
   // Debounce da busca — evita uma requisição por tecla digitada.
   useEffect(() => {
-    const timer = setTimeout(load, search ? 400 : 0);
-    return () => clearTimeout(timer);
+    const controller = new AbortController();
+    const timer = setTimeout(() => load(controller.signal), search ? 400 : 0);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
   }, [load, search]);
 
   // Trocar filtro volta para a primeira página, senão a paginação fica órfã.

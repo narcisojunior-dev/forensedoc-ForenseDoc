@@ -3,10 +3,9 @@ import { Loader2, Pencil, Check, X } from "lucide-react";
 import toast from "react-hot-toast";
 import { api } from "../../lib/axios";
 
-function PlanRow({ plan, onSaved }) {
-  const [editing, setEditing] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({
+/** Valores do formulário derivados do plano — fonte única para abrir e cancelar. */
+function formFromPlan(plan) {
+  return {
     priceBrl: Number(plan.priceBrl),
     creditsMonthly: plan.creditsMonthly,
     maxUsers: plan.maxUsers,
@@ -14,9 +13,44 @@ function PlanRow({ plan, onSaved }) {
     avulsoPriceBrl: plan.avulsoPriceBrl == null ? "" : Number(plan.avulsoPriceBrl),
     avulsoDiscountLimit: plan.avulsoDiscountLimit,
     isActive: plan.isActive,
-  });
+  };
+}
+
+function PlanRow({ plan, onSaved }) {
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState(() => formFromPlan(plan));
+
+  /** Abre a edição sempre a partir do plano atual, nunca do rascunho anterior. */
+  const startEditing = () => {
+    setForm(formFromPlan(plan));
+    setEditing(true);
+  };
+
+  /**
+   * Cancelar precisa DESCARTAR o rascunho. O `useState` só usa o valor inicial
+   * na primeira montagem, e a linha não é remontada entre edições (a `key` é o
+   * id do plano) — sem restaurar aqui, reabrir a edição trazia de volta o que o
+   * operador tinha digitado e abandonado.
+   */
+  const cancelEditing = () => {
+    setForm(formFromPlan(plan));
+    setEditing(false);
+  };
 
   const save = async () => {
+    // `Number("")` é 0: um campo de preço apagado por engano salvava o plano a
+    // R$ 0,00 sem nenhum aviso. O backend aceita (`nonnegative`), então a
+    // proteção tem de estar aqui.
+    const obrigatorios = [
+      ["Preço/mês", form.priceBrl],
+      ["Créditos", form.creditsMonthly],
+      ["Usuários", form.maxUsers],
+      ["Limite/ciclo", form.avulsoDiscountLimit],
+    ];
+    const vazio = obrigatorios.find(([, v]) => v === "" || v === null || v === undefined);
+    if (vazio) return toast.error(`Preencha o campo "${vazio[0]}".`);
+
     setSaving(true);
     try {
       const { data } = await api.patch(`/admin/plans/${plan.id}`, {
@@ -70,7 +104,7 @@ function PlanRow({ plan, onSaved }) {
         </td>
         <td className={`${cell} text-right text-zinc-400`}>{plan.activeSubscriptions}</td>
         <td className={`${cell} text-right`}>
-          <button onClick={() => setEditing(true)} className="text-zinc-400 hover:text-primary p-1" title="Editar">
+          <button onClick={startEditing} className="text-zinc-400 hover:text-primary p-1" title="Editar">
             <Pencil className="w-4 h-4" />
           </button>
         </td>
@@ -121,7 +155,7 @@ function PlanRow({ plan, onSaved }) {
         <button onClick={save} disabled={saving} className="text-emerald-400 hover:text-emerald-300 p-1 disabled:opacity-50" title="Salvar">
           {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
         </button>
-        <button onClick={() => setEditing(false)} disabled={saving} className="text-zinc-400 hover:text-foreground p-1" title="Cancelar">
+        <button onClick={cancelEditing} disabled={saving} className="text-zinc-400 hover:text-foreground p-1" title="Cancelar">
           <X className="w-4 h-4" />
         </button>
       </td>
