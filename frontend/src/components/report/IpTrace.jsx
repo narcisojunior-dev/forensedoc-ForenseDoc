@@ -122,10 +122,10 @@ export default function IpTrace({ ipAnalysis, homeGeo }) {
                 riskColor={TONES[ip.divergenciaResidencia.tom]?.hex}
                 legenda={
                   <>
-                    <b className="text-foreground">Mapa 1 — origem da conexão × residência.</b>{" "}
+                    <b className="text-foreground">Mapa 1. Origem da conexão × residência.</b>{" "}
                     <b className="text-primary">R</b> = residência informada ·{" "}
                     <b className="text-red-500">I</b> = origem da conexão pelo endereço IP. O ponto
-                    I indica o ponto de presença da operadora, <b>não</b> a posição do aparelho —
+                    I indica o ponto de presença da operadora, <b>não</b> a posição do aparelho;
                     a margem é de dezenas de quilômetros.
                   </>
                 }
@@ -137,7 +137,8 @@ export default function IpTrace({ ipAnalysis, homeGeo }) {
 
       <Note>
         Um endereço IP não carrega coordenada. A localização acima vem de base que mapeia
-        blocos de IP ao ponto de presença da operadora — o roteador de saída, não o aparelho.
+        blocos de IP ao ponto de presença da operadora, ou seja, ao roteador de saída, não ao
+        aparelho.
         Em rede móvel brasileira, com CGNAT e blocos IPv6 alocados por região, o ponto
         devolvido tende à capital ou ao centro de operação do estado. Divergências de dezenas
         de quilômetros são esperadas; o que tem valor indiciário é a incompatibilidade de

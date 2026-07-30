@@ -967,7 +967,7 @@ export default function Analyze() {
                         }
                         legenda={
                           <>
-                            <b className="text-foreground">Mapa 2 — residência × local declarado.</b>{" "}
+                            <b className="text-foreground">Mapa 2. Residência × local declarado.</b>{" "}
                             <b className="text-primary">R</b> = residência informada ·{" "}
                             <b className="text-accent">A</b> = geolocalização declarada no documento.
                             A linha tracejada é a distância geodésica (Haversine). Ambos os pontos têm
@@ -1023,8 +1023,8 @@ export default function Analyze() {
                         geolocalização declarada da assinatura. A geolocalização por IP é de nível de
                         operadora (margem de dezenas de quilômetros; VPN/proxy podem distorcê-la),
                         então a divergência entre a origem do IP e o local declarado da assinatura é
-                        indício de larga escala — GPS potencialmente forjado ou ato praticado por
-                        terceiro — e não uma medida exata.
+                        indício de larga escala, como GPS potencialmente forjado ou ato praticado
+                        por terceiro, e não uma medida exata.
                       </Note>
                     )}
                   <IpTrace ipAnalysis={report.ipAnalysis} homeGeo={report.home?.geo} />

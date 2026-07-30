@@ -197,7 +197,7 @@ function cover(ctx, analysis, result, timestamp) {
   doc.moveDown(0.6);
 
   field(ctx, "Identificador do laudo", analysis.id);
-  field(ctx, "Arquivo analisado", result.file?.name || "—");
+  field(ctx, "Arquivo analisado", result.file?.name || "nome não informado");
   field(ctx, "Tamanho do arquivo", result.file?.sizeBytes ? `${(result.file.sizeBytes / 1024).toFixed(2)} KB` : null);
   field(ctx, "Data de geração", timestamp);
   if (result.usedOcr) field(ctx, "OCR", `Aplicado em ${result.ocrPages} página(s)`);
@@ -426,7 +426,7 @@ function sectionGeo(ctx, result, mapas = {}) {
       "   Origem da coordenada",
       home.precision === "manual"
         ? "confirmada pelo operador (padrão-ouro deste laudo)"
-        : `${home.display || "não informada"} — precisão ${precisionText(home)}`
+        : `${home.display || "não informada"} (precisão ${precisionText(home)})`
     );
   }
   if (home && (home.precision === "city" || !home.precision)) {
@@ -445,10 +445,10 @@ function sectionGeo(ctx, result, mapas = {}) {
   }
 
   // ─── Confronto 1: origem da conexão × residência ──────────────────────────
-  subheading(ctx, "§ 5.1 · Confronto 1 — origem da conexão (IP) × residência informada");
+  subheading(ctx, "§ 5.1 · Confronto 1 · origem da conexão (IP) × residência informada");
   paragraph(
     ctx,
-    "Pergunta: a conexão que originou a assinatura partiu da região onde o contratante reside? A localização do IP tem precisão de nível de operadora — aponta o roteador de saída, não o aparelho —, então a margem é de dezenas de quilômetros e só a incompatibilidade de ordem de grandeza tem valor indiciário.",
+    "Pergunta: a conexão que originou a assinatura partiu da região onde o contratante reside? A localização do IP tem precisão de nível de operadora, isto é, aponta o roteador de saída e não o aparelho. A margem, portanto, é de dezenas de quilômetros, e só a incompatibilidade de ordem de grandeza tem valor indiciário.",
     { color: MUTED, size: 8.5 }
   );
 
@@ -465,7 +465,7 @@ function sectionGeo(ctx, result, mapas = {}) {
     field(
       ctx,
       "Origem da conexão",
-      `${[ipRef.geo.city, ipRef.geo.region, ipRef.geo.country].filter(Boolean).join(" / ")} — ${ipRef.geo.lat}, ${ipRef.geo.lon}`
+      `${[ipRef.geo.city, ipRef.geo.region, ipRef.geo.country].filter(Boolean).join(" / ")} (${ipRef.geo.lat}, ${ipRef.geo.lon})`
     );
     const d = ipRef.divergenciaResidencia;
     if (d) {
@@ -480,16 +480,16 @@ function sectionGeo(ctx, result, mapas = {}) {
       drawMap(
         ctx,
         mapas.mapaIpResidencia,
-        "Mapa 1 — origem da conexão pelo endereço IP (I, vermelho) × residência informada (R, azul). A linha representa a distância geodésica (Haversine). O ponto I indica o ponto de presença da operadora, NÃO a posição do aparelho. Base cartográfica OpenStreetMap."
+        "Mapa 1. Origem da conexão pelo endereço IP (I, vermelho) × residência informada (R, azul). A linha representa a distância geodésica (Haversine). O ponto I indica o ponto de presença da operadora, NÃO a posição do aparelho. Base cartográfica OpenStreetMap."
       );
     }
   }
 
   // ─── Confronto 2: residência × geolocalização declarada ───────────────────
-  subheading(ctx, "§ 5.2 · Confronto 2 — residência informada × geolocalização declarada no documento");
+  subheading(ctx, "§ 5.2 · Confronto 2 · residência informada × geolocalização declarada no documento");
   paragraph(
     ctx,
-    "Pergunta: a coordenada que o próprio documento registra como local da assinatura corresponde à residência do contratante? Aqui as duas coordenadas são de precisão métrica (GPS declarado e ponto confirmado), então a comparação é direta e uma divergência de poucos quilômetros já é significativa — ao contrário do Confronto 1.",
+    "Pergunta: a coordenada que o próprio documento registra como local da assinatura corresponde à residência do contratante? Aqui as duas coordenadas são de precisão métrica (GPS declarado e ponto confirmado). A comparação é direta e, ao contrário do Confronto 1, uma divergência de poucos quilômetros já é significativa.",
     { color: MUTED, size: 8.5 }
   );
 
@@ -504,7 +504,7 @@ function sectionGeo(ctx, result, mapas = {}) {
   } else {
     if (cg.endereco) field(ctx, "Endereço declarado", cg.endereco);
     field(ctx, "Coordenada declarada", `${cg.lat}, ${cg.lon}`, { mono: true });
-    field(ctx, "   Origem da coordenada", `${cg.fonte || "não informada"} — precisão ${precisionText(cg)}`);
+    field(ctx, "   Origem da coordenada", `${cg.fonte || "não informada"} (precisão ${precisionText(cg)})`);
     if (cg.dataHora) field(ctx, "   Data / hora do registro", cg.dataHora);
 
     // Régua PRÓPRIA deste confronto. `riskFromDistance` (50/300/1000 km) é
@@ -527,7 +527,7 @@ function sectionGeo(ctx, result, mapas = {}) {
       drawMap(
         ctx,
         mapas.mapaResidenciaDeclarado,
-        "Mapa 2 — residência informada (R, azul) × geolocalização declarada no documento (A, âmbar). A linha representa a distância geodésica (Haversine). Ambos os pontos têm precisão métrica, ao contrário do Mapa 1. Base cartográfica OpenStreetMap."
+        "Mapa 2. Residência informada (R, azul) × geolocalização declarada no documento (A, âmbar). A linha representa a distância geodésica (Haversine). Ambos os pontos têm precisão métrica, ao contrário do Mapa 1. Base cartográfica OpenStreetMap."
       );
     }
   }
@@ -544,7 +544,7 @@ function sectionGeo(ctx, result, mapas = {}) {
     if (ipLonge && declarado.nivel === "compativel") {
       paragraph(
         ctx,
-        `Leitura conjunta dos dois confrontos: o documento declara que a assinatura ocorreu a ${declarado.km.toFixed(2)} km da residência do contratante — praticamente no mesmo local —, mas a conexão que originou o ato partiu de ${ipRef.divergenciaResidencia.km.toFixed(2)} km de distância. A coordenada declarada e a origem real da conexão apontam regiões distintas. A divergência não comprova fraude e admite explicações legítimas (uso de rede de terceiro, imprecisão da base de geolocalização, roteamento da operadora), mas é ponto que exige esclarecimento da instituição financeira, a quem incumbe demonstrar a autenticidade do ato (STJ, Tema 1.061).`,
+        `Leitura conjunta dos dois confrontos: o documento declara que a assinatura ocorreu a ${declarado.km.toFixed(2)} km da residência do contratante, praticamente no mesmo local, mas a conexão que originou o ato partiu de ${ipRef.divergenciaResidencia.km.toFixed(2)} km de distância. A coordenada declarada e a origem real da conexão apontam regiões distintas. A divergência não comprova fraude e admite explicações legítimas (uso de rede de terceiro, imprecisão da base de geolocalização, roteamento da operadora), mas é ponto que exige esclarecimento da instituição financeira, a quem incumbe demonstrar a autenticidade do ato (STJ, Tema 1.061).`,
         { color: DANGER, size: 9 }
       );
     } else if (ipLonge && declarado.nivel !== "compativel") {
@@ -552,7 +552,7 @@ function sectionGeo(ctx, result, mapas = {}) {
       // leitor precisa cruzar duas seções para perceber que nada fecha.
       paragraph(
         ctx,
-        `Leitura conjunta dos dois confrontos: nenhum dos dois pontos coincide com a residência informada — o local declarado no documento está a ${declarado.km.toFixed(2)} km e a origem da conexão a ${ipRef.divergenciaResidencia.km.toFixed(2)} km. As duas divergências são independentes e devem ser esclarecidas separadamente, confrontadas com a data e hora do registro, com a versão do contratante sobre onde esteve e com a localização do correspondente bancário.`,
+        `Leitura conjunta dos dois confrontos: nenhum dos dois pontos coincide com a residência informada. O local declarado no documento está a ${declarado.km.toFixed(2)} km e a origem da conexão a ${ipRef.divergenciaResidencia.km.toFixed(2)} km. As duas divergências são independentes e devem ser esclarecidas separadamente, confrontadas com a data e hora do registro, com a versão do contratante sobre onde esteve e com a localização do correspondente bancário.`,
         { color: DANGER, size: 9 }
       );
     }
@@ -586,7 +586,7 @@ function sectionIpTrace(ctx, result) {
 
   paragraph(
     ctx,
-    "Um endereço IP não carrega coordenada. A localização abaixo vem de base que mapeia blocos de IP ao ponto de presença da operadora — o roteador de saída, não o aparelho. Em rede móvel brasileira, com CGNAT e blocos IPv6 alocados por região, o ponto devolvido tende à capital ou ao centro de operação do estado. Divergências de dezenas de quilômetros são esperadas; o que tem valor indiciário é a incompatibilidade de ordem de grandeza.",
+    "Um endereço IP não carrega coordenada. A localização abaixo vem de base que mapeia blocos de IP ao ponto de presença da operadora, ou seja, ao roteador de saída, não ao aparelho. Em rede móvel brasileira, com CGNAT e blocos IPv6 alocados por região, o ponto devolvido tende à capital ou ao centro de operação do estado. Divergências de dezenas de quilômetros são esperadas; o que tem valor indiciário é a incompatibilidade de ordem de grandeza.",
     { color: MUTED, size: 8.5 }
   );
 
@@ -630,7 +630,7 @@ function sectionIpTrace(ctx, result) {
     field(
       ctx,
       "   Origem da conexão",
-      `${[ip.geo.city, ip.geo.region, ip.geo.country].filter(Boolean).join(" / ")} — ${ip.geo.lat}, ${ip.geo.lon}`
+      `${[ip.geo.city, ip.geo.region, ip.geo.country].filter(Boolean).join(" / ")} (${ip.geo.lat}, ${ip.geo.lon})`
     );
     if (ip.geo.isp) field(ctx, "   Operadora (ISP)", ip.geo.isp);
     field(ctx, "   Fonte da geolocalização", ip.geo.source || "não informada");

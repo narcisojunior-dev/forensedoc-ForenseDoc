@@ -24,7 +24,7 @@ export const DEFINICAO_CADEIA_CUSTODIA =
 
 /** Por que a completude importa, em termos de ônus da prova. */
 export const EFEITO_PROCESSUAL_CADEIA =
-  "Impugnada a assinatura pelo consumidor, o ônus de comprovar autenticidade e integridade do documento recai sobre a instituição financeira (STJ, Tema 1.061; CPC, art. 373, e art. 429, II). A assinatura eletrônica sem certificação ICP-Brasil é válida (MP 2.200-2/2001, art. 10, § 2º; Lei 14.063/2020), mas essa validade é CONDICIONADA à demonstração de autoria e integridade — e é exatamente isso que a cadeia de custódia documenta. Cada elemento ausente subtrai um meio de prova de que a instituição dispõe para se desincumbir desse ônus.";
+  "Impugnada a assinatura pelo consumidor, o ônus de comprovar autenticidade e integridade do documento recai sobre a instituição financeira (STJ, Tema 1.061; CPC, art. 373, e art. 429, II). A assinatura eletrônica sem certificação ICP-Brasil é válida (MP 2.200-2/2001, art. 10, § 2º; Lei 14.063/2020), mas essa validade é CONDICIONADA à demonstração de autoria e integridade, que é precisamente o que a cadeia de custódia documenta. Cada elemento ausente subtrai um meio de prova de que a instituição dispõe para se desincumbir desse ônus.";
 
 /**
  * Os oito elementos, cada um com função probatória, base normativa e efeito da
@@ -56,7 +56,7 @@ export const ELEMENTOS_CADEIA = [
     comprova:
       "Indica de qual conexão partiu o ato. Combinado com data e hora, é o dado que permite requisitar da operadora a identificação do assinante da conexão.",
     norma:
-      "Marco Civil da Internet (Lei 12.965/2014), arts. 13 e 15 — guarda de registros de conexão por 1 ano e de acesso a aplicações por 6 meses; art. 10, § 1º e art. 22 — fornecimento mediante ordem judicial",
+      "Marco Civil da Internet (Lei 12.965/2014), arts. 13 e 15 (guarda de registros de conexão por 1 ano e de acesso a aplicações por 6 meses); art. 10, § 1º e art. 22 (fornecimento mediante ordem judicial)",
     ausencia:
       "Sem o IP, extingue-se a única via de rastrear a origem material da conexão. A prazo, a perda é irreversível: passados os prazos de guarda do Marco Civil, o dado deixa de existir na operadora.",
   },
@@ -65,16 +65,16 @@ export const ELEMENTOS_CADEIA = [
     nome: "Geolocalização do ato",
     comprova:
       "Situa o ato no espaço, permitindo o confronto com a residência do contratante e com a localização do correspondente bancário.",
-    norma: "LGPD (Lei 13.709/2018), arts. 5º, I e 7º — coordenada é dado pessoal e seu tratamento exige base legal",
+    norma: "LGPD (Lei 13.709/2018), arts. 5º, I e 7º: a coordenada é dado pessoal e seu tratamento exige base legal",
     ausencia:
-      "Sem geolocalização, o laudo não pode aferir incompatibilidade espacial, e resta apenas o IP — cuja precisão é de nível de operadora.",
+      "Sem geolocalização, o laudo não pode aferir incompatibilidade espacial, restando apenas o IP, cuja precisão é de nível de operadora.",
   },
   {
     chave: "metodo_autenticacao",
     nome: "Método de autenticação",
     comprova:
       "Descreve COMO a identidade foi verificada (token por SMS, biometria facial, senha, certificado) e determina o nível da assinatura.",
-    norma: "Lei 14.063/2020, art. 4º, I a III — assinatura simples, avançada e qualificada",
+    norma: "Lei 14.063/2020, art. 4º, I a III: assinatura simples, avançada e qualificada",
     ausencia:
       "Sem o método declarado, não é possível classificar o nível da assinatura nem avaliar se ele era adequado ao ato praticado.",
   },
@@ -92,7 +92,7 @@ export const ELEMENTOS_CADEIA = [
     nome: "Trilha de auditoria",
     comprova:
       "Registra a sequência de eventos do fluxo (envio, abertura, leitura, aceite), permitindo reconstituir o que ocorreu e em que ordem.",
-    norma: "CPP, art. 158-A (por analogia — história cronológica do vestígio); ISO/IEC 27037:2012",
+    norma: "CPP, art. 158-A, por analogia, quanto à história cronológica do vestígio; ISO/IEC 27037:2012",
     ausencia:
       "Sem trilha, cada registro isolado passa a depender da palavra da instituição, sem meio de conferir consistência entre eles.",
   },

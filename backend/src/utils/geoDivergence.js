@@ -54,7 +54,7 @@ const FAIXAS = [
     rotulo: "DIVERGÊNCIA GRAVE",
     tom: "danger",
     sintese:
-      "A origem da conexão é geograficamente incompatível com o local informado, em ordem de grandeza que a margem de erro da geolocalização por IP não alcança. Indício de que o ato não partiu de onde o documento sugere — a ser confrontado com a data/hora do registro e com a versão do cliente.",
+      "A origem da conexão é geograficamente incompatível com o local informado, em ordem de grandeza que a margem de erro da geolocalização por IP não alcança. Trata-se de indício de que o ato não partiu de onde o documento sugere, a ser confrontado com a data e hora do registro e com a versão do cliente.",
   },
 ];
 
