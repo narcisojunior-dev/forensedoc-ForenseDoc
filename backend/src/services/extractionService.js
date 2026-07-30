@@ -1,4 +1,5 @@
 import { firstMatch, allMatches, titleCaseName } from "../utils/stringUtils.js";
+import { extractIpAddresses } from "../utils/ipExtraction.js";
 
 export function heuristicExtractionFromText(rawText) {
   const text = String(rawText || "").replace(/\r/g, "\n");
@@ -50,8 +51,10 @@ export function heuristicExtractionFromText(rawText) {
   const cetMensal = firstMatch(flat, [/(?:CET\s+mensal|C\.?E\.?T\.?\s*a\.?m\.?)\s*[:\-]?\s*([\d,.]+\s*%)/i]);
   const cetAnual = firstMatch(flat, [/(?:CET\s+anual|C\.?E\.?T\.?\s*a\.?a\.?)\s*[:\-]?\s*([\d,.]+\s*%)/i]);
   const dates = allMatches(flat, /\b(\d{2}\/\d{2}\/\d{4})\b/g);
-  const ipValues = Array.from(new Set(allMatches(flat, /\b((?:\d{1,3}\.){3}\d{1,3})\b/g)))
-    .filter((ip) => ip.split(".").every((part) => Number(part) >= 0 && Number(part) <= 255));
+  // Extração dedicada (utils/ipExtraction.js): cobre IPv6, lê o rótulo do
+  // assinador e descarta número de versão de User-Agent, que o regex anterior
+  // aceitava como endereço.
+  const ipRecords = extractIpAddresses(text);
   const hash = firstMatch(flat, [
     /\b([a-f0-9]{64})\b/i,
     /\b([a-f0-9]{40})\b/i,
@@ -59,18 +62,51 @@ export function heuristicExtractionFromText(rawText) {
     /\b([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\b/i,
   ]);
   const coordPair = flat.match(/(-?\d{1,2}[,.]\d{4,})\s*[,; ]\s*(-?\d{1,3}[,.]\d{4,})/);
-  const latitudeValue = firstMatch(flat, [
-    /latitude\s*:?\s*(-?\d{1,2}[,.]\d{3,})/i,
-    /lat\s*:?\s*(-?\d{1,2}[,.]\d{3,})/i,
-  ]) || (coordPair ? coordPair[1] : null);
-  const longitudeValue = firstMatch(flat, [
-    /longitude\s*:?\s*(-?\d{1,3}[,.]\d{3,})/i,
-    /lon(?:g)?\s*:?\s*(-?\d{1,3}[,.]\d{3,})/i,
-  ]) || (coordPair ? coordPair[2] : null);
-  const declaredGeoAddress = firstMatch(flat, [
+  /*
+   * O rótulo COMBINADO tem precedência sobre os isolados.
+   *
+   * Assinadores brasileiros escrevem "Latitude e Longitude: -3.4340189 /
+   * -60.4593232" — um rótulo, dois valores. Os padrões isolados liam isso
+   * errado: `/longitude\s*:?\s*(...)/ ` casava o "Longitude:" de dentro do
+   * rótulo combinado e capturava o PRIMEIRO número, que é a latitude. O laudo
+   * saía com latitude nula e a latitude ocupando o campo da longitude — uma
+   * coordenada trocada num documento pericial.
+   */
+  const parCombinado = flat.match(
+    /latitude\s*(?:e|,|\/)\s*longitude\s*[:\-]?\s*(-?\d{1,2}[,.]\d{3,})\s*[\/,;]\s*(-?\d{1,3}[,.]\d{3,})/i
+  );
+  const latitudeValue = parCombinado
+    ? parCombinado[1]
+    : firstMatch(flat, [
+        /latitude\s*[:\-]\s*(-?\d{1,2}[,.]\d{3,})/i,
+        /\blat\s*[:\-]\s*(-?\d{1,2}[,.]\d{3,})/i,
+      ]) || (coordPair ? coordPair[1] : null);
+  const longitudeValue = parCombinado
+    ? parCombinado[2]
+    : firstMatch(flat, [
+        /longitude\s*[:\-]\s*(-?\d{1,3}[,.]\d{3,})/i,
+        /\blon(?:g)?\s*[:\-]\s*(-?\d{1,3}[,.]\d{3,})/i,
+      ]) || (coordPair ? coordPair[2] : null);
+
+  /*
+   * O endereço declarado só é aceito se PARECER um endereço.
+   *
+   * O padrão anterior capturava os 120 caracteres seguintes a qualquer
+   * "geolocalização"/"localização" — e num dossiê que traz política de
+   * privacidade isso trouxe "cookies, pixel tags, beacons, local shared
+   * objects...". O laudo apresentava um trecho de política de privacidade como
+   * endereço da assinatura.
+   */
+  const TERMOS_DE_ENDERECO = /\b(?:rua|avenida|av\.|travessa|rodovia|estrada|alameda|pra[çc]a|bairro|munic[íi]pio|cidade|CEP|n[ºo°]|\d{5}-?\d{3})\b/i;
+  const candidatoGeoEndereco = firstMatch(flat, [
     /geolocaliza[cç][aã]o\s*[:\-]?\s*([^.;\n]{8,120})/i,
     /localiza[cç][aã]o\s*[:\-]?\s*([^.;\n]{8,120})/i,
+    /(?:local|endere[cç]o)\s+da\s+assinatura\s*[:\-]?\s*([^.;\n]{8,120})/i,
   ]);
+  const declaredGeoAddress =
+    candidatoGeoEndereco && TERMOS_DE_ENDERECO.test(candidatoGeoEndereco)
+      ? candidatoGeoEndereco
+      : null;
   const hasSignature = /assinad|assinatura|signat[aá]rio|biometr|token|selfie|certificado|ip\b/i.test(flat);
   const hasAudit = /auditoria|log|trilha|evid[eê]ncia|carimbo|data\s+e\s+hora/i.test(flat);
   const hasGeo = Boolean((latitudeValue && longitudeValue) || declaredGeoAddress);
@@ -95,7 +131,7 @@ export function heuristicExtractionFromText(rawText) {
   const irregularidades = [];
   if (lowText) irregularidades.push("O PDF possui pouco texto pesquisável/OCR extraível. Para resultado completo em documento escaneado, aplique OCR prévio ao arquivo.");
   if (!hash) irregularidades.push("Ausência de hash de integridade extraível no texto do documento.");
-  if (!ipValues.length) irregularidades.push("Ausência de endereço IP extraível no texto do documento.");
+  if (!ipRecords.length) irregularidades.push("Ausência de endereço IP extraível no texto do documento.");
   if (!hasGeo) irregularidades.push("Ausência de geolocalização GPS extraível no texto do documento.");
   if (!hasAudit) irregularidades.push("Trilha de auditoria não identificada pela extração local.");
 
@@ -174,7 +210,7 @@ export function heuristicExtractionFromText(rawText) {
     },
     cadeia_custodia: {
       identificacao_signatario: Boolean(name || cpf),
-      registro_ip: ipValues.length > 0,
+      registro_ip: ipRecords.length > 0,
       carimbo_tempo: /\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}/.test(flat),
       geolocalizacao: hasGeo,
       metodo_autenticacao: /token|sms|biometr|selfie|email|e-mail|senha/i.test(flat),
@@ -185,7 +221,15 @@ export function heuristicExtractionFromText(rawText) {
         ? "Cadeia de custódia não pôde ser inferida com segurança porque o PDF possui pouco texto extraível."
         : "Cadeia de custódia inferida por extração local. Revise os campos antes de uso em peça processual.",
     },
-    ips: ipValues.map((ip) => ({ endereco: ip, contexto: "IP extraído do texto do PDF", data_hora: null, user_agent: null })),
+    ips: ipRecords.map((r) => ({
+      endereco: r.endereco,
+      versao: r.versao,
+      porta: r.porta,
+      rotulo: r.rotulo,
+      contexto: r.contexto,
+      data_hora: r.data_hora,
+      user_agent: r.user_agent,
+    })),
     evidencias_irregularidade: irregularidades,
     observacoes_periciais: lowText
       ? "Laudo gerado em modo local, mas o PDF contém pouco texto pesquisável. Para resultado completo em documentos escaneados, aplique OCR prévio e envie novamente."

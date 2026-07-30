@@ -1,6 +1,8 @@
 import { getIpInfo } from "./apiService.js";
 import { geocodeAddress } from "./geocodingService.js";
 import { haversineKm } from "../utils/geoUtils.js";
+import { isIP } from "node:net";
+import { describeIpDivergence } from "../utils/geoDivergence.js";
 
 /**
  * Confronto geográfico do §5 do laudo (Módulo 4, Fase A).
@@ -24,14 +26,25 @@ export async function enrichGeography(extracted, homeAddress, homeCoord = null) 
   const cliente = extracted.cliente || {};
 
   // 1. Geolocalizar cada IP extraído do PDF.
+  //
+  // O gate era `/^\d{1,3}(\.\d{1,3}){3}$/` — só IPv4. Assinadores brasileiros
+  // registram o IP em IPv6 na rede móvel, e esses endereços passavam direto com
+  // `geo: null`: o § 6 listava o IP e afirmava "geolocalização indisponível"
+  // sem nunca ter consultado provedor nenhum.
   const ipResults = [];
   for (const ipInfo of extracted.ips || []) {
-    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(ipInfo.endereco)) {
-      const geo = await getIpInfo(ipInfo.endereco);
-      ipResults.push({ ...ipInfo, geo });
-    } else {
-      ipResults.push({ ...ipInfo, geo: null });
+    if (!isIP(ipInfo.endereco)) {
+      ipResults.push({ ...ipInfo, geo: null, geoFailure: "endereço inválido" });
+      continue;
     }
+    const geo = await getIpInfo(ipInfo.endereco);
+    ipResults.push({
+      ...ipInfo,
+      geo,
+      // Distingue "o documento não trazia" de "a consulta falhou" — num laudo,
+      // as duas ausências têm significados diferentes.
+      geoFailure: geo ? null : "nenhum provedor de geolocalização respondeu",
+    });
   }
 
   // 2. Ponto de referência: endereço residencial. Manual (da tela) tem
@@ -108,6 +121,7 @@ export async function enrichGeography(extracted, homeAddress, homeCoord = null) 
   //      aconteceu? Incompatibilidade grosseira aqui é forte indício de GPS
   //      forjado ou assinatura por terceiro. (Geo por IP é de nível de operadora,
   //      então serve como indício de larga escala, não como coordenada exata.)
+  const referenciaConfirmada = homeGeo?.precision === "manual";
   const ipAnalysis = ipResults.map((ip) => {
     let distance = null;
     let distanceToSignature = null;
@@ -115,7 +129,25 @@ export async function enrichGeography(extracted, homeAddress, homeCoord = null) 
       if (homeGeo) distance = haversineKm(homeGeo.lat, homeGeo.lon, ip.geo.lat, ip.geo.lon);
       if (contractGeo) distanceToSignature = haversineKm(contractGeo.lat, contractGeo.lon, ip.geo.lat, ip.geo.lon);
     }
-    return { ...ip, distance, distanceToSignature };
+
+    // Confronto explícito contra o ponto de referência do operador, com a
+    // leitura pericial da faixa. Antes só existia o número em km, e interpretá-lo
+    // ficava por conta de quem lesse o laudo.
+    return {
+      ...ip,
+      distance,
+      distanceToSignature,
+      divergenciaResidencia: describeIpDivergence({
+        km: distance,
+        referenciaConfirmada,
+        referenciaRotulo: homeSource,
+      }),
+      divergenciaAssinatura: describeIpDivergence({
+        km: distanceToSignature,
+        referenciaConfirmada: contractGeo?.precision === "gps",
+        referenciaRotulo: "geolocalização declarada no contrato",
+      }),
+    };
   });
 
   let contractToHomeKm = null;

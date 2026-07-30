@@ -8,7 +8,7 @@ import {
 
 import { api } from "../lib/axios.js";
 import { classifyHashString } from "../utils/crypto.js";
-import { riskFromDistance, ipSignatureCompat } from "../utils/geo.js";
+import { riskFromDistance } from "../utils/geo.js";
 import { exportReportPDF } from "../utils/pdfExport.js";
 import { downloadReportPdf } from "../utils/reportDownload.js";
 import {
@@ -16,6 +16,8 @@ import {
 } from "../components/UiComponents.jsx";
 import { DistanceBanner } from "../components/DistanceBanner.jsx";
 import { GeoMap } from "../components/GeoMap.jsx";
+import CadeiaCustodia from "../components/report/CadeiaCustodia.jsx";
+import IpTrace from "../components/report/IpTrace.jsx";
 import { useAuthStore } from "../store/authStore.js";
 
 // Espelha o MAX_PDF_MB do backend (utils/pdfValidation.js). Checar aqui evita
@@ -806,76 +808,15 @@ export default function Analyze() {
                 <Note>{report.extracted.assinatura.observacoes}</Note>
               )}
 
-              {(() => {
-                const a = report.extracted.assinatura || {};
-                const cc = report.extracted.cadeia_custodia || {};
-                const items = [
-                  ["Identificação do signatário", !!(cc.identificacao_signatario || a.titular_certificado || a.cpf_titular || report.extracted.cliente?.nome)],
-                  ["Registro de IP", !!(cc.registro_ip || report.ipAnalysis.length > 0)],
-                  ["Carimbo de data e hora", !!(cc.carimbo_tempo || a.data_hora_assinatura)],
-                  ["Geolocalização do ato", !!(cc.geolocalizacao || report.geoDeclaredPresent || report.contractGeo)],
-                  ["Método de autenticação", !!(cc.metodo_autenticacao || (a.metodos_autenticacao && a.metodos_autenticacao.length > 0) || (a.tipo && a.tipo !== "Ausente" && a.tipo !== "Indeterminado"))],
-                  ["Hash de integridade", !!(cc.hash_integridade || a.hash_documento_assinado)],
-                  ["Trilha de auditoria", !!cc.trilha_auditoria],
-                  ["Evidência de aceite / vontade", !!cc.evidencia_aceite],
-                ];
-                const present = items.filter((it) => it[1]).length;
-                const total = items.length;
-                const pct = Math.round((present / total) * 100);
-                const completo = present >= 6;
-                const parcial = present >= 4 && present < 6;
-                const tone = completo ? "ok" : parcial ? "warn" : "danger";
-                const missing = items.filter((it) => !it[1]).map((it) => it[0].toLowerCase());
-
-                return (
-                  <>
-                    <SubHead>Cadeia de custódia da assinatura</SubHead>
-
-                    {/* Checklist item a item: antes só existia o placar agregado,
-                        e o operador não via QUAL elemento faltava sem ler o texto. */}
-                    <div className="grid grid-cols-1 gap-x-6 gap-y-1 sm:grid-cols-2">
-                      {items.map(([nome, ok]) => (
-                        <div key={nome} className="flex items-center gap-2 py-1 text-[13px]">
-                          {ok ? (
-                            <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
-                          ) : (
-                            <AlertTriangle className="h-4 w-4 shrink-0 text-zinc-600" />
-                          )}
-                          <span className={ok ? "text-zinc-300" : "text-zinc-500"}>{nome}</span>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div
-                      data-report-block
-                      className={`mt-4 flex flex-wrap items-center justify-between gap-4 rounded-xl border px-5 py-4 ${TONES[tone].bg}`}
-                      style={{ borderColor: `${TONES[tone].hex}55` }}
-                    >
-                      <div>
-                        <div className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
-                          Completude da cadeia de custódia
-                        </div>
-                        <div
-                          className="mt-1 text-2xl font-bold tabular-nums"
-                          style={{ color: TONES[tone].hex }}
-                        >
-                          {present}/{total} · {pct}%
-                        </div>
-                      </div>
-                      <Badge
-                        label={completo ? "SUBSTANCIALMENTE COMPLETA" : parcial ? "PARCIAL" : "INCOMPLETA"}
-                        tone={tone}
-                      />
-                    </div>
-
-                    <Note tone={tone}>
-                      {completo
-                        ? "A assinatura eletrônica é juridicamente válida ainda que sem certificação ICP-Brasil, e a cadeia de custódia reúne os elementos necessários para que a instituição comprove autoria e integridade (MP 2.200-2/2001, art. 10, §2º; Lei 14.063/2020; STJ, REsp 2.159.442, rel. Min. Nancy Andrighi)."
-                        : `A ausência de certificação ICP-Brasil não invalida, por si só, a assinatura. Contudo, a cadeia de custódia está ${parcial ? "parcial" : "incompleta"}: faltam ${missing.join(", ")}. Quando o consumidor contesta a assinatura em contrato bancário, o ônus de comprovar a autenticidade e a integridade recai sobre a instituição financeira (STJ, Tema 1.061). A incompletude da cadeia de custódia fragiliza essa prova e sustenta a impugnação do documento.`}
-                    </Note>
-                  </>
-                );
-              })()}
+              {report.cadeiaCustodia?.elementos?.length ? (
+                <CadeiaCustodia cadeia={report.cadeiaCustodia} />
+              ) : (
+                <Note tone="warn">
+                  Este laudo foi gerado antes de a cadeia de custódia passar a ser
+                  avaliada com fundamento normativo por elemento. Gere uma nova análise
+                  para obter o § 4.1 completo.
+                </Note>
+              )}
             </Section>
 
             {/* §5 */}
@@ -1022,100 +963,7 @@ export default function Analyze() {
                         terceiro — e não uma medida exata.
                       </Note>
                     )}
-                  <div className="mt-3 space-y-3">
-                    {report.ipAnalysis.map((ip, i) => {
-                      const risk = riskFromDistance(ip.distance);
-                      return (
-                        <div
-                          key={i}
-                          data-report-block
-                          className="rounded-xl border p-4"
-                          style={{ borderColor: `${risk.color}40`, background: risk.bg }}
-                        >
-                          <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
-                            <div
-                              className="font-mono text-[13px] font-bold"
-                              style={{ color: risk.color }}
-                            >
-                              IP #{i + 1} · {ip.endereco}
-                            </div>
-                            <Badge label={risk.label} color={risk.color} />
-                          </div>
-                          {ip.contexto && (
-                            <p className="mb-2 text-[12px] text-zinc-500">Contexto: {ip.contexto}</p>
-                          )}
-
-                          {ip.geo ? (
-                            <>
-                              {[
-                                ["País", ip.geo.country],
-                                ["Estado / região", ip.geo.region],
-                                ["Cidade", ip.geo.city],
-                                ["Provedor (ISP / ASN)", ip.geo.isp],
-                                ["Fuso horário", ip.geo.timezone],
-                              ].map(([lbl, val]) => (
-                                <Row key={lbl} label={lbl} value={val} />
-                              ))}
-                              <Row
-                                label="Coordenadas do IP"
-                                value={`${ip.geo.lat?.toFixed(7)}, ${ip.geo.lon?.toFixed(7)}`}
-                                mono
-                              />
-                              {ip.distance !== null ? (
-                                <div
-                                  data-report-block
-                                  className="flex flex-wrap items-baseline justify-between gap-3 border-b border-surface-border/60 py-2.5"
-                                >
-                                  <span className="text-[13px] text-zinc-400">
-                                    Distância à residência do cliente
-                                  </span>
-                                  <span
-                                    className="text-[13px] font-bold tabular-nums"
-                                    style={{ color: risk.color }}
-                                  >
-                                    {ip.distance.toFixed(2)} km
-                                  </span>
-                                </div>
-                              ) : (
-                                <p className="mt-2 text-[12px] text-zinc-500">
-                                  Endereço residencial não geocodificado. Distância indisponível para
-                                  este IP.
-                                </p>
-                              )}
-                              {ip.distanceToSignature !== null &&
-                                ip.distanceToSignature !== undefined &&
-                                (() => {
-                                  const compat = ipSignatureCompat(ip.distanceToSignature);
-                                  return (
-                                    <div
-                                      data-report-block
-                                      className="flex flex-wrap items-baseline justify-between gap-3 border-b border-surface-border/60 py-2.5"
-                                    >
-                                      <span className="text-[13px] text-zinc-400">
-                                        IP × geolocalização declarada da assinatura
-                                      </span>
-                                      <span
-                                        className="text-[13px] font-bold tabular-nums"
-                                        style={{ color: compat.color }}
-                                      >
-                                        {ip.distanceToSignature.toFixed(2)} km · {compat.label}
-                                      </span>
-                                    </div>
-                                  );
-                                })()}
-                            </>
-                          ) : (
-                            <p className="py-1.5 text-[13px] text-zinc-500">
-                              Geolocalização indisponível para este endereço IP.
-                            </p>
-                          )}
-
-                          {ip.data_hora && <Row label="Data / hora registrada" value={ip.data_hora} />}
-                          {ip.user_agent && <Row label="User-Agent" value={ip.user_agent} />}
-                        </div>
-                      );
-                    })}
-                  </div>
+                  <IpTrace ipAnalysis={report.ipAnalysis} />
                 </>
               )}
             </Section>

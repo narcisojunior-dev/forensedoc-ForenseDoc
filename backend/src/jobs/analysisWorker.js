@@ -8,6 +8,7 @@ import { extractPdfMetadata } from "../services/pdfService.js";
 import { heuristicExtractionFromText } from "../services/extractionService.js";
 import { enrichGeography } from "../services/geoEnrichmentService.js";
 import { cleanPdfBase64, stripDiacritics } from "../utils/stringUtils.js";
+import { buildCustodyChain } from "../reports/custodyChain.js";
 
 function fileHashes(buffer) {
   return {
@@ -67,6 +68,10 @@ export async function processAnalysis(job) {
       contractGeo: geo.contractGeo,
       geoDeclaredPresent: geo.geoDeclaredPresent,
       ipAnalysis: geo.ipAnalysis,
+      // Cadeia de custódia já avaliada e persistida: o PDF do servidor e a tela
+      // passam a ler a MESMA análise, em vez de cada um recalcular a sua. Era
+      // por aí que as duas versões do § 4 divergiam.
+      cadeiaCustodia: buildCustodyChain(fallback, geo.ipAnalysis, geo.geoDeclaredPresent),
       generatedAt: new Date().toISOString(),
     };
 

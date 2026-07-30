@@ -99,15 +99,37 @@ export async function fetchStaticMap(points, opts = {}) {
 }
 
 // Monta os pontos do §5 (residência + assinatura declarada) para o mapa.
+/**
+ * Pontos do mapa do § 5: residência (R), assinatura declarada (A) e origem do
+ * IP (I).
+ *
+ * O ponto do IP passou a integrar o mapa porque o confronto que mais interessa
+ * ao laudo é justamente entre a ORIGEM DA CONEXÃO e o local informado — e ele
+ * só existia como número em quilômetros, no meio do texto. Ver os três pontos
+ * enquadrados juntos mostra de imediato se o ato partiu da região informada.
+ *
+ * Só o primeiro IP geolocalizado entra. Documentos de trilha de auditoria
+ * costumam repetir o mesmo endereço em vários eventos, e plotar todos
+ * empilharia marcadores sobre o mesmo ponto sem acrescentar informação.
+ */
 export function signatureMapPoints(result) {
   const points = [];
   const home = result?.home?.geo;
   const cg = result?.contractGeo;
+
   if (home && Number.isFinite(home.lat) && Number.isFinite(home.lon)) {
     points.push({ lat: home.lat, lon: home.lon, color: "#2563eb", label: "R" });
   }
   if (cg && Number.isFinite(cg.lat) && Number.isFinite(cg.lon)) {
     points.push({ lat: cg.lat, lon: cg.lon, color: "#f59e0b", label: "A" });
   }
+
+  const ipGeo = (result?.ipAnalysis || []).find(
+    (ip) => Number.isFinite(ip.geo?.lat) && Number.isFinite(ip.geo?.lon)
+  );
+  if (ipGeo) {
+    points.push({ lat: ipGeo.geo.lat, lon: ipGeo.geo.lon, color: "#dc2626", label: "I" });
+  }
+
   return points;
 }

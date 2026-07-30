@@ -34,30 +34,82 @@ export async function geocodeAddress(q) {
   return null;
 }
 
+/**
+ * Provedores de geolocalização por IP, em ordem de tentativa.
+ *
+ * Existir mais de um não é redundância: o ipapi.co tem cota gratuita baixa e,
+ * quando ela esgota, responde `{"error": true, "reason": "RateLimited"}` com
+ * HTTP 200. O código antigo tratava isso como "IP sem localização" e o § 6 do
+ * laudo saía vazio — sem nenhum indício de que a falha era de cota, não do
+ * documento. Num laudo pericial, ausência de dado e falha de consulta são coisas
+ * diferentes e não podem se confundir.
+ *
+ * Ambos aceitam IPv4 e IPv6 e dispensam chave.
+ */
+const PROVEDORES_GEOIP = [
+  {
+    nome: "ipapi.co",
+    url: (ip) => `https://ipapi.co/${encodeURIComponent(ip)}/json/`,
+    normalizar: (d) =>
+      d.error || d.latitude == null
+        ? null
+        : {
+            city: d.city,
+            region: d.region,
+            country: d.country_name,
+            lat: Number(d.latitude),
+            lon: Number(d.longitude),
+            isp: d.org || d.asn,
+            timezone: d.timezone,
+          },
+  },
+  {
+    nome: "ipwho.is",
+    url: (ip) => `https://ipwho.is/${encodeURIComponent(ip)}`,
+    normalizar: (d) =>
+      d.success === false || d.latitude == null
+        ? null
+        : {
+            city: d.city,
+            region: d.region,
+            country: d.country,
+            lat: Number(d.latitude),
+            lon: Number(d.longitude),
+            isp: d.connection?.isp || d.connection?.org,
+            timezone: d.timezone?.id,
+          },
+  },
+];
+
+/**
+ * @returns {Promise<object|null>} dados de localização, ou `null` se NENHUM
+ *   provedor respondeu. O chamador distingue os casos pelo campo `source`.
+ */
 export async function getIpInfo(ip) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  try {
-    const r = await fetch(`https://ipapi.co/${ip}/json/`, { signal: controller.signal });
-    const d = await r.json();
-    if (d.error) return null;
-    return {
-      ip: d.ip,
-      city: d.city,
-      region: d.region,
-      country: d.country_name,
-      lat: d.latitude,
-      lon: d.longitude,
-      isp: d.org || d.asn,
-      timezone: d.timezone,
-      currency: d.currency,
-    };
-  } catch (err) {
-    if (err.name === "AbortError") {
-      console.warn(`[API] ipapi.co timeout para IP: ${ip}`);
+  for (const provedor of PROVEDORES_GEOIP) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    try {
+      const r = await fetch(provedor.url(ip), {
+        signal: controller.signal,
+        headers: { "User-Agent": "ForenseDoc/3.0 (laudo pericial)" },
+      });
+      if (!r.ok) continue;
+
+      const normalizado = provedor.normalizar(await r.json());
+      if (normalizado) {
+        // `source` entra no laudo: a origem do dado é parte da cadeia de
+        // custódia, e dois provedores podem divergir entre si.
+        return { ip, ...normalizado, source: provedor.nome };
+      }
+    } catch (err) {
+      const motivo = err.name === "AbortError" ? "timeout" : err.message;
+      console.warn(`[API] ${provedor.nome} indisponível para ${ip}: ${motivo}`);
+    } finally {
+      clearTimeout(timer);
     }
-    return null;
-  } finally {
-    clearTimeout(timer);
   }
+
+  console.warn(`[API] Nenhum provedor de geolocalização respondeu para ${ip}`);
+  return null;
 }
