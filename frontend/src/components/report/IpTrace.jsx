@@ -1,6 +1,7 @@
 import React from "react";
 import { Globe, AlertTriangle } from "lucide-react";
 import { Row, Badge, Note, TONES } from "../UiComponents.jsx";
+import { GeoMap } from "../GeoMap.jsx";
 
 /**
  * § 6 — rastro de conexão por endereço IP.
@@ -40,7 +41,7 @@ function Divergencia({ titulo, d }) {
   );
 }
 
-export default function IpTrace({ ipAnalysis }) {
+export default function IpTrace({ ipAnalysis, homeGeo }) {
   return (
     <div className="mt-3 space-y-3">
       {ipAnalysis.map((ip, i) => (
@@ -102,6 +103,35 @@ export default function IpTrace({ ipAnalysis }) {
 
           <Divergencia titulo="IP × residência informada" d={ip.divergenciaResidencia} />
           <Divergencia titulo="IP × GPS declarado no contrato" d={ip.divergenciaAssinatura} />
+
+          {/* Confronto 1 — origem da conexão × residência. Só no primeiro IP
+              geolocalizado: dossiês de trilha repetem o mesmo endereço em vários
+              eventos, e um mapa por evento seria o mesmo mapa várias vezes. */}
+          {i === 0 && ip.geo && homeGeo && ip.divergenciaResidencia && (
+            <div className="mt-3">
+              <GeoMap
+                from={{ ...homeGeo, label: "R", color: "#3b82f6", titulo: "Residência informada" }}
+                to={{
+                  lat: ip.geo.lat,
+                  lon: ip.geo.lon,
+                  label: "I",
+                  color: "#dc2626",
+                  titulo: `Origem da conexão (${ip.geo.city || "localização do IP"})`,
+                }}
+                distanceKm={ip.divergenciaResidencia.km}
+                riskColor={TONES[ip.divergenciaResidencia.tom]?.hex}
+                legenda={
+                  <>
+                    <b className="text-foreground">Mapa 1 — origem da conexão × residência.</b>{" "}
+                    <b className="text-primary">R</b> = residência informada ·{" "}
+                    <b className="text-red-500">I</b> = origem da conexão pelo endereço IP. O ponto
+                    I indica o ponto de presença da operadora, <b>não</b> a posição do aparelho —
+                    a margem é de dezenas de quilômetros.
+                  </>
+                }
+              />
+            </div>
+          )}
         </div>
       ))}
 

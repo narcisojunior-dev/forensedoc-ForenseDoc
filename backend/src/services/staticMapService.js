@@ -60,7 +60,7 @@ export async function fetchStaticMap(points, opts = {}) {
   );
   if (valid.length === 0) return null;
 
-  const { width = 780, height = 460, line = true } = opts;
+  const { width = 780, height = 460, line = true, lineColor = null } = opts;
 
   // Marcadores: um por ponto, cor própria e rótulo curto.
   const markers = valid
@@ -72,14 +72,17 @@ export async function fetchStaticMap(points, opts = {}) {
     })
     .join("|");
 
-  // Linha entre os dois primeiros pontos (residência ↔ assinatura declarada).
+  // Linha da distância entre os dois pontos do confronto. A cor acompanha o
+  // segundo ponto (o que está sendo confrontado com a referência), para que a
+  // legenda do laudo e o traço no mapa concordem sem precisar de explicação.
   let geometry = "";
   if (line && valid.length >= 2) {
     const a = valid[0];
     const b = valid[1];
+    const cor = encodeURIComponent(lineColor || b.color || "#dc2626");
     geometry =
       `&geometry=polyline:${a.lon},${a.lat},${b.lon},${b.lat};` +
-      `linecolor:%23f06363;linewidth:3;lineopacity:0.9`;
+      `linecolor:${cor};linewidth:3;lineopacity:0.9`;
   }
 
   const url =
@@ -105,38 +108,59 @@ export async function fetchStaticMap(points, opts = {}) {
   }
 }
 
-// Monta os pontos do §5 (residência + assinatura declarada) para o mapa.
-/**
- * Pontos do mapa do § 5: residência (R), assinatura declarada (A) e origem do
- * IP (I).
+/*
+ * ─── Dois mapas, dois confrontos ─────────────────────────────────────────────
  *
- * O ponto do IP passou a integrar o mapa porque o confronto que mais interessa
- * ao laudo é justamente entre a ORIGEM DA CONEXÃO e o local informado — e ele
- * só existia como número em quilômetros, no meio do texto. Ver os três pontos
- * enquadrados juntos mostra de imediato se o ato partiu da região informada.
+ * Antes havia um único mapa com os três pontos (residência, GPS declarado e
+ * origem do IP) e uma linha ligando apenas os dois primeiros. Isso confundia
+ * duas perguntas periciais distintas num só quadro:
  *
- * Só o primeiro IP geolocalizado entra. Documentos de trilha de auditoria
- * costumam repetir o mesmo endereço em vários eventos, e plotar todos
- * empilharia marcadores sobre o mesmo ponto sem acrescentar informação.
+ *   1. A CONEXÃO partiu de onde o cliente mora?  (residência × IP)
+ *   2. O DOCUMENTO afirma que o ato ocorreu onde o cliente mora?
+ *      (residência × GPS declarado)
+ *
+ * As duas têm naturezas diferentes e não se somam. A primeira compara contra um
+ * dado de precisão de operadora — dezenas de quilômetros de margem. A segunda
+ * compara duas coordenadas de precisão métrica, onde uma divergência de poucos
+ * quilômetros já é significativa. Sobrepostas no mesmo enquadramento, a escala
+ * do confronto de IP (centenas de km) achatava o outro até a irrelevância
+ * visual: os pontos R e A viravam um só pixel.
+ *
+ * Cada função abaixo devolve o PAR de um confronto, e `fetchStaticMap` liga os
+ * dois primeiros pontos com a linha da distância.
  */
-export function signatureMapPoints(result) {
-  const points = [];
-  const home = result?.home?.geo;
-  const cg = result?.contractGeo;
 
-  if (home && Number.isFinite(home.lat) && Number.isFinite(home.lon)) {
-    points.push({ lat: home.lat, lon: home.lon, color: "#2563eb", label: "R" });
-  }
-  if (cg && Number.isFinite(cg.lat) && Number.isFinite(cg.lon)) {
-    points.push({ lat: cg.lat, lon: cg.lon, color: "#f59e0b", label: "A" });
-  }
-
-  const ipGeo = (result?.ipAnalysis || []).find(
+/** Primeiro IP geolocalizado — dossiês repetem o mesmo endereço em vários eventos. */
+function primeiroIpGeolocalizado(result) {
+  return (result?.ipAnalysis || []).find(
     (ip) => Number.isFinite(ip.geo?.lat) && Number.isFinite(ip.geo?.lon)
   );
-  if (ipGeo) {
-    points.push({ lat: ipGeo.geo.lat, lon: ipGeo.geo.lon, color: "#dc2626", label: "I" });
-  }
+}
 
-  return points;
+function pontoResidencia(result) {
+  const home = result?.home?.geo;
+  if (!home || !Number.isFinite(home.lat) || !Number.isFinite(home.lon)) return null;
+  return { lat: home.lat, lon: home.lon, color: "#2563eb", label: "R" };
+}
+
+/**
+ * Mapa 1 — origem da conexão (I) × residência informada (R).
+ * Responde: a conexão que gerou a assinatura partiu da região onde o cliente mora?
+ */
+export function mapPointsIpVsHome(result) {
+  const r = pontoResidencia(result);
+  const ip = primeiroIpGeolocalizado(result);
+  if (!r || !ip) return [];
+  return [r, { lat: ip.geo.lat, lon: ip.geo.lon, color: "#dc2626", label: "I" }];
+}
+
+/**
+ * Mapa 2 — residência informada (R) × geolocalização declarada no documento (A).
+ * Responde: o documento afirma que o ato ocorreu onde o cliente mora?
+ */
+export function mapPointsHomeVsDeclared(result) {
+  const r = pontoResidencia(result);
+  const cg = result?.contractGeo;
+  if (!r || !cg || !Number.isFinite(cg.lat) || !Number.isFinite(cg.lon)) return [];
+  return [r, { lat: cg.lat, lon: cg.lon, color: "#f59e0b", label: "A" }];
 }

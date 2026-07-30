@@ -30,7 +30,19 @@ function pinIcon(color, letter) {
   });
 }
 
-export function GeoMap({ home, sign, distanceKm, riskColor }) {
+/**
+ * Mapa de UM confronto: dois pontos e a distância entre eles.
+ *
+ * Antes o componente era fixo em "residência × assinatura declarada", com
+ * rótulos R/A e cores embutidos. O § 5 do laudo passou a ter DOIS confrontos
+ * independentes — origem do IP × residência, e residência × geolocalização
+ * declarada —, cada um com seu mapa e sua escala. Um único quadro com os três
+ * pontos misturava as duas perguntas e, pior, a escala do confronto de IP
+ * (centenas de km) achatava o outro: os pontos ficavam sobrepostos em um pixel.
+ *
+ * Agora recebe um par genérico `{ lat, lon, label, color, titulo }`.
+ */
+export function GeoMap({ from, to, distanceKm, riskColor, legenda }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
 
@@ -44,10 +56,16 @@ export function GeoMap({ home, sign, distanceKm, riskColor }) {
    *
    * Comparar por valor mantém o mapa vivo enquanto as coordenadas não mudam.
    */
-  const homeLat = home?.lat;
-  const homeLon = home?.lon;
-  const signLat = sign?.lat;
-  const signLon = sign?.lon;
+  const homeLat = from?.lat;
+  const homeLon = from?.lon;
+  const signLat = to?.lat;
+  const signLon = to?.lon;
+  const fromLabel = from?.label || "A";
+  const fromColor = from?.color || "#3b82f6";
+  const fromTitulo = from?.titulo || "Ponto de referência";
+  const toLabel = to?.label || "B";
+  const toColor = to?.color || "#f59e0b";
+  const toTitulo = to?.titulo || "Ponto confrontado";
 
   useEffect(() => {
     if (!containerRef.current || homeLat == null || signLat == null) return;
@@ -69,12 +87,12 @@ export function GeoMap({ home, sign, distanceKm, riskColor }) {
     const homeLL = [home.lat, home.lon];
     const signLL = [sign.lat, sign.lon];
 
-    L.marker(homeLL, { icon: pinIcon("#3b82f6", "R") })
+    L.marker(homeLL, { icon: pinIcon(fromColor, fromLabel) })
       .addTo(map)
-      .bindPopup(`<b>Residência do cliente</b><br>${home.lat.toFixed(5)}, ${home.lon.toFixed(5)}`);
-    L.marker(signLL, { icon: pinIcon("#f59e0b", "A") })
+      .bindPopup(`<b>${fromTitulo}</b><br>${home.lat.toFixed(5)}, ${home.lon.toFixed(5)}`);
+    L.marker(signLL, { icon: pinIcon(toColor, toLabel) })
       .addTo(map)
-      .bindPopup(`<b>Assinatura declarada</b><br>${sign.lat.toFixed(5)}, ${sign.lon.toFixed(5)}`);
+      .bindPopup(`<b>${toTitulo}</b><br>${sign.lat.toFixed(5)}, ${sign.lon.toFixed(5)}`);
 
     // Linha da distância, cor pelo risco.
     const line = L.polyline([homeLL, signLL], {
@@ -103,17 +121,16 @@ export function GeoMap({ home, sign, distanceKm, riskColor }) {
       map.remove();
       mapRef.current = null;
     };
-  }, [homeLat, homeLon, signLat, signLon, distanceKm, riskColor]);
+  }, [homeLat, homeLon, signLat, signLon, distanceKm, riskColor,
+      fromLabel, fromColor, fromTitulo, toLabel, toColor, toTitulo]);
 
-  if (!home || !sign) return null;
+  if (!from || !to) return null;
 
   return (
     <div className="overflow-hidden rounded-xl border border-surface-border">
       <div ref={containerRef} className="h-[380px] w-full bg-background" />
       <p className="border-t border-surface-border bg-surface/40 px-3 py-2 text-[11.5px] leading-relaxed text-zinc-500">
-        Mapa real (OpenStreetMap). Marcador <b className="text-primary">R</b> = residência do cliente ·
-        <b className="text-accent"> A</b> = local declarado da assinatura. A linha tracejada representa a
-        distância geodésica (Haversine) entre os dois pontos. Arraste e use o zoom para explorar.
+        {legenda}
       </p>
     </div>
   );

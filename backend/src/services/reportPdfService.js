@@ -1,6 +1,6 @@
 import PDFDocument from "pdfkit";
 import { riskFromDistance } from "../utils/geoUtils.js";
-import { fetchStaticMap, signatureMapPoints } from "./staticMapService.js";
+import { fetchStaticMap, mapPointsIpVsHome, mapPointsHomeVsDeclared } from "./staticMapService.js";
 import {
   FIRM,
   NOTA_ASSINATURA,
@@ -35,8 +35,13 @@ const MARGIN = 50;
  * @param {object} result   Analysis.result já parseado
  */
 export async function buildReportPdf(analysis, result) {
-  // Pré-busca do mapa (não bloqueia o laudo se falhar).
-  const mapBuffer = await fetchStaticMap(signatureMapPoints(result)).catch(() => null);
+  // Pré-busca dos DOIS mapas do § 5, em paralelo. Cada um responde a uma
+  // pergunta pericial distinta (ver staticMapService.js) e nenhum é requisito:
+  // se a busca falhar, a seção sai com as coordenadas e as distâncias.
+  const [mapaIpResidencia, mapaResidenciaDeclarado] = await Promise.all([
+    fetchStaticMap(mapPointsIpVsHome(result)).catch(() => null),
+    fetchStaticMap(mapPointsHomeVsDeclared(result)).catch(() => null),
+  ]);
 
   const doc = new PDFDocument({
     size: "A4",
@@ -62,7 +67,7 @@ export async function buildReportPdf(analysis, result) {
   sectionContract(ctx, extracted);
   sectionClient(ctx, extracted);
   sectionSignature(ctx, extracted, result);
-  sectionGeo(ctx, result, mapBuffer);
+  sectionGeo(ctx, result, { mapaIpResidencia, mapaResidenciaDeclarado });
   sectionIrregularities(ctx, extracted);
   sectionRemarks(ctx, extracted);
   sectionLegal(ctx);
@@ -349,10 +354,10 @@ function precisionText(geoLike) {
 
 // Insere a imagem do mapa estático (residência × assinatura declarada) com
 // legenda. Quebra de página se não couber no espaço restante.
-function drawMap(ctx, mapBuffer) {
+function drawMap(ctx, mapBuffer, legenda) {
   const { doc, contentWidth } = ctx;
   const imgH = contentWidth * (460 / 780); // mesma proporção da imagem buscada
-  if (doc.y + imgH + 40 > doc.page.height - 60) doc.addPage();
+  if (doc.y + imgH + 52 > doc.page.height - 60) doc.addPage();
   doc.moveDown(0.4);
   try {
     doc.image(mapBuffer, MARGIN, doc.y, { width: contentWidth });
@@ -365,62 +370,143 @@ function drawMap(ctx, mapBuffer) {
     .fontSize(8)
     .font("Helvetica-Oblique")
     .fillColor(MUTED)
-    .text(
-      "Mapa: residência do cliente (R, azul) · local declarado da assinatura (A, âmbar) · origem da conexão pelo endereço IP (I, vermelho). As linhas representam distâncias geodésicas (Haversine). O ponto I tem precisão de nível de operadora e não indica a posição do aparelho. Base cartográfica OpenStreetMap.",
-      MARGIN,
-      doc.y,
-      { width: contentWidth, align: "center" }
-    );
+    .text(legenda, MARGIN, doc.y, { width: contentWidth, align: "center" });
   doc.moveDown(0.4);
 }
 
-function sectionGeo(ctx, result, mapBuffer) {
+function sectionGeo(ctx, result, mapas = {}) {
   heading(ctx, "§ 5 · Geolocalização da assinatura · confronto geográfico");
 
   const home = result.home?.geo;
-  if (result.home?.query || home) {
-    if (result.home?.query) field(ctx, `Residência (${result.home.source || "referência"})`, result.home.query);
-    // A COORDENADA NUMÉRICA é obrigatória, não o rótulo dela.
-    //
-    // O laudo imprimia apenas `home.display` — que para uma coordenada
-    // confirmada pelo operador é o texto "Coordenada confirmada pelo operador".
-    // O documento afirmava ter uma coordenada de referência sem nunca dizer
-    // QUAL, e todas as distâncias do § 5 derivam desse ponto: sem o valor, o
-    // laudo deixa de ser reproduzível e a conferência por terceiro fica
-    // impossível.
-    if (home && Number.isFinite(home.lat) && Number.isFinite(home.lon)) {
-      field(ctx, "Coordenada da residência", `${home.lat}, ${home.lon}`, { mono: true });
-      field(
-        ctx,
-        "   Origem da coordenada",
-        home.precision === "manual"
-          ? "confirmada pelo operador (padrão-ouro deste laudo)"
-          : `${home.display || "não informada"} — precisão ${precisionText(home)}`
-      );
+  const cg = result.contractGeo;
+  const ipRef = (result.ipAnalysis || []).find((ip) => ip.geo?.lat != null);
+
+  // ─── Ponto de referência ───────────────────────────────────────────────────
+  paragraph(
+    ctx,
+    "Esta seção apresenta DOIS confrontos independentes, cada um com seu mapa. Eles respondem a perguntas diferentes e não se somam: o primeiro verifica de onde partiu a CONEXÃO que gerou o ato; o segundo verifica o que o DOCUMENTO afirma sobre o local do ato. Ambos usam como referência a residência informada.",
+    { size: 9 }
+  );
+
+  subheading(ctx, "Ponto de referência · residência do contratante");
+  if (result.home?.query) field(ctx, `Endereço (${result.home.source || "referência"})`, result.home.query);
+  if (home && Number.isFinite(home.lat) && Number.isFinite(home.lon)) {
+    // A coordenada NUMÉRICA é obrigatória: todas as distâncias abaixo derivam
+    // dela, e sem o valor o laudo deixa de ser reproduzível por terceiro.
+    field(ctx, "Coordenada adotada", `${home.lat}, ${home.lon}`, { mono: true });
+    field(
+      ctx,
+      "   Origem da coordenada",
+      home.precision === "manual"
+        ? "confirmada pelo operador (padrão-ouro deste laudo)"
+        : `${home.display || "não informada"} — precisão ${precisionText(home)}`
+    );
+  }
+  if (home && (home.precision === "city" || !home.precision)) {
+    paragraph(
+      ctx,
+      "Atenção: a coordenada da residência foi resolvida apenas em nível de cidade. As distâncias derivadas dela são aproximadas e não devem ser tratadas como medidas exatas sem confirmação da coordenada pelo operador.",
+      { color: DANGER, size: 8.5 }
+    );
+  }
+  if (!home) {
+    paragraph(
+      ctx,
+      "Não foi possível estabelecer a coordenada de referência da residência. Sem ela, nenhum dos dois confrontos abaixo pode ser calculado.",
+      { color: DANGER, size: 9 }
+    );
+  }
+
+  // ─── Confronto 1: origem da conexão × residência ──────────────────────────
+  subheading(ctx, "§ 5.1 · Confronto 1 — origem da conexão (IP) × residência informada");
+  paragraph(
+    ctx,
+    "Pergunta: a conexão que originou a assinatura partiu da região onde o contratante reside? A localização do IP tem precisão de nível de operadora — aponta o roteador de saída, não o aparelho —, então a margem é de dezenas de quilômetros e só a incompatibilidade de ordem de grandeza tem valor indiciário.",
+    { color: MUTED, size: 8.5 }
+  );
+
+  if (!ipRef) {
+    paragraph(
+      ctx,
+      (result.ipAnalysis || []).length
+        ? "Confronto não realizado: há endereço IP no documento, mas nenhuma coordenada foi obtida para ele (ver § 5.3)."
+        : "Confronto não realizado: não foi extraído endereço IP do documento.",
+      { color: MUTED, size: 9 }
+    );
+  } else {
+    field(ctx, "Endereço IP", ipRef.endereco, { mono: true });
+    field(
+      ctx,
+      "Origem da conexão",
+      `${[ipRef.geo.city, ipRef.geo.region, ipRef.geo.country].filter(Boolean).join(" / ")} — ${ipRef.geo.lat}, ${ipRef.geo.lon}`
+    );
+    const d = ipRef.divergenciaResidencia;
+    if (d) {
+      badge(ctx, "Distância entre a origem do IP e a residência", `${d.km.toFixed(2)} km · ${d.rotulo}`, d.tom === "ok");
+      paragraph(ctx, d.sintese, { size: 9, color: d.tom === "danger" ? DANGER : INK });
+    } else if (!home) {
+      paragraph(ctx, "Distância não calculada: falta a coordenada de referência.", { color: MUTED, size: 8.5 });
     }
-    // Aviso explícito quando a residência é só aproximada (nível de cidade):
-    // a distância derivada dela não pode ser tratada como exata.
-    if (home && (home.precision === "city" || !home.precision)) {
-      paragraph(
+
+    if (mapas.mapaIpResidencia) {
+      drawMap(
         ctx,
-        "Atenção: a coordenada da residência foi resolvida apenas em nível de cidade. A distância abaixo é aproximada e não deve ser usada como medida exata sem confirmação da coordenada pelo operador.",
-        { color: DANGER, size: 8.5 }
+        mapas.mapaIpResidencia,
+        "Mapa 1 — origem da conexão pelo endereço IP (I, vermelho) × residência informada (R, azul). A linha representa a distância geodésica (Haversine). O ponto I indica o ponto de presença da operadora, NÃO a posição do aparelho. Base cartográfica OpenStreetMap."
       );
     }
   }
 
-  const cg = result.contractGeo;
-  if (cg) {
-    field(ctx, "Local declarado da assinatura", cg.endereco || `${cg.lat}, ${cg.lon}`);
-    field(ctx, "Coordenadas", `${cg.lat}, ${cg.lon} — precisão ${precisionText(cg)}`);
+  // ─── Confronto 2: residência × geolocalização declarada ───────────────────
+  subheading(ctx, "§ 5.2 · Confronto 2 — residência informada × geolocalização declarada no documento");
+  paragraph(
+    ctx,
+    "Pergunta: a coordenada que o próprio documento registra como local da assinatura corresponde à residência do contratante? Aqui as duas coordenadas são de precisão métrica (GPS declarado e ponto confirmado), então a comparação é direta e uma divergência de poucos quilômetros já é significativa — ao contrário do Confronto 1.",
+    { color: MUTED, size: 8.5 }
+  );
+
+  if (!cg) {
+    paragraph(
+      ctx,
+      result.geoDeclaredPresent
+        ? "Confronto não realizado: o documento indica geolocalização da assinatura, mas não foi possível obter coordenadas válidas nem geocodificar o endereço declarado."
+        : "Confronto não realizado: não foi localizada geolocalização (coordenadas GPS) declarada no log de assinatura deste documento.",
+      { color: MUTED, size: 9 }
+    );
+  } else {
+    if (cg.endereco) field(ctx, "Endereço declarado", cg.endereco);
+    field(ctx, "Coordenada declarada", `${cg.lat}, ${cg.lon}`, { mono: true });
+    field(ctx, "   Origem da coordenada", `${cg.fonte || "não informada"} — precisão ${precisionText(cg)}`);
+    if (cg.dataHora) field(ctx, "   Data / hora do registro", cg.dataHora);
+
     if (cg.distance != null) {
       const r = riskFromDistance(cg.distance);
-      badge(ctx, "Distância entre a assinatura declarada e a residência", `${cg.distance.toFixed(2)} km · ${r.label}`, r.score <= 1);
+      badge(ctx, "Distância entre o local declarado e a residência", `${cg.distance.toFixed(2)} km · ${r.label}`, r.score <= 1);
+    }
+
+    if (mapas.mapaResidenciaDeclarado) {
+      drawMap(
+        ctx,
+        mapas.mapaResidenciaDeclarado,
+        "Mapa 2 — residência informada (R, azul) × geolocalização declarada no documento (A, âmbar). A linha representa a distância geodésica (Haversine). Ambos os pontos têm precisão métrica, ao contrário do Mapa 1. Base cartográfica OpenStreetMap."
+      );
     }
   }
 
-  // Mapa real dos dois pontos, quando disponível.
-  if (mapBuffer) drawMap(ctx, mapBuffer);
+  // ─── Leitura conjunta ─────────────────────────────────────────────────────
+  // O cruzamento dos dois confrontos é o achado que nenhum deles produz
+  // isoladamente, e era exatamente o que o mapa único não permitia enxergar.
+  if (ipRef?.divergenciaResidencia && cg?.distance != null) {
+    const ipLonge = ipRef.divergenciaResidencia.nivel !== "compativel";
+    const declaradoPerto = cg.distance < 30;
+    if (ipLonge && declaradoPerto) {
+      paragraph(
+        ctx,
+        `Leitura conjunta dos dois confrontos: o documento declara que a assinatura ocorreu a ${cg.distance.toFixed(2)} km da residência do contratante — praticamente no mesmo local —, mas a conexão que originou o ato partiu de ${ipRef.divergenciaResidencia.km.toFixed(2)} km de distância. A coordenada declarada e a origem real da conexão apontam regiões distintas. A divergência não comprova fraude e admite explicações legítimas (uso de rede de terceiro, imprecisão da base de geolocalização, roteamento da operadora), mas é ponto que exige esclarecimento da instituição financeira, a quem incumbe demonstrar a autenticidade do ato (STJ, Tema 1.061).`,
+        { color: DANGER, size: 9 }
+      );
+    }
+  }
 
   sectionIpTrace(ctx, result);
 
@@ -431,7 +517,7 @@ function sectionGeo(ctx, result, mapBuffer) {
 }
 
 /**
- * § 6 — rastro de conexão e confronto com o ponto de referência.
+ * § 5.3 — detalhamento do rastro de conexão.
  *
  * A versão anterior imprimia "IP <endereço> — cidade/UF" e duas distâncias.
  * Faltava o que dá valor probatório ao dado: o rótulo com que o assinador
@@ -446,7 +532,7 @@ function sectionIpTrace(ctx, result) {
   if (!ips.length) return;
 
   doc.moveDown(0.5);
-  subheading(ctx, "§ 5.1 · Rastro de conexão (endereços IP)");
+  subheading(ctx, "§ 5.3 · Rastro de conexão · detalhamento dos endereços IP");
 
   paragraph(
     ctx,

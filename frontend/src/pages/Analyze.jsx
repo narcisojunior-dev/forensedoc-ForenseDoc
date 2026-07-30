@@ -905,11 +905,34 @@ export default function Analyze() {
                         label="Distância: residência do cliente → local declarado da assinatura"
                         km={report.contractGeo.distance}
                       />
+                      {/* Confronto 2 — residência × geolocalização declarada.
+                          Ambos os pontos têm precisão métrica, então a escala é
+                          local e uma divergência pequena já é significativa. */}
                       <GeoMap
-                        home={report.home.geo}
-                        sign={{ lat: report.contractGeo.lat, lon: report.contractGeo.lon }}
+                        from={{
+                          ...report.home.geo,
+                          label: "R",
+                          color: "#3b82f6",
+                          titulo: "Residência informada",
+                        }}
+                        to={{
+                          lat: report.contractGeo.lat,
+                          lon: report.contractGeo.lon,
+                          label: "A",
+                          color: "#f59e0b",
+                          titulo: "Geolocalização declarada no documento",
+                        }}
                         distanceKm={report.contractGeo.distance}
                         riskColor={riskFromDistance(report.contractGeo.distance).color}
+                        legenda={
+                          <>
+                            <b className="text-foreground">Mapa 2 — residência × local declarado.</b>{" "}
+                            <b className="text-primary">R</b> = residência informada ·{" "}
+                            <b className="text-accent">A</b> = geolocalização declarada no documento.
+                            A linha tracejada é a distância geodésica (Haversine). Ambos os pontos têm
+                            precisão métrica, ao contrário do Mapa 1.
+                          </>
+                        }
                       />
                       <Note>
                         A distância isolada não determina fraude. Deslocamentos compatíveis com a
@@ -963,7 +986,7 @@ export default function Analyze() {
                         terceiro — e não uma medida exata.
                       </Note>
                     )}
-                  <IpTrace ipAnalysis={report.ipAnalysis} />
+                  <IpTrace ipAnalysis={report.ipAnalysis} homeGeo={report.home?.geo} />
                 </>
               )}
             </Section>
