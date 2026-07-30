@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Scale, Loader2, CheckCircle2 } from "lucide-react";
 import toast from "react-hot-toast";
 import { useAuthStore } from "../store/authStore";
-import { MIN_LENGTH } from "../utils/passwordRules";
+import { MIN_LENGTH, checkPassword } from "../utils/passwordRules";
 
 export default function Register() {
   const [formData, setFormData] = useState({
@@ -23,6 +23,16 @@ export default function Register() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    // Mesma checagem do aceite de convite: o `minLength` do input cobre só o
+    // comprimento, e descobrir "a senha contém seu nome" depois de digitar nome,
+    // CPF/CNPJ e OAB é o pior momento possível.
+    const politica = checkPassword(formData.password, {
+      email: formData.email,
+      name: formData.name,
+    });
+    if (!politica.ok) return toast.error(politica.error);
+
     setIsSubmitting(true);
     
     // Removendo formatação básica se houver

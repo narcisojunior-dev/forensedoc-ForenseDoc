@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useLocation, Outlet } from "react-router-dom";
 import { 
   LayoutDashboard, 
@@ -21,6 +21,15 @@ export default function DashboardLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
   const { user, logout } = useAuthStore();
+
+  // Escape fecha a sidebar mobile. Todos os outros overlays do sistema fazem
+  // isso; deixar um de fora é atrito gratuito para quem navega por teclado.
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    const onKey = (e) => e.key === "Escape" && setSidebarOpen(false);
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [sidebarOpen]);
 
   const navItems = [
     { name: "Visão Geral", path: "/dashboard", icon: LayoutDashboard },

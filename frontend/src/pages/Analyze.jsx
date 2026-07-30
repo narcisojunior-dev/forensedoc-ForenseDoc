@@ -1,5 +1,6 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { Link } from "react-router-dom";
+import toast from "react-hot-toast";
 import {
   UploadCloud, FileText, Loader2, AlertTriangle, ShieldCheck, MapPin,
   Fingerprint, Ruler, Download, RotateCcw, FileDown, CheckCircle2, Wand2,
@@ -23,11 +24,24 @@ import { useAuthStore } from "../store/authStore.js";
 const MAX_PDF_MB = Number(import.meta.env.VITE_MAX_PDF_MB) || 30;
 const MAX_PDF_BYTES = MAX_PDF_MB * 1024 * 1024;
 
+/**
+ * Converte o PDF para base64 em blocos.
+ *
+ * A versão anterior concatenava caractere por caractere numa string: para um
+ * PDF de 30 MB são ~31 milhões de iterações com realocação de string a cada
+ * passo, travando a interface por vários segundos sem nenhum indicador. Blocos
+ * de 32 KB via `String.fromCharCode(...bloco)` fazem o mesmo trabalho em uma
+ * fração do tempo, e o limite do bloco evita estourar o tamanho máximo de
+ * argumentos da chamada.
+ */
 function arrayBufferToBase64(buffer) {
-  let binary = "";
   const bytes = new Uint8Array(buffer);
-  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
-  return btoa(binary);
+  const CHUNK = 0x8000;
+  const partes = [];
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    partes.push(String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK)));
+  }
+  return btoa(partes.join(""));
 }
 
 const PRECISION_LABEL = {
@@ -73,11 +87,20 @@ function parseExtraction(raw) {
 }
 
 // Polling do job assíncrono (Módulo 4) — para assim que sair de PROCESSING.
-async function pollAnalysisStatus(analysisId, onProgress) {
+/**
+ * `isCancelled` interrompe o polling quando o usuário abandona a análise.
+ *
+ * Sem isso, sair da tela ou clicar em "Analisar novo contrato" deixava o laço
+ * rodando por até 5 minutos — 150 requisições inúteis — e, ao terminar, ele
+ * ainda escrevia o resultado no estado: o laudo de uma análise abandonada
+ * aparecia sobre a tela que o usuário tinha acabado de abrir.
+ */
+async function pollAnalysisStatus(analysisId, onProgress, isCancelled) {
   const POLL_INTERVAL_MS = 2000;
   const MAX_ATTEMPTS = 150; // ~5 minutos
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    if (isCancelled()) return null;
     const { data } = await api.get(`/analyses/${analysisId}/status`);
     if (data.status !== "PROCESSING") return data.status;
     onProgress(Math.min(30 + attempt, 45));
@@ -103,12 +126,25 @@ export default function Analyze() {
   const [correcting, setCorrecting] = useState(false);
   const fileRef = useRef();
 
+  /*
+   * Identifica a análise vigente. Cada `analyze()` incrementa o contador, e o
+   * polling só escreve no estado se o token dele ainda for o atual. É o que
+   * impede uma análise abandonada (reset, ou desmontagem da tela) de sobrescrever
+   * a interface minutos depois.
+   */
+  const runIdRef = useRef(0);
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
+
   // Correção da coordenada da residência pelo operador — recalcula o §5 no
   // servidor e re-persiste, para o PDF refletir o ponto confirmado.
   const handleGeoCorrect = async () => {
     const coord = parseLatLon(correctCoord);
     if (!coord) {
-      setError("Coordenada inválida. Cole no formato: latitude, longitude (ex.: -5.0951, -42.8100).");
+      // `toast`, não `setError`: o bloco de erro só é renderizado no estágio
+      // "error", então uma mensagem posta aqui nunca chegava à tela — o operador
+      // clicava em "Aplicar coordenada" e nada acontecia.
+      toast.error("Coordenada inválida. Use o formato: latitude, longitude (ex.: -5.0951, -42.8100).");
       return;
     }
     if (!report?.analysisId) return;
@@ -123,9 +159,9 @@ export default function Analyze() {
         ipAnalysis: r.ipAnalysis || prev.ipAnalysis,
       }));
       setCorrectCoord("");
-      setError("");
+      toast.success("Coordenada aplicada. As distâncias do §5 foram recalculadas.");
     } catch (err) {
-      setError(err.response?.data?.error || "Não foi possível corrigir a coordenada.");
+      toast.error(err.response?.data?.error || "Não foi possível corrigir a coordenada.");
     } finally {
       setCorrecting(false);
     }
@@ -137,7 +173,7 @@ export default function Analyze() {
     try {
       await downloadReportPdf(report.analysisId);
     } catch {
-      setError("Não foi possível gerar o laudo em PDF pelo servidor.");
+      toast.error("Não foi possível gerar o laudo em PDF pelo servidor.");
     } finally {
       setServerPdfBusy(false);
     }
@@ -145,7 +181,7 @@ export default function Analyze() {
 
   const analyze = useCallback(async (file) => {
     if (!file) return;
-    if (!file.name.match(/\.(pdf|PDF)$/)) {
+    if (!/\.pdf$/i.test(file.name)) {
       setError("Formato não suportado. Envie um arquivo em PDF.");
       setStage("error");
       return;
@@ -159,6 +195,9 @@ export default function Analyze() {
       setStage("error");
       return;
     }
+
+    const runId = ++runIdRef.current;
+    const desatualizado = () => runId !== runIdRef.current || !mountedRef.current;
 
     setStage("processing");
     setError("");
@@ -182,9 +221,19 @@ export default function Analyze() {
       });
 
       setProgress({ label: "Extraindo dados, calculando hashes e geolocalizando...", pct: 34 });
-      const finalStatus = await pollAnalysisStatus(startData.analysisId, (pct) =>
-        setProgress({ label: "Extraindo dados, calculando hashes e geolocalizando...", pct })
+      const finalStatus = await pollAnalysisStatus(
+        startData.analysisId,
+        (pct) => {
+          if (!desatualizado()) {
+            setProgress({ label: "Extraindo dados, calculando hashes e geolocalizando...", pct });
+          }
+        },
+        desatualizado
       );
+
+      // O usuário abandonou esta análise: ela segue no servidor e aparece no
+      // histórico, mas não pode mais mexer na tela.
+      if (finalStatus === null || desatualizado()) return;
 
       if (finalStatus !== "COMPLETED") {
         setError(
@@ -254,6 +303,9 @@ export default function Analyze() {
   };
 
   const reset = () => {
+    // Invalida a execução em voo: sem isto, o polling da análise anterior
+    // continuava e devolvia o laudo dela sobre a tela já reiniciada.
+    runIdRef.current += 1;
     setStage("idle");
     setReport(null);
     setError("");

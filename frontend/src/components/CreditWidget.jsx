@@ -25,19 +25,26 @@ export default function CreditWidget() {
         </span>
       </div>
 
+      {/*
+        As quatro bolsas, não duas. `total` soma monthly + avulso + emergency +
+        manual, mas o detalhamento listava apenas as duas primeiras: um escritório
+        com créditos de emergência ou de cortesia via um total que não fechava com
+        nenhuma linha exibida.
+      */}
       <div className="space-y-1">
-        {details.monthly > 0 && (
-          <div className="flex justify-between text-xs text-zinc-500">
-            <span>Plano Mensal</span>
-            <span>{details.monthly}</span>
-          </div>
-        )}
-        {details.avulso > 0 && (
-          <div className="flex justify-between text-xs text-zinc-500">
-            <span>Avulsos (Não expiram)</span>
-            <span>{details.avulso}</span>
-          </div>
-        )}
+        {[
+          ["Plano mensal", details.monthly],
+          ["Avulsos (não expiram)", details.avulso],
+          ["Emergência", details.emergency],
+          ["Cortesia", details.manual],
+        ]
+          .filter(([, valor]) => valor > 0)
+          .map(([rotulo, valor]) => (
+            <div key={rotulo} className="flex justify-between text-xs text-zinc-500">
+              <span>{rotulo}</span>
+              <span>{valor}</span>
+            </div>
+          ))}
       </div>
 
       <div className="h-px bg-surface-border my-1" />

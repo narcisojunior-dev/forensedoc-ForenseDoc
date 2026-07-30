@@ -4,7 +4,7 @@ import { Scale, Loader2, Users, AlertTriangle } from "lucide-react";
 import toast from "react-hot-toast";
 import { api } from "../lib/axios";
 import { useAuthStore } from "../store/authStore";
-import { MIN_LENGTH } from "../utils/passwordRules";
+import { MIN_LENGTH, checkPassword } from "../utils/passwordRules";
 
 /**
  * Tela de aceite de convite de equipe (L2).
@@ -124,6 +124,13 @@ export default function AcceptInvite() {
     if (password !== confirmPassword) {
       return toast.error("As senhas não conferem.");
     }
+
+    // O `minLength` do input só cobre o comprimento. As demais regras (senha
+    // contendo o próprio nome ou e-mail, pouca variação) eram deixadas para o
+    // backend, e o convidado só descobria depois de submeter o formulário
+    // inteiro. Aqui o e-mail e o nome já estão em mãos.
+    const politica = checkPassword(password, { email: invite.email, name });
+    if (!politica.ok) return toast.error(politica.error);
 
     setSubmitting(true);
     try {

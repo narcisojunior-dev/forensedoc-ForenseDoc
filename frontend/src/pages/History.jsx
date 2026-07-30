@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { FileSearch, Loader2, X, ChevronLeft, ChevronRight, Eye, Download } from "lucide-react";
 import toast from "react-hot-toast";
 import { api } from "../lib/axios";
-import { Row, Badge, Section, Note, Flag } from "../components/UiComponents.jsx";
+import { Row, Badge, Section, Note, Flag, TONES } from "../components/UiComponents.jsx";
 import { riskFromDistance, ipSignatureCompat } from "../utils/geo.js";
 import { downloadReportPdf } from "../utils/reportDownload.js";
 
@@ -18,11 +18,13 @@ function parseExtraction(raw) {
   return null;
 }
 
+// Tons vindos de UiComponents: as cores da v2.2 estavam fixas aqui e ficaram
+// fora da padronização, porque não moravam na CSS legada que foi removida.
 const STATUS_LABELS = {
-  PROCESSING: { label: "Processando", color: "#4fc3e8" },
-  COMPLETED: { label: "Concluída", color: "#3ddc97" },
-  ERROR: { label: "Erro", color: "#f06363" },
-  REFUNDED: { label: "Estornada", color: "#f2b03d" },
+  PROCESSING: { label: "Processando", color: TONES.info.hex },
+  COMPLETED: { label: "Concluída", color: TONES.ok.hex },
+  ERROR: { label: "Erro", color: TONES.danger.hex },
+  REFUNDED: { label: "Estornada", color: TONES.warn.hex },
 };
 
 function AnalysisDetailModal({ analysisId, onClose }) {
@@ -47,6 +49,14 @@ function AnalysisDetailModal({ analysisId, onClose }) {
     };
     load();
   }, [analysisId]);
+
+  // Escape fecha o modal — o de detalhes do tenant já se comportava assim, e a
+  // divergência entre dois modais do mesmo produto é atrito gratuito.
+  useEffect(() => {
+    const onKey = (e) => e.key === "Escape" && onClose();
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   const metadata = result?.metadata || null;
   // Laudos gerados antes da Fase A não têm os artefatos forenses persistidos.
@@ -239,21 +249,51 @@ export default function History() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [selectedId, setSelectedId] = useState(null);
+  // Espelha a lista para o intervalo consultar. Um closure sobre `analyses`
+  // capturaria o array do render em que o efeito rodou — sempre o vazio inicial.
+  const analysesRef = useRef([]);
+  analysesRef.current = analyses;
 
   useEffect(() => {
-    const load = async () => {
-      setLoading(true);
+    let ativo = true;
+
+    // `silencioso` evita piscar o spinner nas recargas automáticas.
+    const load = async (silencioso = false) => {
+      if (!silencioso) setLoading(true);
       try {
         const { data } = await api.get(`/analyses?page=${page}&limit=10`);
+        if (!ativo) return;
         setAnalyses(data.analyses);
         setTotalPages(data.pagination.totalPages || 1);
       } catch {
-        toast.error("Erro ao carregar histórico de análises.");
+        if (ativo && !silencioso) toast.error("Erro ao carregar histórico de análises.");
       } finally {
-        setLoading(false);
+        if (ativo && !silencioso) setLoading(false);
       }
     };
+
     load();
+
+    /*
+     * Recarrega enquanto houver análise em PROCESSING.
+     *
+     * A tela de análise faz polling do próprio job, mas o histórico não fazia
+     * nenhum: quem abrisse esta página com uma análise em andamento via
+     * "Processando" para sempre, sem forma de saber que havia terminado a não ser
+     * recarregar a página na mão.
+     *
+     * O intervalo é criado dentro do efeito da página atual, então trocar de
+     * página ou sair da tela o encerra.
+     */
+    const temPendente = () => analysesRef.current.some((a) => a.status === "PROCESSING");
+    const timer = setInterval(() => {
+      if (temPendente()) load(true);
+    }, 5000);
+
+    return () => {
+      ativo = false;
+      clearInterval(timer);
+    };
   }, [page]);
 
   return (
@@ -274,7 +314,7 @@ export default function History() {
         ) : (
           <div className="divide-y divide-surface-border/50">
             {analyses.map((item) => {
-              const status = STATUS_LABELS[item.status] || { label: item.status, color: "#8595a8" };
+              const status = STATUS_LABELS[item.status] || { label: item.status, color: TONES.neutral.hex };
               return (
                 <div key={item.id} className="flex items-center justify-between px-6 py-4">
                   <div>
