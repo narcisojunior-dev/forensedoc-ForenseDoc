@@ -79,6 +79,28 @@ const REGISTER_OK = {
 const DUMMY_PASSWORD_HASH = bcrypt.hashSync("credenciais-invalidas", 12);
 
 /**
+ * Nome do cookie de refresh.
+ *
+ * "refreshToken" era genérico demais: cookies não são isolados por PORTA, só por
+ * host. Qualquer outra aplicação rodando em localhost que use o mesmo nome grava
+ * um cookie que o navegador envia junto — e o cookie-parser resolve o conflito
+ * pegando a PRIMEIRA ocorrência. Na prática, um projeto vizinho sequestrava a
+ * sessão daqui e todo recarregamento de página caía no login.
+ *
+ * O prefixo do produto elimina a colisão. Em produção, com domínio dedicado, o
+ * risco é menor — mas o custo de prefixar é zero.
+ */
+export const REFRESH_COOKIE = "forensedoc_rt";
+
+/** Atributos do cookie, iguais em toda emissão. */
+const REFRESH_COOKIE_OPTS = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production",
+  sameSite: "strict",
+  maxAge: 30 * 24 * 60 * 60 * 1000,
+};
+
+/**
  * Segundos restantes até o access token expirar — o tempo exato que ele precisa
  * ficar na blacklist do logout. Devolve 0 para token ilegível ou já vencido,
  * casos em que a blacklist não teria utilidade nenhuma.
@@ -275,12 +297,7 @@ export async function login(req, res) {
     });
 
     // Enviar refreshToken via Cookie HttpOnly
-    res.cookie("refreshToken", refreshTokenString, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-      maxAge: 30 * 24 * 60 * 60 * 1000,
-    });
+    res.cookie(REFRESH_COOKIE, refreshTokenString, REFRESH_COOKIE_OPTS);
 
     return res.json({ accessToken });
   } catch (error) {
@@ -297,7 +314,7 @@ export async function refresh(req, res) {
     // no corpo contorna as proteções que o cookie carrega (httpOnly, Secure,
     // SameSite) e permite que ele acabe num log de requisição ou num histórico.
     const refreshTokenString =
-      req.cookies?.refreshToken ||
+      req.cookies?.[REFRESH_COOKIE] ||
       (process.env.NODE_ENV !== "production" ? req.body?.refreshToken : null);
     if (!refreshTokenString) return res.status(401).json({ error: "Refresh token ausente." });
 
@@ -363,12 +380,7 @@ export async function refresh(req, res) {
       },
     });
 
-    res.cookie("refreshToken", newRefreshTokenString, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-      maxAge: 30 * 24 * 60 * 60 * 1000,
-    });
+    res.cookie(REFRESH_COOKIE, newRefreshTokenString, REFRESH_COOKIE_OPTS);
 
     return res.json({ accessToken: newAccessToken });
   } catch (error) {
@@ -492,7 +504,7 @@ export async function resetPassword(req, res) {
 
 export async function logout(req, res) {
   try {
-    const refreshTokenString = req.cookies?.refreshToken || req.body.refreshToken;
+    const refreshTokenString = req.cookies?.[REFRESH_COOKIE] || req.body?.refreshToken;
     const accessToken = req.headers.authorization?.split(" ")[1];
 
     if (refreshTokenString) {
@@ -510,7 +522,7 @@ export async function logout(req, res) {
       if (ttl > 0) await redis.setex(`blacklist:${accessToken}`, ttl, "1");
     }
 
-    res.clearCookie("refreshToken");
+    res.clearCookie(REFRESH_COOKIE, { path: "/" });
     return res.json({ message: "Logout realizado com sucesso." });
   } catch (error) {
     console.error("[Auth] Erro no logout:", error);

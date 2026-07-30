@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
 import { FileSearch, Loader2, X, ChevronLeft, ChevronRight, Eye, Download } from "lucide-react";
 import toast from "react-hot-toast";
-import "../styles/ForenseDoc.css";
 import { api } from "../lib/axios";
-import { Row, Badge, Section } from "../components/UiComponents.jsx";
+import { Row, Badge, Section, Note, Flag } from "../components/UiComponents.jsx";
 import { riskFromDistance, ipSignatureCompat } from "../utils/geo.js";
 import { downloadReportPdf } from "../utils/reportDownload.js";
 
@@ -101,10 +100,10 @@ function AnalysisDetailModal({ analysisId, onClose }) {
           {!loading && !error && extracted && (
             <div className="space-y-4">
               {!hasForensics && (
-                <div className="note" style={{ borderLeftColor: "var(--muted)", background: "rgba(133,149,168,0.07)" }}>
+                <Note>
                   Este laudo foi gerado antes do confronto geográfico e dos hashes passarem a ser
                   arquivados. Gere uma nova análise para obter o laudo completo com §5 e cadeia de custódia.
-                </div>
+                </Note>
               )}
 
               {result?.hashes && (
@@ -140,9 +139,9 @@ function AnalysisDetailModal({ analysisId, onClose }) {
               </Section>
 
               <Section title="Assinatura eletrônica">
-                <div className="row">
-                  <span className="row-label">Assinatura presente</span>
-                  <Badge label={extracted.assinatura?.presente ? "CONFIRMADA" : "AUSENTE"} color={extracted.assinatura?.presente ? "#3ddc97" : "#f06363"} />
+                <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 border-b border-surface-border/60 py-2.5">
+                  <span className="text-[13px] text-zinc-400">Assinatura presente</span>
+                  <Badge label={extracted.assinatura?.presente ? "CONFIRMADA" : "AUSENTE"} tone={extracted.assinatura?.presente ? "ok" : "danger"} />
                 </div>
                 <Row label="Plataforma" value={extracted.assinatura?.plataforma} />
                 <Row label="Tipo" value={extracted.assinatura?.tipo} />
@@ -158,9 +157,9 @@ function AnalysisDetailModal({ analysisId, onClose }) {
                     <Row label={`Residência (${result.home.source})`} value={result.home.query} />
                   )}
                   {result.contractGeo.distance != null && (
-                    <div className="row">
-                      <span className="row-label">Distância assinatura → residência</span>
-                      <span className="row-value" style={{ color: riskFromDistance(result.contractGeo.distance).color, fontWeight: 700 }}>
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 border-b border-surface-border/60 py-2.5">
+                      <span className="text-[13px] text-zinc-400">Distância assinatura → residência</span>
+                      <span className="text-[13px] font-bold tabular-nums" style={{ color: riskFromDistance(result.contractGeo.distance).color }}>
                         {result.contractGeo.distance.toFixed(2)} km · {riskFromDistance(result.contractGeo.distance).label}
                       </span>
                     </div>
@@ -171,25 +170,25 @@ function AnalysisDetailModal({ analysisId, onClose }) {
               {result?.ipAnalysis?.length > 0 ? (
                 <Section title={`Endereços IP · geolocalização (${result.ipAnalysis.length})`}>
                   {result.ipAnalysis.map((ip, i) => (
-                    <div key={i} style={{ marginBottom: 10 }}>
-                      <div className="row">
-                        <span className="row-label" style={{ fontFamily: "monospace" }}>
+                    <div key={i} className="mb-2.5">
+                      <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 border-b border-surface-border/60 py-2.5">
+                        <span className="font-mono text-[13px] text-zinc-400">
                           {ip.endereco}{ip.geo?.city ? ` · ${ip.geo.city}/${ip.geo.region || ""}` : ""}
                         </span>
                         {ip.distance != null ? (
-                          <span className="row-value" style={{ color: riskFromDistance(ip.distance).color, fontWeight: 700 }}>
+                          <span className="text-[13px] font-bold tabular-nums" style={{ color: riskFromDistance(ip.distance).color }}>
                             {ip.distance.toFixed(2)} km da residência
                           </span>
                         ) : (
-                          <span className="row-value" style={{ color: "var(--muted)" }}>sem distância</span>
+                          <span className="text-[13px] text-zinc-500">sem distância</span>
                         )}
                       </div>
                       {ip.distanceToSignature != null && (() => {
                         const c = ipSignatureCompat(ip.distanceToSignature);
                         return (
-                          <div className="row">
-                            <span className="row-label" style={{ fontSize: 12 }}>IP × assinatura declarada</span>
-                            <span className="row-value" style={{ color: c.color, fontWeight: 700, fontSize: 12 }}>
+                          <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 border-b border-surface-border/60 py-2.5">
+                            <span className="text-[12px] text-zinc-400">IP × assinatura declarada</span>
+                            <span className="text-[12px] font-bold tabular-nums" style={{ color: c.color }}>
                               {ip.distanceToSignature.toFixed(2)} km · {c.label}
                             </span>
                           </div>
@@ -214,9 +213,7 @@ function AnalysisDetailModal({ analysisId, onClose }) {
                   <Row label="Autor declarado" value={metadata.author} />
                   <Row label="Aplicativo criador" value={metadata.creator} />
                   {metadata.warnings?.length > 0 && (
-                    <div className="note" style={{ borderLeftColor: "var(--warn)", background: "rgba(242,176,61,0.07)" }}>
-                      {metadata.warnings.join(" ")}
-                    </div>
+                    <Note tone="warn">{metadata.warnings.join(" ")}</Note>
                   )}
                 </Section>
               )}
@@ -224,7 +221,7 @@ function AnalysisDetailModal({ analysisId, onClose }) {
               {extracted.evidencias_irregularidade?.length > 0 && (
                 <Section title="Evidências de irregularidade" danger>
                   {extracted.evidencias_irregularidade.map((ev, i) => (
-                    <div key={i} className="flag"><b>▸</b><span>{ev}</span></div>
+                    <Flag key={i} tone="danger">{ev}</Flag>
                   ))}
                 </Section>
               )}

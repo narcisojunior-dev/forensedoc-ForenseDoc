@@ -1,13 +1,18 @@
 import { useState, useRef, useCallback } from "react";
 import { Link } from "react-router-dom";
+import {
+  UploadCloud, FileText, Loader2, AlertTriangle, ShieldCheck, MapPin,
+  Fingerprint, Ruler, Download, RotateCcw, FileDown, CheckCircle2, Wand2,
+} from "lucide-react";
 
-import "../styles/ForenseDoc.css";
 import { api } from "../lib/axios.js";
 import { classifyHashString } from "../utils/crypto.js";
 import { riskFromDistance, ipSignatureCompat } from "../utils/geo.js";
 import { exportReportPDF } from "../utils/pdfExport.js";
 import { downloadReportPdf } from "../utils/reportDownload.js";
-import { Row, Badge, Section } from "../components/UiComponents.jsx";
+import {
+  Row, Badge, Section, SubHead, Note, Flag, CompareGrid, CompareCard, Norm, TONES,
+} from "../components/UiComponents.jsx";
 import { DistanceBanner } from "../components/DistanceBanner.jsx";
 import { GeoMap } from "../components/GeoMap.jsx";
 import { useAuthStore } from "../store/authStore.js";
@@ -258,505 +263,735 @@ export default function Analyze() {
     if (fileRef.current) fileRef.current.value = "";
   };
 
+  const btnPrimary =
+    "inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-white shadow-lg shadow-primary/20 transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50";
+  const btnGhost =
+    "inline-flex items-center justify-center gap-2 rounded-lg border border-surface-border bg-secondary px-5 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-secondary-hover disabled:cursor-not-allowed disabled:opacity-50";
+  const inputBase =
+    "block w-full rounded-lg border border-surface-border bg-surface px-4 py-2.5 text-sm text-foreground placeholder-zinc-500 transition-all focus:border-transparent focus:outline-none focus:ring-2 focus:ring-primary";
+
   return (
-    <>
-      <div className="fd-root">
-        <div className="fd-shell">
+    <div className="animate-fade-in space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-foreground">Nova análise</h1>
+        <p className="text-zinc-400">
+          Envie o contrato em PDF e receba o laudo técnico pericial completo.
+        </p>
+      </div>
 
-          {/* IDLE */}
-          {stage === "idle" && (
-            <div style={{ maxWidth: 660, margin: "0 auto" }}>
-              <div className="field">
-                <label>Endereço residencial do cliente (conferido)</label>
-                <input
-                  type="text"
-                  value={homeAddr}
-                  onChange={(e) => setHomeAddr(e.target.value)}
-                  placeholder="Rua, número, bairro, cidade, UF"
-                />
-                <span className="hint">
-                  Ponto de referência de todas as comparações de distância: a geolocalização declarada no contrato e cada IP serão confrontados com este endereço. Se ficar em branco, o sistema usa o endereço extraído do próprio contrato.
-                </span>
-              </div>
-
-              <div className="field">
-                <label>Coordenada exata da residência (opcional)</label>
-                <input
-                  type="text"
-                  value={homeCoordInput}
-                  onChange={(e) => setHomeCoordInput(e.target.value)}
-                  placeholder="Ex.: -5.0951, -42.8100"
-                />
-                <span className="hint">
-                  Para máxima precisão do laudo, cole a coordenada exata da residência (no Google Maps, clique com o botão direito sobre o local → a primeira linha copia "latitude, longitude"). Quando informada, ela prevalece sobre a geocodificação automática do endereço. Você também poderá confirmar ou corrigir a coordenada depois, no laudo.
-                </span>
-              </div>
-
-              <div
-                className="dropzone"
-                style={{ borderColor: dragging ? "var(--accent)" : undefined }}
-                onDrop={handleDrop}
-                onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-                onDragLeave={() => setDragging(false)}
-                onClick={() => fileRef.current.click()}
-              >
-                <div className="dz-icon">◈</div>
-                <div className="dz-title">Anexar contrato em PDF</div>
-                <div className="dz-sub">Arraste o arquivo aqui ou clique para selecionar</div>
-                <div className="dz-foot">PDF · CONSIGNADO INSS · TODOS OS BANCOS</div>
-              </div>
-              <input ref={fileRef} type="file" accept=".pdf" style={{ display: "none" }} onChange={(e) => analyze(e.target.files[0])} />
-
-              <div className="features">
-                {[
-                  { icon: "⬡", label: "Hash SHA-256 / SHA-1" },
-                  { icon: "◉", label: "Geolocalização de IP" },
-                  { icon: "⬢", label: "GPS da assinatura" },
-                  { icon: "◈", label: "Distância Haversine" },
-                ].map((f) => (
-                  <div key={f.label} className="feature">
-                    <div className="f-icon">{f.icon}</div>
-                    <div className="f-label">{f.label}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* PROCESSING */}
-          {stage === "processing" && (
-            <div style={{ maxWidth: 520, margin: "70px auto", textAlign: "center" }}>
-              <div style={{ width: 50, height: 50, border: "3px solid var(--panel-2)", borderTopColor: "var(--accent)", borderRadius: "50%", margin: "0 auto 26px", animation: "fd-spin 1s linear infinite" }} />
-              <div className="eyebrow" style={{ animation: "fd-pulse 1.8s infinite", display: "block", marginBottom: 18 }}>Analisando documento</div>
-              <div className="track"><div className="fill" style={{ width: `${progress.pct}%` }} /></div>
-              <div style={{ fontSize: 13, color: "var(--label)", marginBottom: 8 }}>{progress.label}</div>
-              <div style={{ fontSize: 16, color: "var(--accent)", fontWeight: 700 }}>{progress.pct}%</div>
-            </div>
-          )}
-
-          {/* ERROR */}
-          {stage === "error" && (
-            <div style={{ maxWidth: 500, margin: "70px auto", textAlign: "center" }}>
-              <div style={{ fontSize: 40, color: "var(--crit)", marginBottom: 16 }}>⚠</div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: "var(--crit)", marginBottom: 10, letterSpacing: "0.04em" }}>
-                {noCredits ? "Créditos insuficientes" : "Erro na análise"}
-              </div>
-              <div style={{ fontSize: 14, color: "var(--label)", marginBottom: 28 }}>{error}</div>
-              <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
-                {noCredits && (
-                  <Link className="btn btn-primary" to="/dashboard/plans" style={{ textDecoration: "none" }}>
-                    Ver planos
-                  </Link>
-                )}
-                <button className="btn" onClick={reset}>Tentar novamente</button>
-              </div>
-            </div>
-          )}
-
-          {/* REPORT */}
-          {stage === "done" && report && (
+      {/* ─── IDLE ─────────────────────────────────────────────────────────── */}
+      {stage === "idle" && (
+        <div className="mx-auto w-full max-w-3xl space-y-6">
+          <div className="glass space-y-5 rounded-2xl border border-surface-border p-6">
             <div>
-              <div id="fd-report" style={{ background: "var(--ink)", padding: "2px 0" }}>
-              {/* Report header */}
-              <div className="card report-cover" style={{ textAlign: "center", borderColor: "rgba(79,195,232,0.3)", background: "linear-gradient(180deg, rgba(79,195,232,0.06), var(--panel))" }}>
-                <div className="eyebrow" style={{ fontSize: 11 }}>Laudo técnico pericial · Análise forense digital</div>
-                <div className="report-cover-title" style={{ fontFamily: "var(--display)", fontWeight: 700, fontSize: 22, color: "#fff", margin: "12px 0 8px", letterSpacing: "0.02em" }}>
-                  Contrato de Crédito Consignado
-                </div>
-                <div style={{ fontSize: 12.5, color: "var(--muted)" }}>Emitido em {report.timestamp} · Horário de Fortaleza (BRT)</div>
-                <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 3 }}>
-                  {report.file.name} · {report.file.sizeKB} KB · {report.file.sizeBytes.toLocaleString("pt-BR")} bytes
+              <label className="mb-1 block text-sm font-medium text-zinc-300">
+                Endereço residencial do cliente (conferido)
+              </label>
+              <input
+                type="text"
+                value={homeAddr}
+                onChange={(e) => setHomeAddr(e.target.value)}
+                placeholder="Rua, número, bairro, cidade, UF"
+                className={inputBase}
+              />
+              <p className="mt-2 text-xs leading-relaxed text-zinc-500">
+                Ponto de referência de todas as comparações de distância: a geolocalização declarada
+                no contrato e cada IP serão confrontados com este endereço. Se ficar em branco, o
+                sistema usa o endereço extraído do próprio contrato.
+              </p>
+            </div>
+
+            <div>
+              <label className="mb-1 block text-sm font-medium text-zinc-300">
+                Coordenada exata da residência <span className="text-zinc-500">(opcional)</span>
+              </label>
+              <input
+                type="text"
+                value={homeCoordInput}
+                onChange={(e) => setHomeCoordInput(e.target.value)}
+                placeholder="Ex.: -5.0951, -42.8100"
+                className={inputBase}
+              />
+              <p className="mt-2 text-xs leading-relaxed text-zinc-500">
+                Para máxima precisão do laudo, cole a coordenada exata da residência (no Google
+                Maps, clique com o botão direito sobre o local → a primeira linha copia
+                "latitude, longitude"). Quando informada, ela prevalece sobre a geocodificação
+                automática do endereço. Você também poderá confirmar ou corrigir a coordenada
+                depois, no laudo.
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onDrop={handleDrop}
+            onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+            onDragLeave={() => setDragging(false)}
+            onClick={() => fileRef.current.click()}
+            className={`flex w-full flex-col items-center justify-center rounded-2xl border-2 border-dashed px-6 py-14 text-center transition-colors ${
+              dragging
+                ? "border-primary bg-primary/5"
+                : "border-surface-border bg-surface/30 hover:border-primary/50 hover:bg-surface/50"
+            }`}
+          >
+            <div className="mb-4 rounded-full border border-primary/20 bg-primary/10 p-4">
+              <UploadCloud className="h-7 w-7 text-primary" />
+            </div>
+            <span className="text-base font-bold text-foreground">Anexar contrato em PDF</span>
+            <span className="mt-1 text-sm text-zinc-400">
+              Arraste o arquivo aqui ou clique para selecionar
+            </span>
+            <span className="mt-4 text-[11px] font-medium uppercase tracking-wider text-zinc-600">
+              PDF · Consignado INSS · Todos os bancos · Até {MAX_PDF_MB} MB
+            </span>
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".pdf"
+            className="hidden"
+            onChange={(e) => analyze(e.target.files[0])}
+          />
+
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            {[
+              { icon: Fingerprint, label: "Hash SHA-256 / SHA-1" },
+              { icon: MapPin, label: "Geolocalização de IP" },
+              { icon: ShieldCheck, label: "GPS da assinatura" },
+              { icon: Ruler, label: "Distância Haversine" },
+            ].map(({ icon: Icon, label }) => (
+              <div
+                key={label}
+                className="glass flex flex-col items-center gap-2 rounded-xl border border-surface-border px-3 py-4 text-center"
+              >
+                <Icon className="h-5 w-5 text-primary" />
+                <span className="text-xs font-medium text-zinc-400">{label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ─── PROCESSING ───────────────────────────────────────────────────── */}
+      {stage === "processing" && (
+        <div className="glass mx-auto mt-10 w-full max-w-md rounded-2xl border border-surface-border p-10 text-center">
+          <Loader2 className="mx-auto mb-6 h-12 w-12 animate-spin text-primary" />
+          <div className="mb-5 text-[11px] font-bold uppercase tracking-[0.14em] text-zinc-400">
+            Analisando documento
+          </div>
+          <div className="mb-4 h-1.5 w-full overflow-hidden rounded-full bg-surface-border">
+            <div
+              className="h-full rounded-full bg-primary transition-[width] duration-500 ease-out"
+              style={{ width: `${progress.pct}%` }}
+            />
+          </div>
+          <div className="text-sm text-zinc-400">{progress.label}</div>
+          <div className="mt-2 text-lg font-bold tabular-nums text-primary">{progress.pct}%</div>
+        </div>
+      )}
+
+      {/* ─── ERROR ────────────────────────────────────────────────────────── */}
+      {stage === "error" && (
+        <div className="glass mx-auto mt-10 w-full max-w-md rounded-2xl border border-surface-border p-8 text-center">
+          <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-full border border-red-500/20 bg-red-500/10">
+            <AlertTriangle className="h-7 w-7 text-red-500" />
+          </div>
+          <h2 className="mb-2 text-xl font-bold text-foreground">
+            {noCredits ? "Créditos insuficientes" : "Erro na análise"}
+          </h2>
+          <p className="mb-7 text-sm leading-relaxed text-zinc-400">{error}</p>
+          <div className="flex flex-wrap justify-center gap-3">
+            {noCredits && (
+              <Link to="/dashboard/plans" className={btnPrimary}>
+                Ver planos
+              </Link>
+            )}
+            <button type="button" className={btnGhost} onClick={reset}>
+              <RotateCcw className="h-4 w-4" /> Tentar novamente
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ─── LAUDO ────────────────────────────────────────────────────────── */}
+      {stage === "done" && report && (
+        <div className="space-y-6">
+          {/* id="fd-report" é o alvo do html2canvas em utils/pdfExport.js. */}
+          <div id="fd-report" className="space-y-4">
+            {/* Capa */}
+            <div
+              data-report-block
+              className="glass rounded-2xl border border-primary/25 bg-gradient-to-b from-primary/[0.07] to-transparent p-8 text-center"
+            >
+              <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-primary">
+                Laudo técnico pericial · Análise forense digital
+              </div>
+              <h2 className="mt-3 text-2xl font-bold tracking-tight text-foreground">
+                Contrato de Crédito Consignado
+              </h2>
+              <p className="mt-2 text-[12.5px] text-zinc-500">
+                Emitido em {report.timestamp} · Horário de Fortaleza (BRT)
+              </p>
+              <p className="mt-1 text-[12.5px] text-zinc-500">
+                {report.file.name} · {report.file.sizeKB} KB ·{" "}
+                {report.file.sizeBytes.toLocaleString("pt-BR")} bytes
+              </p>
+            </div>
+
+            {report.processingNotice && (
+              <div
+                data-report-block
+                className="flex items-start gap-3 rounded-2xl border border-emerald-500/25 bg-emerald-500/[0.06] p-5"
+              >
+                <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-500" />
+                <div>
+                  <div className="text-[13px] font-bold text-emerald-500">OCR local aplicado</div>
+                  <div className="mt-1 text-[13px] leading-relaxed text-zinc-300">
+                    {report.processingNotice}
+                  </div>
                 </div>
               </div>
+            )}
 
-              {report.processingNotice && (
-                <div className="card report-notice" style={{ borderColor: "rgba(61,220,151,0.32)", background: "rgba(61,220,151,0.06)" }}>
-                  <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-                    <span style={{ color: "var(--ok)", fontSize: 18, lineHeight: 1.2 }}>✓</span>
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ok)", marginBottom: 4 }}>OCR local aplicado</div>
-                      <div style={{ fontSize: 13, color: "#bfe8d6", lineHeight: 1.6 }}>{report.processingNotice}</div>
-                    </div>
+            {report.extractionError && (
+              <div
+                data-report-block
+                className="flex items-start gap-3 rounded-2xl border border-accent/25 bg-accent/[0.06] p-5"
+              >
+                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-accent" />
+                <div>
+                  <div className="text-[13px] font-bold text-accent">Extração automática parcial</div>
+                  <div className="mt-1 text-[13px] leading-relaxed text-zinc-300">
+                    {report.extractionError}
                   </div>
                 </div>
-              )}
+              </div>
+            )}
 
-              {report.extractionError && (
-                <div className="card report-notice" style={{ borderColor: "rgba(242,176,61,0.4)", background: "rgba(242,176,61,0.06)" }}>
-                  <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-                    <span style={{ color: "var(--warn)", fontSize: 18, lineHeight: 1.2 }}>⚠</span>
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: "var(--warn)", marginBottom: 4 }}>Extração automática parcial</div>
-                      <div style={{ fontSize: 13, color: "#d9c79a", lineHeight: 1.6 }}>{report.extractionError}</div>
-                    </div>
-                  </div>
-                </div>
-              )}
+            {/* §1 */}
+            <Section title="§ 1 · Identificação e integridade criptográfica">
+              <Row label="Nome do arquivo" value={report.file.name} />
+              <Row
+                label="Tamanho"
+                value={`${report.file.sizeKB} KB (${report.file.sizeBytes.toLocaleString("pt-BR")} bytes)`}
+              />
+              <Row label="Tipo de documento" value={report.extracted.tipo_documento} />
+              <Row label="Qualidade de OCR / leitura" value={report.extracted.qualidade_ocr} />
 
-              {/* §1 */}
-              <Section title="§ 1 · Identificação e integridade criptográfica">
-                <Row label="Nome do arquivo" value={report.file.name} />
-                <Row label="Tamanho" value={`${report.file.sizeKB} KB (${report.file.sizeBytes.toLocaleString("pt-BR")} bytes)`} />
-                <Row label="Tipo de documento" value={report.extracted.tipo_documento} />
-                <Row label="Qualidade de OCR / leitura" value={report.extracted.qualidade_ocr} />
+              {(() => {
+                const declared = report.extracted.assinatura?.hash_documento_assinado
+                  ? String(report.extracted.assinatura.hash_documento_assinado).trim()
+                  : null;
+                const declaredAlgo = report.extracted.assinatura?.algoritmo_hash || null;
+                const calc = report.hashes.sha256;
+                const cls = classifyHashString(declared);
+                const confere =
+                  !!declared &&
+                  cls?.format === "SHA-256" &&
+                  declared.replace(/\s/g, "").toUpperCase() === calc.toUpperCase();
 
-                {(() => {
-                  const declared = report.extracted.assinatura?.hash_documento_assinado
-                    ? String(report.extracted.assinatura.hash_documento_assinado).trim()
-                    : null;
-                  const declaredAlgo = report.extracted.assinatura?.algoritmo_hash || null;
-                  const calc = report.hashes.sha256;
-                  const cls = classifyHashString(declared);
-                  const confere = !!declared && cls?.format === "SHA-256" && declared.replace(/\s/g, "").toUpperCase() === calc.toUpperCase();
-                  const vcolor = confere ? "var(--ok)" : "var(--crit)";
-
-                  if (declared) {
-                    return (
-                      <>
-                        <div className="sub-head">Confronto · hash informado × hash encontrado</div>
-                        <div className="grid-2">
-                          <div className="hash-card" style={{ borderTopColor: "var(--warn)" }}>
-                            <div className="htitle" style={{ color: "var(--warn)" }}>Hash informado no documento</div>
-                            <div className="hvalue" style={{ color: "#f4cd86" }}>{declared}</div>
-                            <div className="hmeta">
-                              Algoritmo declarado: {declaredAlgo || "não informado"}<br />
-                              Formato detectado: {cls?.format}{cls && !cls.isHash ? " (não é hash criptográfico)" : ""}
-                            </div>
-                          </div>
-                          <div className="hash-card" style={{ borderTopColor: "var(--accent)" }}>
-                            <div className="htitle" style={{ color: "var(--accent)" }}>Hash encontrado (calculado)</div>
-                            <div className="hvalue" style={{ color: "var(--accent)" }}>{calc}</div>
-                            <div className="hmeta">
-                              Algoritmo: SHA-256 (NIST FIPS 180-4)<br />
-                              Calculado localmente sobre o arquivo original
-                            </div>
-                          </div>
-                        </div>
-                        <div className="row" style={{ marginTop: 14 }}>
-                          <span className="row-label">Resultado da comparação</span>
-                          <Badge label={confere ? "HASHES CONFEREM" : "DIVERGÊNCIA DETECTADA"} color={confere ? "#3ddc97" : "#f06363"} />
-                        </div>
-                        <div className="note" style={{ borderLeftColor: vcolor, background: confere ? "rgba(61,220,151,0.07)" : "rgba(240,99,99,0.07)" }}>
-                          {!cls?.isHash
-                            ? `O valor apresentado no documento como hash não corresponde a um hash criptográfico válido. ${cls?.detalhe}. A substituição do hash criptográfico por identificador dessa natureza configura defeito formal do instrumento, pois impede a verificação objetiva de integridade e autenticidade exigida para a assinatura eletrônica, nos termos da MP 2.200-2/2001.`
-                            : confere
-                            ? "O hash informado no documento confere integralmente com o hash calculado localmente sobre o arquivo. Integridade consistente entre o valor declarado e o conteúdo verificado."
-                            : "O hash informado no documento diverge do hash calculado localmente sobre o arquivo. A divergência deve ser interpretada com cautela técnica: em PDFs assinados, o hash de assinatura refere-se ao conteúdo no instante da assinatura e pode não coincidir com o recálculo sobre o arquivo finalizado. Recomenda-se verificação pericial complementar antes de qualquer conclusão sobre adulteração."}
-                        </div>
-                      </>
-                    );
-                  }
-
+                if (declared) {
                   return (
                     <>
-                      <Row label="SHA-256 (fingerprint)" value={calc} mono />
-                      <div className="note">
-                        O contrato não veio acompanhado de hash informado. Não há, no documento, valor declarado de hash criptográfico disponível para conferência. O hash criptográfico (SHA-256) calculado por este sistema sobre o arquivo original é o indicado acima, e passa a servir como impressão digital de referência do documento para fins de cadeia de custódia.
+                      <SubHead>Confronto · hash informado × hash encontrado</SubHead>
+                      <CompareGrid>
+                        <CompareCard
+                          tone="warn"
+                          title="Hash informado no documento"
+                          value={declared}
+                        >
+                          Algoritmo declarado: {declaredAlgo || "não informado"}
+                          <br />
+                          Formato detectado: {cls?.format}
+                          {cls && !cls.isHash ? " (não é hash criptográfico)" : ""}
+                        </CompareCard>
+                        <CompareCard tone="info" title="Hash encontrado (calculado)" value={calc}>
+                          Algoritmo: SHA-256 (NIST FIPS 180-4)
+                          <br />
+                          Calculado localmente sobre o arquivo original
+                        </CompareCard>
+                      </CompareGrid>
+                      <div
+                        data-report-block
+                        className="mt-4 flex flex-wrap items-center justify-between gap-3"
+                      >
+                        <span className="text-[13px] text-zinc-400">Resultado da comparação</span>
+                        <Badge
+                          label={confere ? "HASHES CONFEREM" : "DIVERGÊNCIA DETECTADA"}
+                          tone={confere ? "ok" : "danger"}
+                        />
                       </div>
+                      <Note tone={confere ? "ok" : "danger"}>
+                        {!cls?.isHash
+                          ? `O valor apresentado no documento como hash não corresponde a um hash criptográfico válido. ${cls?.detalhe}. A substituição do hash criptográfico por identificador dessa natureza configura defeito formal do instrumento, pois impede a verificação objetiva de integridade e autenticidade exigida para a assinatura eletrônica, nos termos da MP 2.200-2/2001.`
+                          : confere
+                          ? "O hash informado no documento confere integralmente com o hash calculado localmente sobre o arquivo. Integridade consistente entre o valor declarado e o conteúdo verificado."
+                          : "O hash informado no documento diverge do hash calculado localmente sobre o arquivo. A divergência deve ser interpretada com cautela técnica: em PDFs assinados, o hash de assinatura refere-se ao conteúdo no instante da assinatura e pode não coincidir com o recálculo sobre o arquivo finalizado. Recomenda-se verificação pericial complementar antes de qualquer conclusão sobre adulteração."}
+                      </Note>
                     </>
                   );
-                })()}
+                }
 
-                <Row label="SHA-1 (arquivo)" value={report.hashes.sha1} mono />
+                return (
+                  <>
+                    <Row label="SHA-256 (fingerprint)" value={calc} mono />
+                    <Note tone="info">
+                      O contrato não veio acompanhado de hash informado. Não há, no documento, valor
+                      declarado de hash criptográfico disponível para conferência. O hash
+                      criptográfico (SHA-256) calculado por este sistema sobre o arquivo original é o
+                      indicado acima, e passa a servir como impressão digital de referência do
+                      documento para fins de cadeia de custódia.
+                    </Note>
+                  </>
+                );
+              })()}
+
+              <Row label="SHA-1 (arquivo)" value={report.hashes.sha1} mono />
+            </Section>
+
+            {/* §1.1 */}
+            {report.metadata && (
+              <Section title="§ 1.1 · Verificação dos metadados internos do PDF">
+                <div
+                  data-report-block
+                  className="flex flex-wrap items-center justify-between gap-3 border-b border-surface-border/60 py-2.5"
+                >
+                  <span className="text-[13px] text-zinc-400">Resultado da verificação</span>
+                  <Badge
+                    label={
+                      report.metadata.warnings?.length
+                        ? `${report.metadata.warnings.length} ALERTA(S)`
+                        : "SEM ALERTAS"
+                    }
+                    tone={report.metadata.warnings?.length ? "warn" : "ok"}
+                  />
+                </div>
+                {[
+                  ["Versão do formato PDF", report.metadata.version],
+                  ["Número de páginas", report.metadata.totalPages],
+                  ["Formato das páginas", report.metadata.pageFormats?.join(" · ")],
+                  ["Título interno", report.metadata.title],
+                  ["Autor declarado", report.metadata.author],
+                  ["Assunto", report.metadata.subject],
+                  ["Palavras-chave", report.metadata.keywords],
+                  ["Aplicativo criador", report.metadata.creator],
+                  ["Produtor / conversor", report.metadata.producer],
+                  ["Data de criação interna", report.metadata.creationDate],
+                  ["Data de modificação interna", report.metadata.modificationDate],
+                  ["Idioma declarado", report.metadata.language],
+                  ["Arquivo criptografado", report.metadata.encrypted ? "Sim" : "Não"],
+                  ["PDF linearizado", report.metadata.linearized ? "Sim" : "Não"],
+                  ["Formulário AcroForm", report.metadata.hasAcroForm ? "Presente" : "Ausente"],
+                  ["Formulário XFA", report.metadata.hasXfa ? "Presente" : "Ausente"],
+                  [
+                    "Assinatura digital incorporada",
+                    report.metadata.hasEmbeddedSignatures ? "Detectada" : "Não detectada",
+                  ],
+                ].map(([label, value]) => (
+                  <Row key={label} label={label} value={value} />
+                ))}
+                <Row
+                  label="Identificador interno do trailer"
+                  value={report.metadata.trailerFingerprint}
+                  mono
+                />
+
+                {report.metadata.warnings?.length > 0 && (
+                  <>
+                    <SubHead>Achados da auditoria de metadados</SubHead>
+                    {report.metadata.warnings.map((warning, index) => (
+                      <Flag key={index} tone="warn">{warning}</Flag>
+                    ))}
+                  </>
+                )}
+                <Note>
+                  Metadados são campos declarativos e podem ser alterados por editores de PDF. Eles
+                  servem como indício técnico e devem ser avaliados em conjunto com os hashes do
+                  arquivo, a assinatura digital incorporada e a cadeia de custódia.
+                </Note>
               </Section>
+            )}
 
-              {/* §1.1 Metadados internos */}
-              {report.metadata && (
-                <Section title="§ 1.1 · Verificação dos metadados internos do PDF">
-                  <div className="row">
-                    <span className="row-label">Resultado da verificação</span>
+            {/* §2 */}
+            <Section title="§ 2 · Dados do instrumento contratual">
+              {[
+                ["Número do contrato", report.extracted.contrato?.numero],
+                ["Banco / instituição financeira", report.extracted.contrato?.banco],
+                ["Código BACEN", report.extracted.contrato?.codigo_banco_bacen],
+                ["Produto", report.extracted.contrato?.produto],
+                ["Modalidade", report.extracted.contrato?.modalidade],
+                ["Valor contratado", report.extracted.contrato?.valor_contratado],
+                ["Valor da parcela", report.extracted.contrato?.valor_parcela],
+                ["Número de parcelas", report.extracted.contrato?.numero_parcelas],
+                ["Prazo (meses)", report.extracted.contrato?.prazo_meses],
+                ["Taxa de juros mensal", report.extracted.contrato?.taxa_juros_mensal],
+                ["Taxa de juros anual", report.extracted.contrato?.taxa_juros_anual],
+                ["CET mensal", report.extracted.contrato?.cet_mensal],
+                ["CET anual", report.extracted.contrato?.cet_anual],
+                ["Data do contrato", report.extracted.contrato?.data_contrato],
+                ["Primeiro vencimento", report.extracted.contrato?.data_primeiro_vencimento],
+                ["Último vencimento", report.extracted.contrato?.data_ultimo_vencimento],
+              ].map(([lbl, val]) => (
+                <Row key={lbl} label={lbl} value={val} />
+              ))}
+            </Section>
+
+            {/* §3 */}
+            <Section title="§ 3 · Qualificação do contratante">
+              {[
+                ["Nome completo", report.extracted.cliente?.nome],
+                ["CPF", report.extracted.cliente?.cpf],
+                ["RG", report.extracted.cliente?.rg],
+                ["Data de nascimento", report.extracted.cliente?.data_nascimento],
+                ["Endereço (extraído do contrato)", report.extracted.cliente?.endereco],
+                ["Bairro", report.extracted.cliente?.bairro],
+                ["Cidade", report.extracted.cliente?.cidade],
+                ["Estado", report.extracted.cliente?.estado],
+                ["CEP", report.extracted.cliente?.cep],
+                ["Telefone", report.extracted.cliente?.telefone],
+                ["E-mail", report.extracted.cliente?.email],
+                ["Matrícula INSS", report.extracted.cliente?.matricula_inss],
+                ["Número do benefício", report.extracted.cliente?.numero_beneficio],
+                ["Espécie do benefício", report.extracted.cliente?.especie_beneficio],
+                ["Banco de recebimento", report.extracted.cliente?.banco_recepcao],
+              ].map(([lbl, val]) => (
+                <Row key={lbl} label={lbl} value={val} />
+              ))}
+
+              <SubHead>Endereço de referência (ponto de origem das distâncias)</SubHead>
+              <Row
+                label="Endereço adotado"
+                value={report.home.query}
+                nullText="Nenhum endereço informado ou extraído"
+              />
+              <Row label="Origem do endereço" value={report.home.source} />
+              {report.home.geo ? (
+                <Row
+                  label="Coordenadas (residencial · aprox.)"
+                  value={`${report.home.geo.lat.toFixed(6)}, ${report.home.geo.lon.toFixed(6)}`}
+                  mono
+                />
+              ) : report.home.query ? (
+                <Note tone="warn">
+                  Não foi possível geocodificar o endereço residencial informado. As distâncias até
+                  este ponto não puderam ser calculadas. Verifique a grafia do endereço e tente
+                  novamente, de preferência com cidade e UF.
+                </Note>
+              ) : null}
+            </Section>
+
+            {/* §4 */}
+            <Section title="§ 4 · Assinatura eletrônica e cadeia de custódia">
+              <div
+                data-report-block
+                className="flex flex-wrap items-center justify-between gap-3 border-b border-surface-border/60 py-2.5"
+              >
+                <span className="text-[13px] text-zinc-400">Assinatura presente</span>
+                <Badge
+                  label={report.extracted.assinatura?.presente ? "CONFIRMADA" : "AUSENTE"}
+                  tone={report.extracted.assinatura?.presente ? "ok" : "danger"}
+                />
+              </div>
+
+              <Note tone="info">
+                A validade da assinatura eletrônica não depende de certificação ICP-Brasil. A MP
+                2.200-2/2001 (art. 10, §2º) admite outros meios de comprovação de autoria e
+                integridade, e a Lei 14.063/2020 reconhece as assinaturas simples, avançada e
+                qualificada, todas com validade jurídica. O STJ consolidou esse entendimento no REsp
+                2.159.442 (rel. Min. Nancy Andrighi) e o reafirmou no REsp 2.205.708. O ponto
+                decisivo não é o selo ICP-Brasil, e sim a completude da cadeia de custódia:
+                demonstrar quem assinou, quando, de onde e com qual integridade.
+              </Note>
+
+              {[
+                ["Plataforma de assinatura", report.extracted.assinatura?.plataforma],
+                ["Tipo de assinatura", report.extracted.assinatura?.tipo],
+                ["Nível (Lei 14.063/2020)", report.extracted.assinatura?.nivel_legal_mp2200],
+                ["Base legal aplicável", report.extracted.assinatura?.base_legal],
+                ["Titular do signatário", report.extracted.assinatura?.titular_certificado],
+                ["CPF do titular", report.extracted.assinatura?.cpf_titular],
+                ["Data / hora da assinatura", report.extracted.assinatura?.data_hora_assinatura],
+                ["Autoridade certificadora (se ICP-Brasil)", report.extracted.assinatura?.certificadora_ac],
+                ["Nº de série do certificado (se ICP-Brasil)", report.extracted.assinatura?.numero_serie_certificado],
+                ["Validade do certificado · início (se ICP-Brasil)", report.extracted.assinatura?.validade_certificado_inicio],
+                ["Validade do certificado · fim (se ICP-Brasil)", report.extracted.assinatura?.validade_certificado_fim],
+                ["Algoritmo de hash", report.extracted.assinatura?.algoritmo_hash],
+              ].map(([lbl, val]) => (
+                <Row key={lbl} label={lbl} value={val} />
+              ))}
+
+              {report.extracted.assinatura?.metodos_autenticacao?.length > 0 && (
+                <Row
+                  label="Métodos de autenticação"
+                  value={report.extracted.assinatura.metodos_autenticacao.join(" · ")}
+                />
+              )}
+              {report.extracted.assinatura?.hash_documento_assinado && (
+                <Row
+                  label="Hash do doc. assinado"
+                  value={report.extracted.assinatura.hash_documento_assinado}
+                  mono
+                />
+              )}
+              {report.extracted.assinatura?.integridade_pos_assinatura !== null &&
+                report.extracted.assinatura?.integridade_pos_assinatura !== undefined && (
+                  <div
+                    data-report-block
+                    className="flex flex-wrap items-center justify-between gap-3 border-b border-surface-border/60 py-2.5"
+                  >
+                    <span className="text-[13px] text-zinc-400">Integridade pós-assinatura</span>
                     <Badge
-                      label={report.metadata.warnings?.length ? `${report.metadata.warnings.length} ALERTA(S)` : "SEM ALERTAS"}
-                      color={report.metadata.warnings?.length ? "#f2b03d" : "#3ddc97"}
+                      label={
+                        report.extracted.assinatura.integridade_pos_assinatura
+                          ? "ÍNTEGRO"
+                          : "DOCUMENTO ADULTERADO"
+                      }
+                      tone={report.extracted.assinatura.integridade_pos_assinatura ? "ok" : "danger"}
                     />
                   </div>
-                  {[
-                    ["Versão do formato PDF", report.metadata.version],
-                    ["Número de páginas", report.metadata.totalPages],
-                    ["Formato das páginas", report.metadata.pageFormats?.join(" · ")],
-                    ["Título interno", report.metadata.title],
-                    ["Autor declarado", report.metadata.author],
-                    ["Assunto", report.metadata.subject],
-                    ["Palavras-chave", report.metadata.keywords],
-                    ["Aplicativo criador", report.metadata.creator],
-                    ["Produtor / conversor", report.metadata.producer],
-                    ["Data de criação interna", report.metadata.creationDate],
-                    ["Data de modificação interna", report.metadata.modificationDate],
-                    ["Idioma declarado", report.metadata.language],
-                    ["Arquivo criptografado", report.metadata.encrypted ? "Sim" : "Não"],
-                    ["PDF linearizado", report.metadata.linearized ? "Sim" : "Não"],
-                    ["Formulário AcroForm", report.metadata.hasAcroForm ? "Presente" : "Ausente"],
-                    ["Formulário XFA", report.metadata.hasXfa ? "Presente" : "Ausente"],
-                    ["Assinatura digital incorporada", report.metadata.hasEmbeddedSignatures ? "Detectada" : "Não detectada"],
-                  ].map(([label, value]) => <Row key={label} label={label} value={value} />)}
-                  <Row label="Identificador interno do trailer" value={report.metadata.trailerFingerprint} mono />
-
-                  {report.metadata.warnings?.length > 0 && (
-                    <>
-                      <div className="sub-head">Achados da auditoria de metadados</div>
-                      {report.metadata.warnings.map((warning, index) => (
-                        <div key={index} className="flag" style={{ color: "#d9c79a", borderBottomColor: "rgba(242,176,61,0.18)" }}>
-                          <b style={{ color: "var(--warn)" }}>▸</b><span>{warning}</span>
-                        </div>
-                      ))}
-                    </>
-                  )}
-                  <div className="note">
-                    Metadados são campos declarativos e podem ser alterados por editores de PDF. Eles servem como indício técnico e devem ser avaliados em conjunto com os hashes do arquivo, a assinatura digital incorporada e a cadeia de custódia.
-                  </div>
-                </Section>
+                )}
+              {report.extracted.assinatura?.observacoes && (
+                <Note>{report.extracted.assinatura.observacoes}</Note>
               )}
 
-              {/* §2 */}
-              <Section title="§ 2 · Dados do instrumento contratual">
-                {[
-                  ["Número do contrato", report.extracted.contrato?.numero],
-                  ["Banco / instituição financeira", report.extracted.contrato?.banco],
-                  ["Código BACEN", report.extracted.contrato?.codigo_banco_bacen],
-                  ["Produto", report.extracted.contrato?.produto],
-                  ["Modalidade", report.extracted.contrato?.modalidade],
-                  ["Valor contratado", report.extracted.contrato?.valor_contratado],
-                  ["Valor da parcela", report.extracted.contrato?.valor_parcela],
-                  ["Número de parcelas", report.extracted.contrato?.numero_parcelas],
-                  ["Prazo (meses)", report.extracted.contrato?.prazo_meses],
-                  ["Taxa de juros mensal", report.extracted.contrato?.taxa_juros_mensal],
-                  ["Taxa de juros anual", report.extracted.contrato?.taxa_juros_anual],
-                  ["CET mensal", report.extracted.contrato?.cet_mensal],
-                  ["CET anual", report.extracted.contrato?.cet_anual],
-                  ["Data do contrato", report.extracted.contrato?.data_contrato],
-                  ["Primeiro vencimento", report.extracted.contrato?.data_primeiro_vencimento],
-                  ["Último vencimento", report.extracted.contrato?.data_ultimo_vencimento],
-                ].map(([lbl, val]) => <Row key={lbl} label={lbl} value={val} />)}
-              </Section>
+              {(() => {
+                const a = report.extracted.assinatura || {};
+                const cc = report.extracted.cadeia_custodia || {};
+                const items = [
+                  ["Identificação do signatário", !!(cc.identificacao_signatario || a.titular_certificado || a.cpf_titular || report.extracted.cliente?.nome)],
+                  ["Registro de IP", !!(cc.registro_ip || report.ipAnalysis.length > 0)],
+                  ["Carimbo de data e hora", !!(cc.carimbo_tempo || a.data_hora_assinatura)],
+                  ["Geolocalização do ato", !!(cc.geolocalizacao || report.geoDeclaredPresent || report.contractGeo)],
+                  ["Método de autenticação", !!(cc.metodo_autenticacao || (a.metodos_autenticacao && a.metodos_autenticacao.length > 0) || (a.tipo && a.tipo !== "Ausente" && a.tipo !== "Indeterminado"))],
+                  ["Hash de integridade", !!(cc.hash_integridade || a.hash_documento_assinado)],
+                  ["Trilha de auditoria", !!cc.trilha_auditoria],
+                  ["Evidência de aceite / vontade", !!cc.evidencia_aceite],
+                ];
+                const present = items.filter((it) => it[1]).length;
+                const total = items.length;
+                const pct = Math.round((present / total) * 100);
+                const completo = present >= 6;
+                const parcial = present >= 4 && present < 6;
+                const tone = completo ? "ok" : parcial ? "warn" : "danger";
+                const missing = items.filter((it) => !it[1]).map((it) => it[0].toLowerCase());
 
-              {/* §3 */}
-              <Section title="§ 3 · Qualificação do contratante">
-                {[
-                  ["Nome completo", report.extracted.cliente?.nome],
-                  ["CPF", report.extracted.cliente?.cpf],
-                  ["RG", report.extracted.cliente?.rg],
-                  ["Data de nascimento", report.extracted.cliente?.data_nascimento],
-                  ["Endereço (extraído do contrato)", report.extracted.cliente?.endereco],
-                  ["Bairro", report.extracted.cliente?.bairro],
-                  ["Cidade", report.extracted.cliente?.cidade],
-                  ["Estado", report.extracted.cliente?.estado],
-                  ["CEP", report.extracted.cliente?.cep],
-                  ["Telefone", report.extracted.cliente?.telefone],
-                  ["E-mail", report.extracted.cliente?.email],
-                  ["Matrícula INSS", report.extracted.cliente?.matricula_inss],
-                  ["Número do benefício", report.extracted.cliente?.numero_beneficio],
-                  ["Espécie do benefício", report.extracted.cliente?.especie_beneficio],
-                  ["Banco de recebimento", report.extracted.cliente?.banco_recepcao],
-                ].map(([lbl, val]) => <Row key={lbl} label={lbl} value={val} />)}
-
-                <div className="sub-head">Endereço de referência (ponto de origem das distâncias)</div>
-                <Row label="Endereço adotado" value={report.home.query} nullText="Nenhum endereço informado ou extraído" />
-                <Row label="Origem do endereço" value={report.home.source} />
-                {report.home.geo ? (
-                  <Row label="Coordenadas (residencial · aprox.)" value={`${report.home.geo.lat.toFixed(6)}, ${report.home.geo.lon.toFixed(6)}`} mono />
-                ) : report.home.query ? (
-                  <div className="note" style={{ borderLeftColor: "var(--warn)", background: "rgba(242,176,61,0.07)" }}>
-                    Não foi possível geocodificar o endereço residencial informado. As distâncias até este ponto não puderam ser calculadas. Verifique a grafia do endereço e tente novamente, de preferência com cidade e UF.
-                  </div>
-                ) : null}
-              </Section>
-
-              {/* §4 */}
-              <Section title="§ 4 · Assinatura eletrônica e cadeia de custódia">
-                <div className="row">
-                  <span className="row-label">Assinatura presente</span>
-                  <Badge label={report.extracted.assinatura?.presente ? "CONFIRMADA" : "AUSENTE"} color={report.extracted.assinatura?.presente ? "#3ddc97" : "#f06363"} />
-                </div>
-
-                <div className="note">
-                  A validade da assinatura eletrônica não depende de certificação ICP-Brasil. A MP 2.200-2/2001 (art. 10, §2º) admite outros meios de comprovação de autoria e integridade, e a Lei 14.063/2020 reconhece as assinaturas simples, avançada e qualificada, todas com validade jurídica. O STJ consolidou esse entendimento no REsp 2.159.442 (rel. Min. Nancy Andrighi) e o reafirmou no REsp 2.205.708. O ponto decisivo não é o selo ICP-Brasil, e sim a completude da cadeia de custódia: demonstrar quem assinou, quando, de onde e com qual integridade.
-                </div>
-
-                {[
-                  ["Plataforma de assinatura", report.extracted.assinatura?.plataforma],
-                  ["Tipo de assinatura", report.extracted.assinatura?.tipo],
-                  ["Nível (Lei 14.063/2020)", report.extracted.assinatura?.nivel_legal_mp2200],
-                  ["Base legal aplicável", report.extracted.assinatura?.base_legal],
-                  ["Titular do signatário", report.extracted.assinatura?.titular_certificado],
-                  ["CPF do titular", report.extracted.assinatura?.cpf_titular],
-                  ["Data / hora da assinatura", report.extracted.assinatura?.data_hora_assinatura],
-                  ["Autoridade certificadora (se ICP-Brasil)", report.extracted.assinatura?.certificadora_ac],
-                  ["Nº de série do certificado (se ICP-Brasil)", report.extracted.assinatura?.numero_serie_certificado],
-                  ["Validade do certificado · início (se ICP-Brasil)", report.extracted.assinatura?.validade_certificado_inicio],
-                  ["Validade do certificado · fim (se ICP-Brasil)", report.extracted.assinatura?.validade_certificado_fim],
-                  ["Algoritmo de hash", report.extracted.assinatura?.algoritmo_hash],
-                ].map(([lbl, val]) => <Row key={lbl} label={lbl} value={val} />)}
-
-                {report.extracted.assinatura?.metodos_autenticacao?.length > 0 && (
-                  <Row label="Métodos de autenticação" value={report.extracted.assinatura.metodos_autenticacao.join(" · ")} />
-                )}
-                {report.extracted.assinatura?.hash_documento_assinado && (
-                  <Row label="Hash do doc. assinado" value={report.extracted.assinatura.hash_documento_assinado} mono />
-                )}
-                {report.extracted.assinatura?.integridade_pos_assinatura !== null && report.extracted.assinatura?.integridade_pos_assinatura !== undefined && (
-                  <div className="row">
-                    <span className="row-label">Integridade pós-assinatura</span>
-                    <Badge label={report.extracted.assinatura.integridade_pos_assinatura ? "ÍNTEGRO" : "DOCUMENTO ADULTERADO"} color={report.extracted.assinatura.integridade_pos_assinatura ? "#3ddc97" : "#f06363"} />
-                  </div>
-                )}
-                {report.extracted.assinatura?.observacoes && (
-                  <div className="note">{report.extracted.assinatura.observacoes}</div>
-                )}
-
-                {(() => {
-                  const a = report.extracted.assinatura || {};
-                  const cc = report.extracted.cadeia_custodia || {};
-                  const items = [
-                    ["Identificação do signatário", !!(cc.identificacao_signatario || a.titular_certificado || a.cpf_titular || report.extracted.cliente?.nome)],
-                    ["Registro de IP", !!(cc.registro_ip || report.ipAnalysis.length > 0)],
-                    ["Carimbo de data e hora", !!(cc.carimbo_tempo || a.data_hora_assinatura)],
-                    ["Geolocalização do ato", !!(cc.geolocalizacao || report.geoDeclaredPresent || report.contractGeo)],
-                    ["Método de autenticação", !!(cc.metodo_autenticacao || (a.metodos_autenticacao && a.metodos_autenticacao.length > 0) || (a.tipo && a.tipo !== "Ausente" && a.tipo !== "Indeterminado"))],
-                    ["Hash de integridade", !!(cc.hash_integridade || a.hash_documento_assinado)],
-                    ["Trilha de auditoria", !!cc.trilha_auditoria],
-                    ["Evidência de aceite / vontade", !!cc.evidencia_aceite],
-                  ];
-                  const present = items.filter((it) => it[1]).length;
-                  const total = items.length;
-                  const pct = Math.round((present / total) * 100);
-                  const completo = present >= 6;
-                  const parcial = present >= 4 && present < 6;
-                  const vcolor = completo ? "#3ddc97" : parcial ? "#f2b03d" : "#f06363";
-                  const missing = items.filter((it) => !it[1]).map((it) => it[0].toLowerCase());
-
-                  return (
-                    <>
-                      <div className="sub-head">Cadeia de custódia da assinatura</div>
-                      <div className="dist-banner" style={{ borderColor: `${vcolor}55`, background: `${vcolor}14`, marginTop: 16 }}>
-                        <div>
-                          <div className="dl">Completude da cadeia de custódia</div>
-                          <div className="dv" style={{ color: vcolor }}>{present}/{total} · {pct}%</div>
-                        </div>
-                        <Badge label={completo ? "SUBSTANCIALMENTE COMPLETA" : parcial ? "PARCIAL" : "INCOMPLETA"} color={vcolor} />
-                      </div>
-                      <div className="note" style={{ borderLeftColor: vcolor, background: `${vcolor}12` }}>
-                        {completo
-                          ? "A assinatura eletrônica é juridicamente válida ainda que sem certificação ICP-Brasil, e a cadeia de custódia reúne os elementos necessários para que a instituição comprove autoria e integridade (MP 2.200-2/2001, art. 10, §2º; Lei 14.063/2020; STJ, REsp 2.159.442, rel. Min. Nancy Andrighi)."
-                          : `A ausência de certificação ICP-Brasil não invalida, por si só, a assinatura. Contudo, a cadeia de custódia está ${parcial ? "parcial" : "incompleta"}: faltam ${missing.join(", ")}. Quando o consumidor contesta a assinatura em contrato bancário, o ônus de comprovar a autenticidade e a integridade recai sobre a instituição financeira (STJ, Tema 1.061). A incompletude da cadeia de custódia fragiliza essa prova e sustenta a impugnação do documento.`}
-                      </div>
-                    </>
-                  );
-                })()}
-              </Section>
-
-              {/* §5 Geolocalização da assinatura · confronto geográfico */}
-              <Section title="§ 5 · Geolocalização da assinatura · confronto geográfico">
-                {report.contractGeo ? (
+                return (
                   <>
-                    <div className="sub-head">Confronto · residência do cliente × geolocalização declarada no contrato</div>
-                    <div className="grid-2">
-                      <div className="geo-card" style={{ borderTopColor: "var(--accent)" }}>
-                        <div className="gtitle" style={{ color: "var(--accent)" }}>Residência do cliente (referência)</div>
-                        <div className="gcoord" style={{ color: "var(--accent)" }}>
-                          {report.home.geo ? `${report.home.geo.lat.toFixed(6)}, ${report.home.geo.lon.toFixed(6)}` : "Não geocodificada"}
+                    <SubHead>Cadeia de custódia da assinatura</SubHead>
+
+                    {/* Checklist item a item: antes só existia o placar agregado,
+                        e o operador não via QUAL elemento faltava sem ler o texto. */}
+                    <div className="grid grid-cols-1 gap-x-6 gap-y-1 sm:grid-cols-2">
+                      {items.map(([nome, ok]) => (
+                        <div key={nome} className="flex items-center gap-2 py-1 text-[13px]">
+                          {ok ? (
+                            <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
+                          ) : (
+                            <AlertTriangle className="h-4 w-4 shrink-0 text-zinc-600" />
+                          )}
+                          <span className={ok ? "text-zinc-300" : "text-zinc-500"}>{nome}</span>
                         </div>
-                        <div className="gmeta">
-                          {report.home.query || "Endereço não informado"}<br />
-                          Origem: {report.home.source || "não disponível"}<br />
-                          Precisão: {precisionLabel(report.home.geo)}
-                        </div>
-                      </div>
-                      <div className="geo-card" style={{ borderTopColor: "var(--warn)" }}>
-                        <div className="gtitle" style={{ color: "var(--warn)" }}>Geolocalização declarada no contrato</div>
-                        <div className="gcoord" style={{ color: "#f4cd86" }}>
-                          {report.contractGeo.lat.toFixed(7)}, {report.contractGeo.lon.toFixed(7)}
-                        </div>
-                        <div className="gmeta">
-                          {report.contractGeo.endereco || "Endereço declarado não informado"}<br />
-                          Fonte: {report.contractGeo.fonte || "não informada"}
-                          {report.contractGeo.precisao ? ` · Precisão: ${report.contractGeo.precisao} m` : ""}
-                          {report.contractGeo.geocoded ? " · Coordenada obtida por geocodificação do endereço declarado" : " · Coordenada GPS extraída do log"}
-                        </div>
-                      </div>
+                      ))}
                     </div>
 
-                    {report.contractGeo.dataHora && <Row label="Data / hora da geolocalização" value={report.contractGeo.dataHora} />}
-
-                    {isCoarseHome(report.home.geo) && (
-                      <div className="note" style={{ borderLeftColor: "var(--crit)", background: "rgba(240,99,99,0.08)" }}>
-                        <b>Atenção:</b> a coordenada da residência foi resolvida apenas em nível de cidade. A distância abaixo é aproximada. Para um laudo definitivo, confirme a coordenada exata da residência no campo abaixo.
+                    <div
+                      data-report-block
+                      className={`mt-4 flex flex-wrap items-center justify-between gap-4 rounded-xl border px-5 py-4 ${TONES[tone].bg}`}
+                      style={{ borderColor: `${TONES[tone].hex}55` }}
+                    >
+                      <div>
+                        <div className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+                          Completude da cadeia de custódia
+                        </div>
+                        <div
+                          className="mt-1 text-2xl font-bold tabular-nums"
+                          style={{ color: TONES[tone].hex }}
+                        >
+                          {present}/{total} · {pct}%
+                        </div>
                       </div>
-                    )}
+                      <Badge
+                        label={completo ? "SUBSTANCIALMENTE COMPLETA" : parcial ? "PARCIAL" : "INCOMPLETA"}
+                        tone={tone}
+                      />
+                    </div>
 
-                    {/* Correção manual — padrão-ouro forense: coordenada confirmada por humano */}
-                    <div className="note" style={{ borderLeftColor: "var(--accent)", background: "rgba(79,195,232,0.06)" }}>
-                      <div style={{ fontSize: 12.5, color: "var(--label)", marginBottom: 8 }}>
+                    <Note tone={tone}>
+                      {completo
+                        ? "A assinatura eletrônica é juridicamente válida ainda que sem certificação ICP-Brasil, e a cadeia de custódia reúne os elementos necessários para que a instituição comprove autoria e integridade (MP 2.200-2/2001, art. 10, §2º; Lei 14.063/2020; STJ, REsp 2.159.442, rel. Min. Nancy Andrighi)."
+                        : `A ausência de certificação ICP-Brasil não invalida, por si só, a assinatura. Contudo, a cadeia de custódia está ${parcial ? "parcial" : "incompleta"}: faltam ${missing.join(", ")}. Quando o consumidor contesta a assinatura em contrato bancário, o ônus de comprovar a autenticidade e a integridade recai sobre a instituição financeira (STJ, Tema 1.061). A incompletude da cadeia de custódia fragiliza essa prova e sustenta a impugnação do documento.`}
+                    </Note>
+                  </>
+                );
+              })()}
+            </Section>
+
+            {/* §5 */}
+            <Section title="§ 5 · Geolocalização da assinatura · confronto geográfico">
+              {report.contractGeo ? (
+                <>
+                  <SubHead>
+                    Confronto · residência do cliente × geolocalização declarada no contrato
+                  </SubHead>
+                  <CompareGrid>
+                    <CompareCard
+                      tone="info"
+                      title="Residência do cliente (referência)"
+                      value={
+                        report.home.geo
+                          ? `${report.home.geo.lat.toFixed(6)}, ${report.home.geo.lon.toFixed(6)}`
+                          : "Não geocodificada"
+                      }
+                    >
+                      {report.home.query || "Endereço não informado"}
+                      <br />
+                      Origem: {report.home.source || "não disponível"}
+                      <br />
+                      Precisão: {precisionLabel(report.home.geo)}
+                    </CompareCard>
+                    <CompareCard
+                      tone="warn"
+                      title="Geolocalização declarada no contrato"
+                      value={`${report.contractGeo.lat.toFixed(7)}, ${report.contractGeo.lon.toFixed(7)}`}
+                    >
+                      {report.contractGeo.endereco || "Endereço declarado não informado"}
+                      <br />
+                      Fonte: {report.contractGeo.fonte || "não informada"}
+                      {report.contractGeo.precisao ? ` · Precisão: ${report.contractGeo.precisao} m` : ""}
+                      {report.contractGeo.geocoded
+                        ? " · Coordenada obtida por geocodificação do endereço declarado"
+                        : " · Coordenada GPS extraída do log"}
+                    </CompareCard>
+                  </CompareGrid>
+
+                  {report.contractGeo.dataHora && (
+                    <Row label="Data / hora da geolocalização" value={report.contractGeo.dataHora} />
+                  )}
+
+                  {isCoarseHome(report.home.geo) && (
+                    <Note tone="danger">
+                      <b>Atenção:</b> a coordenada da residência foi resolvida apenas em nível de
+                      cidade. A distância abaixo é aproximada. Para um laudo definitivo, confirme a
+                      coordenada exata da residência no campo abaixo.
+                    </Note>
+                  )}
+
+                  {/* Correção manual — padrão-ouro forense: coordenada confirmada por humano */}
+                  <div className="mt-3 rounded-xl border border-primary/20 bg-primary/[0.04] p-4">
+                    <div className="mb-3 flex items-start gap-2.5">
+                      <Wand2 className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                      <p className="text-[12.5px] leading-relaxed text-zinc-400">
                         {report.home.geo?.precision === "manual"
                           ? "Coordenada da residência confirmada pelo operador."
                           : "Confirmar ou corrigir a coordenada da residência (no Google Maps, botão direito no local → clique na coordenada para copiar):"}
-                      </div>
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                        <input
-                          type="text"
-                          value={correctCoord}
-                          onChange={(e) => setCorrectCoord(e.target.value)}
-                          placeholder="Ex.: -5.0951, -42.8100"
-                          style={{ flex: 1, minWidth: 200, padding: "8px 12px", background: "var(--panel-2)", border: "1px solid var(--line)", borderRadius: 8, color: "var(--ink-2)", fontSize: 13 }}
-                        />
-                        <button className="btn btn-primary" onClick={handleGeoCorrect} disabled={correcting} style={{ whiteSpace: "nowrap" }}>
-                          {correcting ? "Aplicando..." : "Aplicar coordenada"}
-                        </button>
-                      </div>
+                      </p>
                     </div>
-
-                    {report.contractGeo.distance !== null && report.contractGeo.distance !== undefined ? (
-                      <div className="geo-visual-block">
-                        <DistanceBanner label="Distância: residência do cliente → local declarado da assinatura" km={report.contractGeo.distance} />
-                        <GeoMap
-                          home={report.home.geo}
-                          sign={{ lat: report.contractGeo.lat, lon: report.contractGeo.lon }}
-                          distanceKm={report.contractGeo.distance}
-                          riskColor={riskFromDistance(report.contractGeo.distance).color}
-                        />
-                        <div className="note" style={{ borderLeftColor: "var(--label)", background: "rgba(133,149,168,0.07)" }}>
-                          A distância isolada não determina fraude. Deslocamentos compatíveis com a rotina do cliente, como ir da zona rural à capital do estado, podem ser plenamente legítimos. Este resultado deve ser confrontado com a entrevista do cliente, com a data e hora da assinatura e com a localização do correspondente bancário antes de qualquer conclusão sobre irregularidade.
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="note" style={{ borderLeftColor: "var(--warn)", background: "rgba(242,176,61,0.07)" }}>
-                        Há geolocalização declarada no contrato, mas o endereço residencial não pôde ser geocodificado. Informe o endereço residencial do cliente na tela inicial para que a distância seja calculada.
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <div className="note" style={{ borderLeftColor: "var(--muted)", background: "rgba(133,149,168,0.07)" }}>
-                    {report.geoDeclaredPresent
-                      ? "O documento indica geolocalização da assinatura, mas não foi possível obter coordenadas válidas nem geocodificar o endereço declarado."
-                      : "Não foi localizada geolocalização (coordenadas GPS) declarada no log de assinatura deste documento. Nada a confrontar nesta seção."}
-                  </div>
-                )}
-              </Section>
-
-              {/* §6 IP */}
-              <Section title={`§ 6 · Endereços IP e geolocalização (${report.ipAnalysis.length} encontrado(s))`}>
-                {report.ipAnalysis.length === 0 ? (
-                  <div style={{ fontSize: 13, color: "var(--muted)", textAlign: "center", padding: 18 }}>
-                    Nenhum endereço IP identificado no documento analisado.
-                  </div>
-                ) : (
-                  <>
-                    <div className="sub-head">
-                      Referência das distâncias: {report.home.query ? `residência do cliente (${report.home.source})` : "endereço residencial não informado"}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input
+                        type="text"
+                        value={correctCoord}
+                        onChange={(e) => setCorrectCoord(e.target.value)}
+                        placeholder="Ex.: -5.0951, -42.8100"
+                        className={`${inputBase} min-w-[200px] flex-1 py-2`}
+                      />
+                      <button
+                        type="button"
+                        className={btnPrimary}
+                        onClick={handleGeoCorrect}
+                        disabled={correcting}
+                      >
+                        {correcting && <Loader2 className="h-4 w-4 animate-spin" />}
+                        {correcting ? "Aplicando..." : "Aplicar coordenada"}
+                      </button>
                     </div>
-                    {report.contractGeo && report.ipAnalysis.some((ip) => ip.distanceToSignature != null) && (
-                      <div className="note" style={{ borderLeftColor: "var(--label)", background: "rgba(133,149,168,0.07)" }}>
-                        Cada IP é confrontado com dois pontos: a residência do cliente e a geolocalização declarada da assinatura. A geolocalização por IP é de nível de operadora (margem de dezenas de quilômetros; VPN/proxy podem distorcê-la), então a divergência entre a origem do IP e o local declarado da assinatura é indício de larga escala — GPS potencialmente forjado ou ato praticado por terceiro — e não uma medida exata.
-                      </div>
+                  </div>
+
+                  {report.contractGeo.distance !== null && report.contractGeo.distance !== undefined ? (
+                    <div data-geo-visual className="mt-4 space-y-3">
+                      <DistanceBanner
+                        label="Distância: residência do cliente → local declarado da assinatura"
+                        km={report.contractGeo.distance}
+                      />
+                      <GeoMap
+                        home={report.home.geo}
+                        sign={{ lat: report.contractGeo.lat, lon: report.contractGeo.lon }}
+                        distanceKm={report.contractGeo.distance}
+                        riskColor={riskFromDistance(report.contractGeo.distance).color}
+                      />
+                      <Note>
+                        A distância isolada não determina fraude. Deslocamentos compatíveis com a
+                        rotina do cliente, como ir da zona rural à capital do estado, podem ser
+                        plenamente legítimos. Este resultado deve ser confrontado com a entrevista do
+                        cliente, com a data e hora da assinatura e com a localização do
+                        correspondente bancário antes de qualquer conclusão sobre irregularidade.
+                      </Note>
+                    </div>
+                  ) : (
+                    <Note tone="warn">
+                      Há geolocalização declarada no contrato, mas o endereço residencial não pôde
+                      ser geocodificado. Informe o endereço residencial do cliente na tela inicial
+                      para que a distância seja calculada.
+                    </Note>
+                  )}
+                </>
+              ) : (
+                <Note>
+                  {report.geoDeclaredPresent
+                    ? "O documento indica geolocalização da assinatura, mas não foi possível obter coordenadas válidas nem geocodificar o endereço declarado."
+                    : "Não foi localizada geolocalização (coordenadas GPS) declarada no log de assinatura deste documento. Nada a confrontar nesta seção."}
+                </Note>
+              )}
+            </Section>
+
+            {/* §6 */}
+            <Section
+              title={`§ 6 · Endereços IP e geolocalização (${report.ipAnalysis.length} encontrado(s))`}
+            >
+              {report.ipAnalysis.length === 0 ? (
+                <p className="py-6 text-center text-[13px] text-zinc-500">
+                  Nenhum endereço IP identificado no documento analisado.
+                </p>
+              ) : (
+                <>
+                  <SubHead>
+                    Referência das distâncias:{" "}
+                    {report.home.query
+                      ? `residência do cliente (${report.home.source})`
+                      : "endereço residencial não informado"}
+                  </SubHead>
+                  {report.contractGeo &&
+                    report.ipAnalysis.some((ip) => ip.distanceToSignature != null) && (
+                      <Note>
+                        Cada IP é confrontado com dois pontos: a residência do cliente e a
+                        geolocalização declarada da assinatura. A geolocalização por IP é de nível de
+                        operadora (margem de dezenas de quilômetros; VPN/proxy podem distorcê-la),
+                        então a divergência entre a origem do IP e o local declarado da assinatura é
+                        indício de larga escala — GPS potencialmente forjado ou ato praticado por
+                        terceiro — e não uma medida exata.
+                      </Note>
                     )}
+                  <div className="mt-3 space-y-3">
                     {report.ipAnalysis.map((ip, i) => {
                       const risk = riskFromDistance(ip.distance);
                       return (
-                        <div key={i} className="ip-block" style={{ border: `1px solid ${risk.color}40`, background: risk.bg }}>
-                          <div className="ip-head">
-                            <div className="ip-id" style={{ color: risk.color }}>IP #{i + 1} · {ip.endereco}</div>
+                        <div
+                          key={i}
+                          data-report-block
+                          className="rounded-xl border p-4"
+                          style={{ borderColor: `${risk.color}40`, background: risk.bg }}
+                        >
+                          <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+                            <div
+                              className="font-mono text-[13px] font-bold"
+                              style={{ color: risk.color }}
+                            >
+                              IP #{i + 1} · {ip.endereco}
+                            </div>
                             <Badge label={risk.label} color={risk.color} />
                           </div>
-                          {ip.contexto && <div className="ip-ctx">Contexto: {ip.contexto}</div>}
+                          {ip.contexto && (
+                            <p className="mb-2 text-[12px] text-zinc-500">Contexto: {ip.contexto}</p>
+                          )}
 
                           {ip.geo ? (
                             <>
@@ -766,34 +1001,61 @@ export default function Analyze() {
                                 ["Cidade", ip.geo.city],
                                 ["Provedor (ISP / ASN)", ip.geo.isp],
                                 ["Fuso horário", ip.geo.timezone],
-                              ].map(([lbl, val]) => <Row key={lbl} label={lbl} value={val} />)}
-                              <Row label="Coordenadas do IP" value={`${ip.geo.lat?.toFixed(7)}, ${ip.geo.lon?.toFixed(7)}`} mono />
+                              ].map(([lbl, val]) => (
+                                <Row key={lbl} label={lbl} value={val} />
+                              ))}
+                              <Row
+                                label="Coordenadas do IP"
+                                value={`${ip.geo.lat?.toFixed(7)}, ${ip.geo.lon?.toFixed(7)}`}
+                                mono
+                              />
                               {ip.distance !== null ? (
-                                <div className="row">
-                                  <span className="row-label">Distância à residência do cliente</span>
-                                  <span className="row-value" style={{ color: risk.color, fontWeight: 700 }}>{ip.distance.toFixed(2)} km</span>
+                                <div
+                                  data-report-block
+                                  className="flex flex-wrap items-baseline justify-between gap-3 border-b border-surface-border/60 py-2.5"
+                                >
+                                  <span className="text-[13px] text-zinc-400">
+                                    Distância à residência do cliente
+                                  </span>
+                                  <span
+                                    className="text-[13px] font-bold tabular-nums"
+                                    style={{ color: risk.color }}
+                                  >
+                                    {ip.distance.toFixed(2)} km
+                                  </span>
                                 </div>
                               ) : (
-                                <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 8 }}>
-                                  Endereço residencial não geocodificado. Distância indisponível para este IP.
-                                </div>
+                                <p className="mt-2 text-[12px] text-zinc-500">
+                                  Endereço residencial não geocodificado. Distância indisponível para
+                                  este IP.
+                                </p>
                               )}
-                              {ip.distanceToSignature !== null && ip.distanceToSignature !== undefined && (() => {
-                                const compat = ipSignatureCompat(ip.distanceToSignature);
-                                return (
-                                  <div className="row">
-                                    <span className="row-label">IP × geolocalização declarada da assinatura</span>
-                                    <span className="row-value" style={{ color: compat.color, fontWeight: 700 }}>
-                                      {ip.distanceToSignature.toFixed(2)} km · {compat.label}
-                                    </span>
-                                  </div>
-                                );
-                              })()}
+                              {ip.distanceToSignature !== null &&
+                                ip.distanceToSignature !== undefined &&
+                                (() => {
+                                  const compat = ipSignatureCompat(ip.distanceToSignature);
+                                  return (
+                                    <div
+                                      data-report-block
+                                      className="flex flex-wrap items-baseline justify-between gap-3 border-b border-surface-border/60 py-2.5"
+                                    >
+                                      <span className="text-[13px] text-zinc-400">
+                                        IP × geolocalização declarada da assinatura
+                                      </span>
+                                      <span
+                                        className="text-[13px] font-bold tabular-nums"
+                                        style={{ color: compat.color }}
+                                      >
+                                        {ip.distanceToSignature.toFixed(2)} km · {compat.label}
+                                      </span>
+                                    </div>
+                                  );
+                                })()}
                             </>
                           ) : (
-                            <div style={{ fontSize: 13, color: "var(--muted)", padding: "6px 0" }}>
+                            <p className="py-1.5 text-[13px] text-zinc-500">
                               Geolocalização indisponível para este endereço IP.
-                            </div>
+                            </p>
                           )}
 
                           {ip.data_hora && <Row label="Data / hora registrada" value={ip.data_hora} />}
@@ -801,157 +1063,188 @@ export default function Analyze() {
                         </div>
                       );
                     })}
+                  </div>
+                </>
+              )}
+            </Section>
+
+            {/* §7 */}
+            {report.extracted.evidencias_irregularidade?.length > 0 && (
+              <Section title="§ 7 · Evidências de irregularidade" danger>
+                {report.extracted.evidencias_irregularidade.map((ev, i) => (
+                  <Flag key={i} tone="danger">{ev}</Flag>
+                ))}
+              </Section>
+            )}
+
+            {/* §8 */}
+            {report.extracted.observacoes_periciais && (
+              <Section title="§ 8 · Observações periciais complementares">
+                <p className="text-[13.5px] leading-relaxed text-zinc-300">
+                  {report.extracted.observacoes_periciais}
+                </p>
+              </Section>
+            )}
+
+            {/* §9 */}
+            <Section title="§ 9 · Fundamentação normativa aplicável">
+              {(() => {
+                const ctr = report.extracted.contrato || {};
+                const declaredHash = report.extracted.assinatura?.hash_documento_assinado;
+                const clsHash = declaredHash ? classifyHashString(declaredHash) : null;
+                const hashDefect = !!(clsHash && !clsHash.isHash);
+                const cetPresent = !!(ctr.cet_mensal || ctr.cet_anual);
+                const geoRisk =
+                  (report.contractGeo?.distance != null && report.contractGeo.distance >= 300) ||
+                  report.ipAnalysis.some((ip) => ip.distance != null && ip.distance >= 300);
+
+                const destaques = [];
+                if (hashDefect) destaques.push("defeito formal de integridade do documento");
+                if (cetPresent) destaques.push("informação e consistência do CET");
+                destaques.push("validade da assinatura eletrônica e ônus da prova");
+                if (geoRisk) destaques.push("incompatibilidade geográfica do ato");
+
+                const groups = [
+                  ["Relação de consumo e dever de informação", [
+                    ["CDC (Lei 8.078/1990), art. 6º, III", "Direito do consumidor à informação adequada, clara e ostensiva sobre o produto de crédito, seus riscos e seu preço."],
+                    ["CDC, art. 46", "O contrato não obriga o consumidor que não teve conhecimento prévio de seu conteúdo ou cujos termos sejam de difícil compreensão."],
+                    ["CDC, art. 52", "No fornecimento de crédito, a instituição deve informar previamente preço, montante dos juros, acréscimos, número e periodicidade das prestações e a soma total a pagar."],
+                    ["CDC, art. 51, IV e § 1º", "Nulidade de cláusulas que coloquem o consumidor em desvantagem exagerada ou incompatíveis com a boa-fé."],
+                    ["Súmula 297 do STJ", "O Código de Defesa do Consumidor é aplicável às instituições financeiras."],
+                  ]],
+                  ["Crédito consignado e benefício do INSS", [
+                    ["Lei 10.820/2003 e Decreto 4.840/2003", "Disciplinam a autorização e os limites do desconto de prestações de empréstimo consignado em folha de pagamento e em benefício previdenciário."],
+                    ["Lei 8.213/1991, art. 115", "Define as hipóteses e os limites de desconto sobre o valor do benefício previdenciário."],
+                    ["Normas do INSS sobre consignações (Instrução Normativa vigente) e Resoluções do CNPS", "Regulam margem consignável, formalização e averbação. Número da IN vigente: verificar conforme a data do contrato."],
+                  ]],
+                  ["Custo Efetivo Total (CET)", [
+                    ["Resolução CMN 4.881/2020, art. 2º", "Define o CET como a taxa que representa, de forma consolidada, todos os encargos e despesas da operação."],
+                    ["Resolução CMN 4.881/2020, art. 7º", "Obriga a instituição a informar o CET previamente à contratação e a apresentar o demonstrativo de cálculo ao tomador."],
+                    ["CDC, art. 52, c/c Resolução CMN 4.881/2020", "A ausência, a incorreção ou a inconsistência do CET frente à taxa de juros caracteriza falha no dever de informação."],
+                  ]],
+                  ["Assinatura eletrônica e ônus da prova", [
+                    ["MP 2.200-2/2001, art. 10, § 2º", "Admite outros meios de comprovação de autoria e integridade, além da certificação ICP-Brasil."],
+                    ["Lei 14.063/2020", "Classifica as assinaturas em simples, avançada e qualificada, todas com validade jurídica conforme o grau de segurança."],
+                    ["STJ, REsp 2.159.442 e REsp 2.205.708", "A ausência de certificação ICP-Brasil não invalida, por si só, a assinatura, desde que comprovadas autoria e integridade."],
+                    ["STJ, Tema 1.061, c/c CPC, art. 373", "Impugnada a assinatura em contrato bancário, cabe à instituição financeira comprovar a autenticidade e a integridade do documento."],
+                  ]],
+                  ["Vícios contratuais e boa-fé", [
+                    ["CC (Lei 10.406/2002), arts. 138, 145 e 157", "Erro, dolo e lesão como vícios do consentimento aptos a invalidar o negócio jurídico."],
+                    ["CC, art. 422", "Dever de probidade e boa-fé objetiva na conclusão e na execução do contrato."],
+                    ["CDC, arts. 54-A a 54-G (Lei 14.181/2021)", "Prevenção e tratamento do superendividamento e do crédito responsável."],
+                    ["Súmula 479 do STJ", "Responsabilidade objetiva da instituição por fraudes e delitos de terceiros no âmbito das operações bancárias."],
+                  ]],
+                  ["Proteção de dados (geolocalização e logs)", [
+                    ["LGPD (Lei 13.709/2018), arts. 5º e 7º", "Coordenadas de geolocalização e registros de IP são dados pessoais; seu tratamento exige base legal e pode ser objeto de verificação probatória."],
+                  ]],
+                ];
+
+                return (
+                  <>
+                    <Note tone="info">
+                      Achados deste laudo com maior aderência normativa: {destaques.join("; ")}.
+                    </Note>
+                    {groups.map(([title, entries]) => (
+                      <div key={title}>
+                        <SubHead>{title}</SubHead>
+                        {entries.map(([disp, sint]) => (
+                          <Norm key={disp} dispositivo={disp} sintese={sint} />
+                        ))}
+                      </div>
+                    ))}
+                    <Note>
+                      A fundamentação acima é referencial e deve ser ajustada ao caso concreto e à
+                      data da contratação. A indicação dos dispositivos não dispensa a conferência da
+                      redação vigente de cada norma no momento do contrato.
+                    </Note>
                   </>
-                )}
-              </Section>
+                );
+              })()}
+            </Section>
 
-              {/* §7 */}
-              {report.extracted.evidencias_irregularidade?.length > 0 && (
-                <Section title="§ 7 · Evidências de irregularidade" danger>
-                  {report.extracted.evidencias_irregularidade.map((ev, i) => (
-                    <div key={i} className="flag"><b>▸</b><span>{ev}</span></div>
-                  ))}
-                </Section>
-              )}
+            {/* Aviso legal */}
+            <div
+              data-report-block
+              className="rounded-2xl border border-surface-border bg-surface/30 p-5 text-[11.5px] leading-relaxed text-zinc-500"
+            >
+              AVISO LEGAL: Este laudo foi gerado automaticamente pelo sistema ForenseDoc (Ronney
+              Menezes Advocacia, OAB/PI 15.508 · OAB/MA 26.102-A) para fins de análise jurídica
+              preliminar. Os hashes criptográficos SHA-256 e SHA-1 foram calculados pelo servidor
+              sobre o arquivo original recebido (NIST FIPS 180-4). A geolocalização de IPs é
+              fornecida por serviço de terceiros (ipapi.co) e possui margem de erro inerente;
+              endereços de ISPs e VPNs podem não refletir a localização física real do usuário. A
+              geolocalização declarada da assinatura é extraída do próprio documento e a
+              geocodificação de endereços usa o serviço OpenStreetMap Nominatim. A fórmula de
+              Haversine calcula a distância geodésica sobre a superfície esférica terrestre. A
+              distância geográfica, isoladamente, não constitui prova de fraude e deve ser ponderada
+              com o contexto fático. Este documento deve ser complementado por análise pericial
+              humana qualificada antes de ser utilizado como prova técnica definitiva nos autos.
+              Gerado em {report.timestamp}.
+            </div>
+          </div>
 
-              {/* §8 */}
-              {report.extracted.observacoes_periciais && (
-                <Section title="§ 8 · Observações periciais complementares">
-                  <div style={{ fontSize: 13.5, color: "#c2cedb", lineHeight: 1.75 }}>{report.extracted.observacoes_periciais}</div>
-                </Section>
-              )}
+          {/* Ações */}
+          <div className="flex flex-wrap justify-center gap-3">
+            <button
+              type="button"
+              className={btnPrimary}
+              onClick={handleServerPdf}
+              disabled={serverPdfBusy || !report.analysisId}
+            >
+              {serverPdfBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              {serverPdfBusy ? "Gerando laudo..." : "Baixar laudo (PDF)"}
+            </button>
+            <button
+              type="button"
+              className={btnGhost}
+              onClick={() => exportReportPDF(setPdfBusy, setPdfDownload)}
+              disabled={pdfBusy}
+            >
+              {pdfBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileDown className="h-4 w-4" />}
+              {pdfBusy ? "Gerando prévia..." : "Prévia visual (navegador)"}
+            </button>
+            <button type="button" className={btnGhost} onClick={reset} disabled={pdfBusy}>
+              <RotateCcw className="h-4 w-4" /> Analisar novo contrato
+            </button>
+          </div>
 
-              {/* §9 Fundamentação normativa */}
-              <Section title="§ 9 · Fundamentação normativa aplicável">
-                {(() => {
-                  const ctr = report.extracted.contrato || {};
-                  const declaredHash = report.extracted.assinatura?.hash_documento_assinado;
-                  const clsHash = declaredHash ? classifyHashString(declaredHash) : null;
-                  const hashDefect = !!(clsHash && !clsHash.isHash);
-                  const cetPresent = !!(ctr.cet_mensal || ctr.cet_anual);
-                  const geoRisk =
-                    (report.contractGeo?.distance != null && report.contractGeo.distance >= 300) ||
-                    report.ipAnalysis.some((ip) => ip.distance != null && ip.distance >= 300);
-
-                  const destaques = [];
-                  if (hashDefect) destaques.push("defeito formal de integridade do documento");
-                  if (cetPresent) destaques.push("informação e consistência do CET");
-                  destaques.push("validade da assinatura eletrônica e ônus da prova");
-                  if (geoRisk) destaques.push("incompatibilidade geográfica do ato");
-
-                  const groups = [
-                    ["Relação de consumo e dever de informação", [
-                      ["CDC (Lei 8.078/1990), art. 6º, III", "Direito do consumidor à informação adequada, clara e ostensiva sobre o produto de crédito, seus riscos e seu preço."],
-                      ["CDC, art. 46", "O contrato não obriga o consumidor que não teve conhecimento prévio de seu conteúdo ou cujos termos sejam de difícil compreensão."],
-                      ["CDC, art. 52", "No fornecimento de crédito, a instituição deve informar previamente preço, montante dos juros, acréscimos, número e periodicidade das prestações e a soma total a pagar."],
-                      ["CDC, art. 51, IV e § 1º", "Nulidade de cláusulas que coloquem o consumidor em desvantagem exagerada ou incompatíveis com a boa-fé."],
-                      ["Súmula 297 do STJ", "O Código de Defesa do Consumidor é aplicável às instituições financeiras."],
-                    ]],
-                    ["Crédito consignado e benefício do INSS", [
-                      ["Lei 10.820/2003 e Decreto 4.840/2003", "Disciplinam a autorização e os limites do desconto de prestações de empréstimo consignado em folha de pagamento e em benefício previdenciário."],
-                      ["Lei 8.213/1991, art. 115", "Define as hipóteses e os limites de desconto sobre o valor do benefício previdenciário."],
-                      ["Normas do INSS sobre consignações (Instrução Normativa vigente) e Resoluções do CNPS", "Regulam margem consignável, formalização e averbação. Número da IN vigente: verificar conforme a data do contrato."],
-                    ]],
-                    ["Custo Efetivo Total (CET)", [
-                      ["Resolução CMN 4.881/2020, art. 2º", "Define o CET como a taxa que representa, de forma consolidada, todos os encargos e despesas da operação."],
-                      ["Resolução CMN 4.881/2020, art. 7º", "Obriga a instituição a informar o CET previamente à contratação e a apresentar o demonstrativo de cálculo ao tomador."],
-                      ["CDC, art. 52, c/c Resolução CMN 4.881/2020", "A ausência, a incorreção ou a inconsistência do CET frente à taxa de juros caracteriza falha no dever de informação."],
-                    ]],
-                    ["Assinatura eletrônica e ônus da prova", [
-                      ["MP 2.200-2/2001, art. 10, § 2º", "Admite outros meios de comprovação de autoria e integridade, além da certificação ICP-Brasil."],
-                      ["Lei 14.063/2020", "Classifica as assinaturas em simples, avançada e qualificada, todas com validade jurídica conforme o grau de segurança."],
-                      ["STJ, REsp 2.159.442 e REsp 2.205.708", "A ausência de certificação ICP-Brasil não invalida, por si só, a assinatura, desde que comprovadas autoria e integridade."],
-                      ["STJ, Tema 1.061, c/c CPC, art. 373", "Impugnada a assinatura em contrato bancário, cabe à instituição financeira comprovar a autenticidade e a integridade do documento."],
-                    ]],
-                    ["Vícios contratuais e boa-fé", [
-                      ["CC (Lei 10.406/2002), arts. 138, 145 e 157", "Erro, dolo e lesão como vícios do consentimento aptos a invalidar o negócio jurídico."],
-                      ["CC, art. 422", "Dever de probidade e boa-fé objetiva na conclusão e na execução do contrato."],
-                      ["CDC, arts. 54-A a 54-G (Lei 14.181/2021)", "Prevenção e tratamento do superendividamento e do crédito responsável."],
-                      ["Súmula 479 do STJ", "Responsabilidade objetiva da instituição por fraudes e delitos de terceiros no âmbito das operações bancárias."],
-                    ]],
-                    ["Proteção de dados (geolocalização e logs)", [
-                      ["LGPD (Lei 13.709/2018), arts. 5º e 7º", "Coordenadas de geolocalização e registros de IP são dados pessoais; seu tratamento exige base legal e pode ser objeto de verificação probatória."],
-                    ]],
-                  ];
-
-                  return (
-                    <>
-                      <div className="note" style={{ marginTop: 0 }}>
-                        Achados deste laudo com maior aderência normativa: {destaques.join("; ")}.
-                      </div>
-                      {groups.map(([title, entries]) => (
-                        <div key={title}>
-                          <div className="sub-head">{title}</div>
-                          {entries.map(([disp, sint]) => (
-                            <div key={disp} className="norm">
-                              <div className="norm-disp">{disp}</div>
-                              <div className="norm-sint">{sint}</div>
-                            </div>
-                          ))}
-                        </div>
-                      ))}
-                      <div className="note" style={{ borderLeftColor: "var(--muted)", background: "rgba(133,149,168,0.07)" }}>
-                        A fundamentação acima é referencial e deve ser ajustada ao caso concreto e à data da contratação. A indicação dos dispositivos não dispensa a conferência da redação vigente de cada norma no momento do contrato.
-                      </div>
-                    </>
-                  );
-                })()}
-              </Section>
-
-              {/* Legal */}
-              <div className="legal">
-                AVISO LEGAL: Este laudo foi gerado automaticamente pelo sistema ForenseDoc (Ronney Menezes Advocacia, OAB/PI 15.508 · OAB/MA 26.102-A) para fins de análise jurídica preliminar. Os hashes criptográficos SHA-256 e SHA-1 foram calculados pelo servidor sobre o arquivo original recebido (NIST FIPS 180-4). A geolocalização de IPs é fornecida por serviço de terceiros (ipapi.co) e possui margem de erro inerente; endereços de ISPs e VPNs podem não refletir a localização física real do usuário. A geolocalização declarada da assinatura é extraída do próprio documento e a geocodificação de endereços usa o serviço OpenStreetMap Nominatim. A fórmula de Haversine calcula a distância geodésica sobre a superfície esférica terrestre. A distância geográfica, isoladamente, não constitui prova de fraude e deve ser ponderada com o contexto fático. Este documento deve ser complementado por análise pericial humana qualificada antes de ser utilizado como prova técnica definitiva nos autos. Gerado em {report.timestamp}.
-              </div>
-
-              </div>
-
-              <div style={{ display: "flex", justifyContent: "center", gap: 12, flexWrap: "wrap", marginTop: 36 }}>
-                <button className="btn btn-primary" onClick={handleServerPdf} disabled={serverPdfBusy || !report.analysisId}>
-                  {serverPdfBusy ? "Gerando laudo..." : "Baixar laudo (PDF)"}
-                </button>
-                <button className="btn" onClick={() => exportReportPDF(setPdfBusy, setPdfDownload)} disabled={pdfBusy}>
-                  {pdfBusy ? "Gerando prévia..." : "Prévia visual (navegador)"}
-                </button>
-                <button className="btn" onClick={reset} disabled={pdfBusy}>Analisar novo contrato</button>
-              </div>
-              {pdfDownload && (
-                <div className="card" style={{ maxWidth: 820, margin: "22px auto 0", borderColor: "rgba(61,220,151,0.32)", background: "rgba(61,220,151,0.05)" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 14, flexWrap: "wrap", marginBottom: 14 }}>
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 800, color: "var(--ok)", letterSpacing: "0.04em", textTransform: "uppercase" }}>
-                        PDF pronto para salvar
-                      </div>
-                      <div style={{ fontSize: 12.5, color: "var(--label)", marginTop: 4 }}>
-                        {pdfDownload.filename} · {pdfDownload.sizeKB} KB
-                      </div>
+          {pdfDownload && (
+            <div className="mx-auto w-full max-w-4xl rounded-2xl border border-emerald-500/25 bg-emerald-500/[0.05] p-5">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <FileText className="h-5 w-5 text-emerald-500" />
+                  <div>
+                    <div className="text-[13px] font-bold uppercase tracking-wider text-emerald-500">
+                      PDF pronto para salvar
                     </div>
-                    <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                      <a className="btn btn-primary" href={pdfDownload.url} download={pdfDownload.filename} style={{ textDecoration: "none" }}>
-                        Baixar PDF
-                      </a>
-                      <a className="btn" href={pdfDownload.url} target="_blank" rel="noopener noreferrer" style={{ textDecoration: "none" }}>
-                        Abrir PDF
-                      </a>
+                    <div className="mt-0.5 text-[12.5px] text-zinc-400">
+                      {pdfDownload.filename} · {pdfDownload.sizeKB} KB
                     </div>
                   </div>
-                  <iframe
-                    title="Prévia do PDF gerado"
-                    src={pdfDownload.url}
-                    style={{
-                      width: "100%",
-                      height: 520,
-                      border: "1px solid var(--line)",
-                      borderRadius: 8,
-                      background: "#f8f6f1",
-                    }}
-                  />
                 </div>
-              )}
+                <div className="flex flex-wrap gap-2.5">
+                  <a className={btnPrimary} href={pdfDownload.url} download={pdfDownload.filename}>
+                    <Download className="h-4 w-4" /> Baixar PDF
+                  </a>
+                  <a
+                    className={btnGhost}
+                    href={pdfDownload.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Abrir PDF
+                  </a>
+                </div>
+              </div>
+              <iframe
+                title="Prévia do PDF gerado"
+                src={pdfDownload.url}
+                className="h-[520px] w-full rounded-lg border border-surface-border bg-zinc-100"
+              />
             </div>
           )}
-
         </div>
-      </div>
-    </>
+      )}
+    </div>
   );
 }

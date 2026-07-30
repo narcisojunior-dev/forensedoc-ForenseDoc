@@ -24,7 +24,7 @@ vi.mock("../src/utils/prisma.js", () => ({
 vi.mock("../src/utils/redis.js", () => ({ redis: { get: vi.fn(), setex: vi.fn() } }));
 vi.mock("../src/services/notificationService.js", () => ({ enqueueEmail: vi.fn() }));
 
-const { refresh } = await import("../src/controllers/authController.js");
+const { refresh, REFRESH_COOKIE } = await import("../src/controllers/authController.js");
 
 function mockRes() {
   return {
@@ -46,7 +46,7 @@ function mockRes() {
   };
 }
 
-const req = () => ({ cookies: { refreshToken: "token-valido" }, body: {}, headers: {} });
+const req = () => ({ cookies: { [REFRESH_COOKIE]: "token-valido" }, body: {}, headers: {} });
 
 /** Token válido e não expirado, variando só o estado do usuário/escritório. */
 function storedToken(userOverrides = {}, tenantOverrides = {}) {
