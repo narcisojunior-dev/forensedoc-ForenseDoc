@@ -31,8 +31,24 @@ const OCR_MAX_PAGES = Number(process.env.OCR_MAX_PAGES || 20);
  * O default agora DERIVA do número de páginas, com folga para máquina mais lenta
  * que a de medição e um piso para documentos curtos. Continua sobrescrevível por
  * `OCR_TIMEOUT_MS` quando a infraestrutura exigir outro valor.
+ *
+ * ─── O primeiro valor não tinha margem, e o teste de carga provou ────────────
+ *
+ * A estimativa inicial era 6 s por página, tirada da MÉDIA de cinco páginas. Com
+ * 20 páginas isso dava 120 s de orçamento, e o teste de carga com documento
+ * escaneado real (scripts/testeDeCarga.mjs) mediu 105,3 s numa execução e
+ * ESTOUROU o prazo em outra, com a mesma carga na mesma máquina.
+ *
+ * O erro foi dimensionar pela média: um prazo colocado sobre a média falha
+ * metade das vezes por definição, e a falha aqui não é um retry, é o crédito
+ * estornado com "não foi possível processar seu documento".
+ *
+ * 9 s por página dá cerca de 70% de folga sobre a média medida. A margem também
+ * cobre a diferença de hardware: a medição saiu numa máquina de desenvolvimento
+ * com 10 núcleos, e o servidor de produção tende a ser mais lento, além de estar
+ * processando outras análises ao mesmo tempo.
  */
-const CUSTO_ESTIMADO_POR_PAGINA_MS = 6_000; // 5s de OCR + 0,5s de raster + folga
+const CUSTO_ESTIMADO_POR_PAGINA_MS = Number(process.env.OCR_COST_PER_PAGE_MS) || 9_000;
 
 /**
  * Orçamento de tempo do OCR, em milissegundos.

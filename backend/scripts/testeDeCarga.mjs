@@ -52,9 +52,11 @@ async function analisar() {
 
 const mb = (b) => (b / 1024 / 1024).toFixed(0);
 const pct = (v, p) => {
+  if (!v.length) return null;
   const ord = [...v].sort((a, b) => a - b);
   return ord[Math.min(ord.length - 1, Math.floor((ord.length * p) / 100))];
 };
+const seg = (ms) => (ms == null ? "—" : (ms / 1000).toFixed(1) + "s");
 
 console.log(`arquivo   ${arquivo} (${mb(pdf.length)} MB)`);
 console.log(`host      ${os.cpus().length} núcleos, ${mb(os.totalmem())} MB de RAM`);
@@ -68,15 +70,21 @@ let melhorConc = 1;
 
 for (const c of listaConc.split(",").map(Number)) {
   const duracoes = [];
+  // Mediana e p95 de conjunto vazio viravam NaN e escondiam que TUDO falhou.
   let picoHeap = 0;
-  let erros = 0;
+  // Motivo do erro, não só a contagem: a primeira execução deste roteiro
+  // reportou "1 erro(s)" e escondeu QUAL, que era justamente o achado.
+  const erros = new Map();
   const t0 = Date.now();
 
   for (let r = 0; r < Number(repeticoes); r++) {
     const resultados = await Promise.allSettled(Array.from({ length: c }, analisar));
     for (const res of resultados) {
       if (res.status === "fulfilled") duracoes.push(res.value.ms);
-      else erros++;
+      else {
+        const motivo = res.reason?.message || String(res.reason);
+        erros.set(motivo, (erros.get(motivo) || 0) + 1);
+      }
     }
     picoHeap = Math.max(picoHeap, process.memoryUsage().heapUsed);
   }
@@ -90,10 +98,11 @@ for (const c of listaConc.split(",").map(Number)) {
 
   console.log(
     `${String(c).padStart(4)}  ${String(duracoes.length).padStart(8)}  ` +
-      `${String((pct(duracoes, 50) / 1000).toFixed(1) + "s").padStart(7)}  ` +
-      `${String((pct(duracoes, 95) / 1000).toFixed(1) + "s").padStart(6)}  ` +
+      `${seg(pct(duracoes, 50)).padStart(7)}  ` +
+      `${seg(pct(duracoes, 95)).padStart(6)}  ` +
       `${String(vazao.toFixed(1) + "/min").padStart(9)}  ` +
-      `${String(mb(picoHeap) + " MB").padStart(9)}   ${erros ? `${erros} erro(s)` : ""}`
+      `${String(mb(picoHeap) + " MB").padStart(9)}   ` +
+      [...erros].map(([m, n]) => `${n}x ${m}`).join(" | ")
   );
 }
 
