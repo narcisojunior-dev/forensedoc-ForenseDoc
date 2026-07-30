@@ -380,7 +380,24 @@ function sectionGeo(ctx, result, mapBuffer) {
   const home = result.home?.geo;
   if (result.home?.query || home) {
     if (result.home?.query) field(ctx, `Residência (${result.home.source || "referência"})`, result.home.query);
-    if (home?.display) field(ctx, "Coordenada da residência", `${home.display} — precisão ${precisionText(home)}`);
+    // A COORDENADA NUMÉRICA é obrigatória, não o rótulo dela.
+    //
+    // O laudo imprimia apenas `home.display` — que para uma coordenada
+    // confirmada pelo operador é o texto "Coordenada confirmada pelo operador".
+    // O documento afirmava ter uma coordenada de referência sem nunca dizer
+    // QUAL, e todas as distâncias do § 5 derivam desse ponto: sem o valor, o
+    // laudo deixa de ser reproduzível e a conferência por terceiro fica
+    // impossível.
+    if (home && Number.isFinite(home.lat) && Number.isFinite(home.lon)) {
+      field(ctx, "Coordenada da residência", `${home.lat}, ${home.lon}`, { mono: true });
+      field(
+        ctx,
+        "   Origem da coordenada",
+        home.precision === "manual"
+          ? "confirmada pelo operador (padrão-ouro deste laudo)"
+          : `${home.display || "não informada"} — precisão ${precisionText(home)}`
+      );
+    }
     // Aviso explícito quando a residência é só aproximada (nível de cidade):
     // a distância derivada dela não pode ser tratada como exata.
     if (home && (home.precision === "city" || !home.precision)) {
@@ -398,7 +415,7 @@ function sectionGeo(ctx, result, mapBuffer) {
     field(ctx, "Coordenadas", `${cg.lat}, ${cg.lon} — precisão ${precisionText(cg)}`);
     if (cg.distance != null) {
       const r = riskFromDistance(cg.distance);
-      badge(ctx, "Distância assinatura ate residência", `${cg.distance.toFixed(2)} km · ${r.label}`, r.score <= 1);
+      badge(ctx, "Distância entre a assinatura declarada e a residência", `${cg.distance.toFixed(2)} km · ${r.label}`, r.score <= 1);
     }
   }
 

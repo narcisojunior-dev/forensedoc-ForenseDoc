@@ -28,10 +28,10 @@ export function heuristicExtractionFromText(rawText) {
     /\b(PARAN[ÁA]\s*BANCO|PARANABANCO)\b/,
   ]);
   const modalidade =
-    /RMC|RESERVA DE MARGEM|CART[AÃ]O CONSIGNADO/i.test(flat) ? "Cartao Consignado" :
+    /RMC|RESERVA DE MARGEM|CART[AÃ]O CONSIGNADO/i.test(flat) ? "Cartão consignado" :
     /RCC|CART[AÃ]O.*BENEF[IÍ]CIO/i.test(flat) ? "RCC" :
     /FGTS/i.test(flat) ? "FGTS" :
-    /EMPR[ÉE]STIMO|CONSIGNADO/i.test(flat) ? "Emprestimo Pessoal" :
+    /EMPR[ÉE]STIMO|CONSIGNADO/i.test(flat) ? "Empréstimo consignado" :
     null;
   const valorContratado = firstMatch(flat, [
     /(?:valor\s+(?:contratado|liberado|financiado|do\s+cr[eé]dito)|cr[eé]dito)\s*[:\-]?\s*(R\$\s*[\d.]+,\d{2})/i,
