@@ -14,6 +14,7 @@ import {
   updatePlan,
   listAuditLogs,
   listAllPayments,
+  getQueueMetrics,
 } from "../controllers/adminMetricsController.js";
 import { requireAuth, requirePlatformAdmin } from "../middleware/auth.js";
 import { adminIpAllowlist } from "../middleware/adminIpAllowlist.js";
@@ -55,5 +56,9 @@ router.patch("/plans/:id", updatePlan);
 // Auditoria e pagamentos
 router.get("/audit-logs", listAuditLogs);
 router.get("/payments", listAllPayments);
+
+// Operação: estado das filas. Ver comentário em getQueueMetrics sobre por que
+// não fica no /health.
+router.get("/queues", getQueueMetrics);
 
 export default router;

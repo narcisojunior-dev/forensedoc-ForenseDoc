@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Loader2, TrendingUp, Users, FileText, AlertTriangle, Target } from "lucide-react";
 import { api } from "../../lib/axios";
 import { cn } from "../../utils/cn";
+import QueueHealth from "./QueueHealth.jsx";
 
 function money(v) {
   return `R$ ${Number(v).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -123,6 +124,8 @@ export default function AdminDashboard() {
           />
         </div>
       </div>
+
+      <QueueHealth />
 
       {/* Séries mensais — small multiples, escalas independentes */}
       <div className="grid md:grid-cols-2 gap-3">

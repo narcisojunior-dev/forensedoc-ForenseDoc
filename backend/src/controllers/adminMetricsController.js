@@ -2,6 +2,7 @@ import { z } from "zod";
 import { prisma } from "../utils/prisma.js";
 import { countOccupiedSeats } from "./tenantController.js";
 import { parsePagination } from "../utils/pagination.js";
+import { queueMetrics } from "../services/queueMetricsService.js";
 
 /**
  * Métricas e gestão de planos do Admin Panel (Módulo 6 — RF-18/RF-20).
@@ -298,5 +299,29 @@ export async function listAllPayments(req, res) {
     }
     console.error("[AdminMetrics] Erro ao listar pagamentos:", error);
     return res.status(500).json({ error: "Erro interno no servidor." });
+  }
+}
+
+/**
+ * Estado operacional das filas.
+ *
+ * Fica no painel administrativo, e não no /health, por dois motivos. O /health é
+ * público e foi deliberadamente reduzido na auditoria (B4) para não entregar
+ * superfície a quem mapeia o alvo, e profundidade de fila diz a um atacante
+ * exatamente quando o sistema está sob pressão. Além disso, o /health precisa
+ * responder rápido sem tocar em dependência externa, e isto consulta o Redis.
+ *
+ * A rota é a única forma de saber se a concorrência configurada dá conta do
+ * volume. Sem ela, o primeiro sinal de saturação é a reclamação do cliente.
+ */
+export async function getQueueMetrics(_req, res) {
+  try {
+    return res.json(await queueMetrics());
+  } catch (error) {
+    console.error("[AdminMetrics] Erro ao coletar métricas de fila:", error);
+    return res.status(503).json({
+      error: "Não foi possível consultar as filas.",
+      code: "QUEUE_METRICS_UNAVAILABLE",
+    });
   }
 }

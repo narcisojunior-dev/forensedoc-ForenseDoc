@@ -7,6 +7,7 @@ import { processWebhook, suspendIfStillOverdue } from "./jobs/webhookProcessor.j
 import { processAnalysis } from "./jobs/analysisWorker.js";
 import { processEmail } from "./jobs/emailWorker.js";
 import { processRenewalReminders, processOverdueReminders } from "./jobs/reminders.js";
+import { startQueueWatch } from "./services/queueMetricsService.js";
 
 // Reexportadas por compatibilidade com quem já importava daqui.
 export { analysisQueue };
@@ -20,11 +21,10 @@ export { analysisQueue };
  *
  * Os valores abaixo seguem o perfil de cada trabalho:
  *
- * ANÁLISE é limitada por CPU. O OCR usa Tesseract, que satura um núcleo por
- * página, e a rasterização por pdftoppm também. Passar de um job por núcleo não
- * aumenta a vazão: só faz todos ficarem mais lentos ao mesmo tempo, e ainda
- * multiplica o pico de memória. O default é o número de núcleos menos um, com
- * mínimo de 1, deixando folga para o resto do processo.
+ * ANÁLISE é limitada por CPU e por memória. O OCR usa Tesseract, que satura um
+ * núcleo por página, e a rasterização por pdftoppm também. Passar de um job por
+ * núcleo não aumenta a vazão: só faz todos ficarem mais lentos ao mesmo tempo.
+ * O default parte de núcleos menos um, mas com o teto explicado logo abaixo.
  *
  * PAGAMENTO é I/O leve e não pode esperar: são poucos milissegundos de banco por
  * job, e cada segundo de atraso é crédito que o cliente pagou e ainda não
@@ -128,6 +128,10 @@ for (const [chave, nomeFila] of Object.entries(QUEUE_NAMES)) {
 console.log(
   `[ForenseDoc v3.0] Worker iniciado em ${NUCLEOS} núcleo(s). ${workers.length} filas ativas.`
 );
+
+// Vigia a saturação e avisa antes do cliente reclamar. Roda aqui, e não na API,
+// porque a API pode ter várias instâncias e cada uma emitiria o mesmo alerta.
+startQueueWatch();
 
 // ─── Cron Jobs (BullMQ Repeatable Jobs) ──────────────────────────────────────
 // O jobId fixo garante um único agendamento por cron, mesmo com várias
