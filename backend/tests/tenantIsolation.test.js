@@ -29,7 +29,12 @@ vi.mock("../src/services/creditService.js", () => ({
   refundCredit: vi.fn(),
   afterDebitCommit: vi.fn(),
 }));
-vi.mock("../src/queues.js", () => ({ saasQueue: { add: vi.fn() } }));
+vi.mock("../src/queues.js", () => ({
+  analysisQueue: { add: vi.fn() },
+  paymentsQueue: { add: vi.fn() },
+  emailsQueue: { add: vi.fn() },
+  cronsQueue: { add: vi.fn() },
+}));
 vi.mock("../src/utils/lock.js", () => ({
   acquireLock: vi.fn(),
   releaseLock: vi.fn(),

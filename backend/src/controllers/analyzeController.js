@@ -1,8 +1,9 @@
 import crypto from "crypto";
 import { prisma } from "../utils/prisma.js";
 import { debitCredit, refundCredit, afterDebitCommit } from "../services/creditService.js";
-import { saasQueue } from "../queues.js";
+import { analysisQueue } from "../queues.js";
 import { acquireLock, releaseLock, analysisLockKey } from "../utils/lock.js";
+import { ocrBudgetMs } from "../services/ocrService.js";
 import { validatePdfPayload } from "../utils/pdfValidation.js";
 import { buildReportPdf } from "../services/reportPdfService.js";
 import { haversineKm } from "../utils/geoUtils.js";
@@ -22,9 +23,21 @@ function parseCoord(lat, lon) {
   return { lat: la, lon: lo };
 }
 
-// TTL do lock: teto de quanto uma análise pode demorar. Se o worker morrer
-// no meio, o lock expira sozinho e o tenant não fica travado para sempre.
-const ANALYSIS_LOCK_TTL = Math.ceil(Number(process.env.ANALYZE_TIMEOUT_MS || 90_000) / 1000) + 60;
+/*
+ * TTL do lock: teto de quanto uma análise pode demorar. Se o worker morrer no
+ * meio, o lock expira sozinho e o tenant não fica travado para sempre.
+ *
+ * Derivava de `ANALYZE_TIMEOUT_MS`, que é o timeout da REQUISIÇÃO HTTP de
+ * upload, não do processamento. Eram grandezas distintas: a rota responde 202 e
+ * o trabalho continua no worker. Com o orçamento de OCR agora dimensionado pelo
+ * número de páginas (até ~120s), o teto de 150s ficaria abaixo do pior caso, e
+ * um lock expirado permite uma segunda análise do mesmo tenant enquanto a
+ * primeira ainda roda. É justamente o que o mutex existe para impedir.
+ *
+ * Passa a derivar do custo real de processamento, com folga para o restante do
+ * pipeline (extração, geolocalização, persistência).
+ */
+const ANALYSIS_LOCK_TTL = Math.ceil(ocrBudgetMs() / 1000) + 120;
 
 export async function analyzePdf(req, res) {
   const { userId, tenantId } = req.auth;
@@ -82,7 +95,7 @@ export async function analyzePdf(req, res) {
 
     // Enfileira ANTES de responder: se a fila estiver fora do ar, o crédito
     // debitado precisa voltar em vez de deixar a análise presa em PROCESSING.
-    await saasQueue.add(
+    await analysisQueue.add(
       "process-pdf",
       {
         analysisId: analysis.id,
@@ -140,7 +153,14 @@ export async function analyzePdf(req, res) {
 
 export async function getAnalysisStatus(req, res) {
   try {
-    const analysis = await prisma.analysis.findUnique({ where: { id: req.params.id } });
+    // `select` explícito: sem ele o Prisma trazia a linha inteira, INCLUSIVE o
+    // campo `result`, que é o laudo estruturado completo. A tela consulta este
+    // endpoint a cada 2 segundos, então uma análise de 60 segundos carregava o
+    // laudo inteiro do banco 30 vezes para descartar tudo menos duas colunas.
+    const analysis = await prisma.analysis.findUnique({
+      where: { id: req.params.id },
+      select: { tenantId: true, status: true, createdAt: true },
+    });
     if (!analysis || analysis.tenantId !== req.tenantId) {
       return res.status(404).json({ error: "Análise não encontrada." });
     }

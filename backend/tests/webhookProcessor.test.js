@@ -44,7 +44,12 @@ vi.mock("../src/services/creditService.js", () => ({
 }));
 
 vi.mock("../src/services/notificationService.js", () => ({ notify: vi.fn() }));
-vi.mock("../src/queues.js", () => ({ saasQueue: { add: vi.fn() } }));
+vi.mock("../src/queues.js", () => ({
+  analysisQueue: { add: vi.fn() },
+  paymentsQueue: { add: vi.fn() },
+  emailsQueue: { add: vi.fn() },
+  cronsQueue: { add: vi.fn() },
+}));
 
 const creditService = await import("../src/services/creditService.js");
 const { processWebhook } = await import("../src/jobs/webhookProcessor.js");

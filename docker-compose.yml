@@ -12,7 +12,6 @@ services:
   # ── Proxy Reverso / TLS ──────────────────────────────────────
   nginx:
     image: nginx:alpine
-    container_name: forensedoc_nginx
     ports:
       - "80:80"
       - "443:443"
@@ -31,7 +30,6 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: forensedoc_backend
     env_file: ./backend/.env.production
     expose:
       - "8787"
@@ -50,7 +48,17 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: forensedoc_worker
+    # Sem `container_name`: nome fixo impede subir mais de uma réplica, porque
+    # dois containers não podem compartilhar o mesmo nome. Aumentar capacidade
+    # exigia editar este arquivo.
+    #
+    #   docker compose up -d --scale worker=4
+    #
+    # Cada réplica tem a sua própria concorrência por fila (ver src/worker.js),
+    # então a vazão total é réplicas x concorrência. A análise é limitada por
+    # CPU: não adianta passar do número de núcleos do host somados.
+    deploy:
+      replicas: ${WORKER_REPLICAS:-1}
     command: node src/worker.js
     env_file: ./backend/.env.production
     environment:
@@ -68,7 +76,6 @@ services:
   # ── PostgreSQL 16 ─────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
-    container_name: forensedoc_postgres
     env_file: ./backend/.env.production
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-forensedoc_app}
@@ -90,7 +97,6 @@ services:
   # ── Redis 7 ───────────────────────────────────────────────────
   redis:
     image: redis:7-alpine
-    container_name: forensedoc_redis
     command: redis-server --requirepass ${REDIS_PASSWORD} --appendonly yes
     expose:
       - "6379"

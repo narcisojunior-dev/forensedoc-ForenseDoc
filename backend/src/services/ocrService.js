@@ -14,7 +14,42 @@ const OCR_LANG_PATH = resolve(__dirname, "../../ocr/lang-data") + "/";
 const OCR_LANG = process.env.OCR_LANG || "por+eng";
 const OCR_DPI = String(process.env.OCR_DPI || 180);
 const OCR_MAX_PAGES = Number(process.env.OCR_MAX_PAGES || 20);
-const OCR_TIMEOUT_MS = Number(process.env.OCR_TIMEOUT_MS || 60_000);
+
+/**
+ * ─── O orçamento de tempo precisa caber no trabalho prometido ────────────────
+ *
+ * Medição sobre dossiê real, a 180 DPI: rasterização de 529 ms por página e OCR
+ * de aproximadamente 5 segundos por página. Com `OCR_MAX_PAGES=20`, o custo
+ * projetado é de cerca de 112 segundos.
+ *
+ * O timeout era fixo em 60 segundos. Os dois valores eram incompatíveis entre
+ * si: o sistema aceitava 20 páginas e desistia por volta da 11ª, e o cliente
+ * recebia "não foi possível processar seu documento" com o crédito estornado.
+ * Documentos escaneados são justamente os que os bancos entregam, então o caso
+ * que falhava era o caso comum.
+ *
+ * O default agora DERIVA do número de páginas, com folga para máquina mais lenta
+ * que a de medição e um piso para documentos curtos. Continua sobrescrevível por
+ * `OCR_TIMEOUT_MS` quando a infraestrutura exigir outro valor.
+ */
+const CUSTO_ESTIMADO_POR_PAGINA_MS = 6_000; // 5s de OCR + 0,5s de raster + folga
+
+/**
+ * Orçamento de tempo do OCR, em milissegundos.
+ *
+ * Exportado porque o TTL do mutex de análise precisa do MESMO número: se o lock
+ * expirar antes do pior caso de processamento, um segundo job do mesmo tenant
+ * entra enquanto o primeiro ainda roda. Duplicar a regra nos dois lugares faria
+ * os dois valores divergirem no primeiro ajuste de `OCR_MAX_PAGES`.
+ */
+export function ocrBudgetMs() {
+  return (
+    Number(process.env.OCR_TIMEOUT_MS) ||
+    Math.max(60_000, OCR_MAX_PAGES * CUSTO_ESTIMADO_POR_PAGINA_MS)
+  );
+}
+
+const OCR_TIMEOUT_MS = ocrBudgetMs();
 const PDFTOPPM_CANDIDATES = [
   process.env.PDFTOPPM_PATH,
   "pdftoppm",
@@ -48,15 +83,36 @@ export async function extractPdfTextWithOcr(pdfBuffer) {
     return { text: baseText, usedOcr: false, ocrPages: 0 };
   }
 
-  return Promise.race([
-    runOcr(baseText, pdfBuffer),
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error(`OCR timeout após ${OCR_TIMEOUT_MS}ms`)), OCR_TIMEOUT_MS)
-    ),
-  ]);
+  /*
+   * `Promise.race` sozinho não cancela nada: ele resolve a promessa externa e
+   * deixa o Tesseract rodando até terminar por conta própria. Sob carga isso
+   * significa CPU queimada com trabalho cujo resultado já foi descartado,
+   * atrasando os jobs seguintes da fila de análise.
+   *
+   * O objeto `controle` fecha esse buraco por dois caminhos: encerra o worker do
+   * Tesseract assim que o prazo estoura, e marca a flag que faz o laço de
+   * páginas parar em vez de seguir processando o documento inteiro.
+   */
+  const controle = { cancelado: false, worker: null };
+  let timer;
+
+  const prazo = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      controle.cancelado = true;
+      Promise.resolve(controle.worker?.terminate()).catch(() => {});
+      reject(new Error(`OCR timeout após ${OCR_TIMEOUT_MS}ms`));
+    }, OCR_TIMEOUT_MS);
+  });
+
+  try {
+    return await Promise.race([runOcr(baseText, pdfBuffer, controle), prazo]);
+  } finally {
+    clearTimeout(timer);
+    controle.cancelado = true;
+  }
 }
 
-async function runOcr(baseText, pdfBuffer) {
+async function runOcr(baseText, pdfBuffer, controle = { cancelado: false }) {
   const pdftoppm = await findPdftoppm();
   const tempDir = await mkdtemp(join(tmpdir(), "forensedoc-ocr-"));
   let worker = null;
@@ -75,8 +131,13 @@ async function runOcr(baseText, pdfBuffer) {
       .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 
     worker = await createWorker(OCR_LANG, 1, { langPath: OCR_LANG_PATH });
+    controle.worker = worker;
+
     let ocrText = "";
     for (const file of files) {
+      // O prazo pode ter estourado durante a página anterior. Continuar aqui
+      // seria processar um documento inteiro cujo resultado já foi rejeitado.
+      if (controle.cancelado) break;
       const { data } = await worker.recognize(join(tempDir, file));
       ocrText += `\n\n--- OCR ${file} ---\n${data.text || ""}`;
     }
@@ -87,7 +148,9 @@ async function runOcr(baseText, pdfBuffer) {
       ocrPages: files.length,
     };
   } finally {
-    if (worker) await worker.terminate();
+    // O timeout pode já ter encerrado este worker; encerrar de novo lança, e a
+    // exceção aqui mascararia o erro real que levou o fluxo até o `finally`.
+    if (worker) await Promise.resolve(worker.terminate()).catch(() => {});
     await rm(tempDir, { recursive: true, force: true });
   }
 }

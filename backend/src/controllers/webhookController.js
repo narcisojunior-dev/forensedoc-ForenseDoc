@@ -1,5 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
-import { saasQueue } from "../queues.js";
+import { paymentsQueue } from "../queues.js";
 
 /**
  * Compara o token do header com o configurado sem vazar pelo tempo de resposta
@@ -48,7 +48,7 @@ export async function handleAsaasWebhook(req, res) {
   // nunca reenviava — o cliente pagava e não recebia crédito.
   try {
     await withTimeout(
-      saasQueue.add("process-webhook", req.body, {
+      paymentsQueue.add("process-webhook", req.body, {
         attempts: 5,
         backoff: { type: "exponential", delay: 2000 },
       }),

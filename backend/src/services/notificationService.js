@@ -1,5 +1,5 @@
 import { prisma } from "../utils/prisma.js";
-import { saasQueue } from "../queues.js";
+import { emailsQueue } from "../queues.js";
 
 /**
  * Ponto único de emissão de notificações (Módulo 7).
@@ -26,7 +26,7 @@ const EMAIL_JOB_OPTS = {
  */
 export async function enqueueEmail({ to, template, data = {} }) {
   if (!to) return;
-  await saasQueue.add(EMAIL_JOB, { to, template, data }, EMAIL_JOB_OPTS).catch((err) => {
+  await emailsQueue.add(EMAIL_JOB, { to, template, data }, EMAIL_JOB_OPTS).catch((err) => {
     // Nunca derrubar o fluxo do usuário por falha ao enfileirar.
     console.error(`[Notification] Falha ao enfileirar e-mail '${template}':`, err.message);
   });

@@ -1,7 +1,7 @@
 import { prisma } from "../utils/prisma.js";
 import * as creditService from "../services/creditService.js";
 import { notify } from "../services/notificationService.js";
-import { saasQueue } from "../queues.js";
+import { paymentsQueue } from "../queues.js";
 
 export async function processWebhook(job) {
   const { event, payment, subscription } = job.data;
@@ -198,7 +198,7 @@ async function handlePaymentOverdue(payment) {
     .update({ where: { tenantId: tenant.id }, data: { status: "OVERDUE" } })
     .catch(() => {});
 
-  await saasQueue.add(
+  await paymentsQueue.add(
     "suspend-if-overdue",
     { tenantId: tenant.id },
     { delay: 7 * 24 * 60 * 60 * 1000 }
