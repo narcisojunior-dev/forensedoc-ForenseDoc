@@ -350,6 +350,21 @@ model Analysis {
   filenameHash          String // hash SHA-256 do nome do arquivo (não do conteúdo)
   status                AnalysisStatus @default(PROCESSING)
   result                Json? // laudo estruturado (JSONB) — sem dados binários do PDF
+
+  // ── PDF original no armazenamento de objetos ────────────────────────────
+  //
+  // O arquivo saiu do payload do job (que vive no Redis, em memória) e passou
+  // para o R2. Guardar a chave aqui permite regerar o laudo e, principalmente,
+  // permite o EXPURGO ser preciso: a rotina de retenção seleciona por data no
+  // banco em vez de varrer o bucket.
+  //
+  // `pdfPurgedAt` registra a eliminação. Um laudo cujo original já foi apagado
+  // continua íntegro (os hashes estão no `result`), mas quem lê o histórico
+  // precisa saber que o arquivo não está mais disponível, e a data é o que
+  // demonstra o cumprimento da política de retenção.
+  pdfObjectKey          String?
+  pdfPurgedAt           DateTime?
+
   processingStartedAt   DateTime?
   processingCompletedAt DateTime?
   createdAt             DateTime       @default(now())

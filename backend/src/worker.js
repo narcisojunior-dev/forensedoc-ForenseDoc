@@ -8,6 +8,7 @@ import { processAnalysis } from "./jobs/analysisWorker.js";
 import { processEmail } from "./jobs/emailWorker.js";
 import { processRenewalReminders, processOverdueReminders } from "./jobs/reminders.js";
 import { startQueueWatch } from "./services/queueMetricsService.js";
+import { processUploadPurge } from "./jobs/purgeUploads.js";
 
 // Reexportadas por compatibilidade com quem já importava daqui.
 export { analysisQueue };
@@ -86,6 +87,7 @@ const HANDLERS = {
     "expire-credits": () => processCreditExpirations(),
     "renewal-reminders": () => processRenewalReminders(),
     "overdue-reminders": () => processOverdueReminders(),
+    "purge-uploads": () => processUploadPurge(),
   },
 };
 
@@ -143,6 +145,9 @@ const CRONS = [
   { name: "renewal-reminders", pattern: "0 9 * * *", jobId: "cron-renewal-reminders" },
   // Cobra quem está em atraso há 3+ dias, antes da suspensão no 7º dia (M7.3).
   { name: "overdue-reminders", pattern: "30 9 * * *", jobId: "cron-overdue-reminders" },
+  // Elimina o PDF original vencido. Cumprimento da política de retenção: roda
+  // todo dia porque um atraso aqui é dado pessoal guardado além do declarado.
+  { name: "purge-uploads", pattern: "0 3 * * *", jobId: "cron-purge-uploads" },
 ];
 
 for (const cron of CRONS) {

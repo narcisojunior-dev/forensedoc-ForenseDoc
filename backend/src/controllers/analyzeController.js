@@ -10,6 +10,7 @@ import { buildReportPdf } from "../services/reportPdfService.js";
 import { haversineKm } from "../utils/geoUtils.js";
 import { parsePagination } from "../utils/pagination.js";
 import { redis } from "../utils/redis.js";
+import { putPdf, buildKey, deletePdf, isConfigured as r2Configurado } from "../services/objectStorageService.js";
 
 function hashFilename(filename) {
   return crypto.createHash("sha256").update(filename || "").digest("hex");
@@ -70,6 +71,7 @@ export async function analyzePdf(req, res) {
   const { userId, tenantId } = req.auth;
   let lockToken = null;
   let analysis = null;
+  let pdfKey = null;
 
   try {
     const { pdfBase64, filename, homeAddress, homeLat, homeLon } = req.body || {};
@@ -150,6 +152,28 @@ export async function analyzePdf(req, res) {
 
     analysis = debit.created;
 
+    /*
+     * ─── O PDF sai do payload do job ─────────────────────────────────────────
+     *
+     * Enviado ANTES de enfileirar: se o armazenamento falhar, a análise ainda
+     * não foi para a fila e o catch abaixo estorna o crédito. Se fosse depois, o
+     * worker pegaria um job cuja chave não existe.
+     *
+     * `putPdf` devolve null quando o R2 não está configurado ou o envio falha, e
+     * nesse caso o job volta a carregar o base64. É degradação deliberada: pior
+     * consumo de memória é aceitável, análise que não roda não é.
+     */
+    if (r2Configurado()) {
+      pdfKey = await putPdf(buildKey(tenantId, analysis.id), Buffer.from(validation.base64, "base64"));
+      if (pdfKey) {
+        await prisma.analysis
+          .update({ where: { id: analysis.id }, data: { pdfObjectKey: pdfKey } })
+          .catch((err) => console.error("[Analyze] Falha ao gravar a chave do PDF:", err.message));
+      } else {
+        console.warn(`[Analyze] R2 indisponível para ${analysis.id}: job seguirá com base64.`);
+      }
+    }
+
     // Cache e alerta só depois do commit: dentro da transação, um rollback
     // deixaria o cache invalidado e o alerta enviado por um débito desfeito.
     await afterDebitCommit(tenantId, debit.balanceBefore);
@@ -160,7 +184,9 @@ export async function analyzePdf(req, res) {
       "process-pdf",
       {
         analysisId: analysis.id,
-        pdfBase64: validation.base64,
+        // Um OU outro, nunca os dois: enviar os dois anularia o ganho de memória.
+        pdfKey: pdfKey || undefined,
+        pdfBase64: pdfKey ? undefined : validation.base64,
         tenantId,
         userId,
         lockToken,
@@ -195,6 +221,11 @@ export async function analyzePdf(req, res) {
     return res.status(202).json({ analysisId: analysis.id, status: "PROCESSING" });
   } catch (error) {
     await releaseSlot(analysisLockKey(tenantId), lockToken);
+
+    // O objeto já foi enviado mas a análise não vai acontecer: deixá-lo no
+    // bucket seria guardar dado pessoal de um processamento que nunca existiu,
+    // e a rotina de expurgo não o alcançaria (ela seleciona por análise).
+    if (pdfKey) await deletePdf(pdfKey);
 
     if (error.message === "INSUFFICIENT_CREDITS") {
       return res.status(402).json({

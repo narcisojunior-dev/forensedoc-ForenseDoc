@@ -9,6 +9,7 @@ import { heuristicExtractionFromText } from "../services/extractionService.js";
 import { enrichGeography } from "../services/geoEnrichmentService.js";
 import { cleanPdfBase64, stripDiacritics } from "../utils/stringUtils.js";
 import { buildCustodyChain } from "../reports/custodyChain.js";
+import { getPdf } from "../services/objectStorageService.js";
 
 function fileHashes(buffer) {
   return {
@@ -18,10 +19,18 @@ function fileHashes(buffer) {
 }
 
 export async function processAnalysis(job) {
-  const { analysisId, pdfBase64, tenantId, userId, lockToken, homeAddress, homeCoord, filename } = job.data;
+  const { analysisId, pdfKey, pdfBase64, tenantId, userId, lockToken, homeAddress, homeCoord, filename } =
+    job.data;
 
   try {
-    const pdfBuffer = Buffer.from(cleanPdfBase64(pdfBase64), "base64");
+    /*
+     * O PDF vem do armazenamento de objetos (caminho normal) ou do próprio
+     * payload (compatibilidade: R2 não configurado, ou jobs enfileirados antes
+     * desta mudança e ainda na fila no momento do deploy).
+     */
+    const pdfBuffer = pdfKey
+      ? await getPdf(pdfKey)
+      : Buffer.from(cleanPdfBase64(pdfBase64), "base64");
 
     // Hash do arquivo calculado sobre o que o SERVIDOR recebeu e analisou —
     // origem autoritativa da cadeia de custódia. Antes vinha do navegador.
