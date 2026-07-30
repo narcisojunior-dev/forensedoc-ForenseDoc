@@ -2,7 +2,12 @@ import crypto from "crypto";
 import { prisma } from "../utils/prisma.js";
 import { debitCredit, refundCredit, afterDebitCommit } from "../services/creditService.js";
 import { analysisQueue } from "../queues.js";
-import { acquireSlot, releaseSlot, analysisLockKey } from "../utils/lock.js";
+import {
+  acquireSlot,
+  releaseSlot,
+  analysisLockKey,
+  SLOT_COTA_DO_USUARIO,
+} from "../utils/lock.js";
 import { getPlanLimits } from "../services/planLimitsService.js";
 import { ocrBudgetMs } from "../services/ocrService.js";
 import { validatePdfPayload } from "../utils/pdfValidation.js";
@@ -118,18 +123,31 @@ export async function analyzePdf(req, res) {
      * (o default) reproduz exatamente o comportamento anterior.
      */
     const { maxConcurrentAnalyses } = await getPlanLimits(tenantId);
-    lockToken = await acquireSlot(
+    const slot = await acquireSlot(
       analysisLockKey(tenantId),
       maxConcurrentAnalyses,
-      ANALYSIS_LOCK_TTL
+      ANALYSIS_LOCK_TTL,
+      userId
     );
+    lockToken = slot.token;
+
     if (!lockToken) {
+      /*
+       * As duas recusas têm causas diferentes e exigem ações diferentes de quem
+       * lê. "A equipe está usando tudo" é capacidade do plano, e a saída é
+       * esperar ou contratar mais. "Sua parte está cheia" significa que há vaga,
+       * mas ela está reservada aos colegas: a saída é aguardar as suas próprias
+       * análises terminarem. Uma mensagem única mandaria metade dos clientes
+       * para o caminho errado.
+       */
+      const porCota = slot.motivo === SLOT_COTA_DO_USUARIO;
       return res.status(409).json({
-        error:
-          maxConcurrentAnalyses === 1
+        error: porCota
+          ? "Você atingiu sua parte das análises simultâneas da equipe. Aguarde a conclusão de uma das suas para iniciar outra."
+          : maxConcurrentAnalyses === 1
             ? "Já existe uma análise em andamento. Aguarde a conclusão para iniciar outra."
-            : `Seu plano permite ${maxConcurrentAnalyses} análises simultâneas, e todas estão em uso. Aguarde a conclusão de uma delas.`,
-        code: "ANALYSIS_IN_PROGRESS",
+            : `As ${maxConcurrentAnalyses} análises simultâneas do seu plano estão em uso pela equipe. Aguarde a conclusão de uma delas.`,
+        code: porCota ? "ANALYSIS_USER_QUOTA" : "ANALYSIS_IN_PROGRESS",
         limite: maxConcurrentAnalyses,
       });
     }

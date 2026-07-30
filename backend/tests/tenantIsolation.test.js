@@ -36,7 +36,7 @@ vi.mock("../src/queues.js", () => ({
   cronsQueue: { add: vi.fn() },
 }));
 vi.mock("../src/utils/lock.js", () => ({
-  acquireSlot: vi.fn(),
+  acquireSlot: vi.fn(async () => ({ token: "tok", motivo: null })),
   releaseSlot: vi.fn(),
   analysisLockKey: (id) => `analysis:${id}`,
 }));
