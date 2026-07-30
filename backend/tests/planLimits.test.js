@@ -39,17 +39,19 @@ describe("getPlanLimits", () => {
     expect(await getPlanLimits("t1")).toEqual({
       maxConcurrentAnalyses: 1,
       analysesPerMinute: 2,
+      maxUsers: 1,
     });
   });
 
   it("assinatura ativa concede a capacidade do plano", async () => {
     prismaFalso.subscription.findUnique.mockResolvedValue({
       status: "ACTIVE",
-      plan: { maxConcurrentAnalyses: 8, analysesPerMinute: 40 },
+      plan: { maxConcurrentAnalyses: 8, analysesPerMinute: 40, maxUsers: 25 },
     });
     expect(await getPlanLimits("t1")).toEqual({
       maxConcurrentAnalyses: 8,
       analysesPerMinute: 40,
+      maxUsers: 25,
     });
   });
 
@@ -62,6 +64,7 @@ describe("getPlanLimits", () => {
     expect(await getPlanLimits("t1")).toEqual({
       maxConcurrentAnalyses: 1,
       analysesPerMinute: 2,
+      maxUsers: 1,
     });
   });
 
@@ -72,6 +75,7 @@ describe("getPlanLimits", () => {
     expect(await getPlanLimits("t1")).toEqual({
       maxConcurrentAnalyses: 1,
       analysesPerMinute: 2,
+      maxUsers: 1,
     });
   });
 
@@ -111,7 +115,58 @@ describe("getPlanLimits", () => {
     expect(await getPlanLimits(null)).toEqual({
       maxConcurrentAnalyses: 1,
       analysesPerMinute: 2,
+      maxUsers: 1,
     });
     expect(prismaFalso.subscription.findUnique).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * O teto de requisições HTTP passou a derivar do plano.
+ *
+ * Ele era fixo em 200/min por tenant, número escolhido quando o produto atendia
+ * um operador só. Depois que a concorrência virou atributo de plano, o teto
+ * passou a contradizer o que é vendido: medido nos intervalos do cliente, uma
+ * análise em andamento custa 30 req/min só de polling de status.
+ */
+describe("httpBudget", () => {
+  const plano = (maxUsers, maxConcurrentAnalyses, analysesPerMinute = 2) => ({
+    maxUsers,
+    maxConcurrentAnalyses,
+    analysesPerMinute,
+  });
+
+  it("nenhum tenant fica abaixo das 200 que já tinha", async () => {
+    // Regra de migração: a mudança não pode piorar ninguém.
+    const { httpBudget } = await import("../src/services/planLimitsService.js");
+    expect(httpBudget(plano(1, 1))).toBe(200);
+    expect(httpBudget({})).toBeGreaterThanOrEqual(200);
+  });
+
+  it("cobre o consumo real de um plano com dez simultâneas", async () => {
+    const { httpBudget } = await import("../src/services/planLimitsService.js");
+    // 10 análises x 30 req/min de polling + navegação dos 25 assentos.
+    const consumoEstimado = 10 * 30 + 25;
+    expect(httpBudget(plano(25, 10, 60))).toBeGreaterThan(consumoEstimado);
+  });
+
+  it("é o caso que estava quebrado: 8 simultâneas passavam de 200", async () => {
+    const { httpBudget } = await import("../src/services/planLimitsService.js");
+    const consumoOitoUsuarios = 8 * 30 + 8; // 248 req/min
+    expect(consumoOitoUsuarios).toBeGreaterThan(200); // estourava o teto antigo
+    expect(httpBudget(plano(8, 8))).toBeGreaterThan(consumoOitoUsuarios);
+  });
+
+  it("cresce com assentos e com simultâneas", async () => {
+    const { httpBudget } = await import("../src/services/planLimitsService.js");
+    expect(httpBudget(plano(10, 4))).toBeGreaterThan(httpBudget(plano(3, 4)));
+    expect(httpBudget(plano(10, 8))).toBeGreaterThan(httpBudget(plano(10, 4)));
+  });
+
+  it("continua sendo teto: não devolve infinito nem valor absurdo", async () => {
+    const { httpBudget } = await import("../src/services/planLimitsService.js");
+    const t = httpBudget(plano(50, 50, 600));
+    expect(Number.isFinite(t)).toBe(true);
+    expect(t).toBeLessThan(5000);
   });
 });

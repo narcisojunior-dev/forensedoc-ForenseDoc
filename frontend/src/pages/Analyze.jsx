@@ -95,16 +95,43 @@ function parseExtraction(raw) {
  * ainda escrevia o resultado no estado: o laudo de uma análise abandonada
  * aparecia sobre a tela que o usuário tinha acabado de abrir.
  */
-async function pollAnalysisStatus(analysisId, onProgress, isCancelled) {
-  const POLL_INTERVAL_MS = 2000;
-  const MAX_ATTEMPTS = 150; // ~5 minutos
+/*
+ * ─── O intervalo cresce com a espera ─────────────────────────────────────────
+ *
+ * Era fixo em 2 segundos, ou seja, 30 requisições por minuto POR ANÁLISE em
+ * andamento. Com a concorrência agora vindo do plano, oito usuários analisando ao
+ * mesmo tempo geravam cerca de 248 req/min de um tenant só, o suficiente para
+ * bater no limite e o cliente ver 429 no uso normal.
+ *
+ * O intervalo curto só é útil no começo: um PDF digital termina em menos de um
+ * segundo, e é aí que a resposta rápida importa para a percepção de velocidade.
+ * Depois de alguns segundos, o que resta é um documento escaneado em OCR, que vai
+ * levar dezenas de segundos, e verificar a cada 2 segundos não adianta nada.
+ *
+ * Numa análise de 60 segundos: 30 requisições antes, 17 agora. O limite é por
+ * TEMPO decorrido e não por número de tentativas, senão aumentar o intervalo
+ * encurtaria o prazo total.
+ */
+const POLL_INICIAL_MS = 2000;
+const POLL_MAXIMO_MS = 5000;
+const POLL_CRESCIMENTO = 1.25;
+const POLL_PRAZO_MS = 5 * 60 * 1000;
 
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+async function pollAnalysisStatus(analysisId, onProgress, isCancelled) {
+  const limite = Date.now() + POLL_PRAZO_MS;
+  let intervalo = POLL_INICIAL_MS;
+  let tentativa = 0;
+
+  while (Date.now() < limite) {
     if (isCancelled()) return null;
     const { data } = await api.get(`/analyses/${analysisId}/status`);
     if (data.status !== "PROCESSING") return data.status;
-    onProgress(Math.min(30 + attempt, 45));
-    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+
+    onProgress(Math.min(30 + tentativa, 45));
+    tentativa++;
+
+    await new Promise((resolve) => setTimeout(resolve, intervalo));
+    intervalo = Math.min(POLL_MAXIMO_MS, Math.round(intervalo * POLL_CRESCIMENTO));
   }
 
   throw new Error("Tempo limite excedido aguardando o processamento da análise.");

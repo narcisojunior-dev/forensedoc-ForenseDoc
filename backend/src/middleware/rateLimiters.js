@@ -1,6 +1,6 @@
 import { ipKeyGenerator } from "express-rate-limit";
 import { createLimiter } from "../utils/rateLimitStore.js";
-import { getPlanLimits } from "../services/planLimitsService.js";
+import { getPlanLimits, httpBudget } from "../services/planLimitsService.js";
 
 /**
  * Teto global por IP, aplicado antes do roteamento (N5 da auditoria).
@@ -39,12 +39,27 @@ function tenantKey(req) {
   return req.tenantId ? `t:${req.tenantId}` : `ip:${ipKeyGenerator(req.ip)}`;
 }
 
-/** Limite geral das rotas autenticadas: 200 req/min por tenant. */
+/**
+ * Limite geral das rotas autenticadas, PROPORCIONAL ao plano.
+ *
+ * Era fixo em 200 por minuto por tenant, número escolhido quando o produto
+ * atendia um operador só. Depois que a concorrência virou atributo de plano, o
+ * teto passou a contradizer o que é vendido: oito usuários analisando ao mesmo
+ * tempo consomem cerca de 248 req/min só de polling de status, então um plano de
+ * dez simultâneas entregaria 429 no uso normal.
+ *
+ * O cálculo está em `httpBudget` (planLimitsService), junto da medição que o
+ * fundamenta. Continua sendo teto: nenhum tenant fica sem limite, e nenhum fica
+ * abaixo das 200 que já tinha.
+ */
 export const tenantLimiter = createLimiter({
   windowMs: 60 * 1000,
-  max: 200,
+  limit: async (req) => httpBudget(await getPlanLimits(req.tenantId)),
   keyGenerator: tenantKey,
-  message: { error: "Limite de requisições excedido. Aguarde um instante." },
+  message: {
+    error: "Limite de requisições do seu plano excedido. Aguarde um instante.",
+    code: "TENANT_RATE_LIMITED",
+  },
   prefix: "rl:tenant:",
 });
 
