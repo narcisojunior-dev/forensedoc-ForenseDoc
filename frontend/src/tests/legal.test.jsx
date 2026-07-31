@@ -4,6 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import Termos from "../pages/legal/Termos.jsx";
 import Privacidade from "../pages/legal/Privacidade.jsx";
 import Landing from "../pages/Landing.jsx";
+import DashboardLayout from "../components/Layout/DashboardLayout.jsx";
 
 /**
  * As duas páginas jurídicas precisam ser alcançáveis SEM sessão.
@@ -17,6 +18,22 @@ const renderizar = (ui) => render(<MemoryRouter>{ui}</MemoryRouter>);
 describe("Landing", () => {
   it("liga para os dois documentos no rodapé", () => {
     renderizar(<Landing />);
+    expect(screen.getByRole("link", { name: /termos de uso/i })).toHaveAttribute("href", "/termos");
+    expect(screen.getByRole("link", { name: /política de privacidade/i })).toHaveAttribute(
+      "href",
+      "/privacidade"
+    );
+  });
+});
+
+describe("DashboardLayout", () => {
+  it("liga para os dois documentos no rodapé", () => {
+    /*
+     * Quem já entrou é justamente quem consulta prazo de retenção e direitos
+     * do titular quando um cliente pergunta. Obrigá-lo a sair para a página
+     * inicial para achar os documentos é atrito sem motivo.
+     */
+    renderizar(<DashboardLayout />);
     expect(screen.getByRole("link", { name: /termos de uso/i })).toHaveAttribute("href", "/termos");
     expect(screen.getByRole("link", { name: /política de privacidade/i })).toHaveAttribute(
       "href",
