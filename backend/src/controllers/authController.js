@@ -9,6 +9,7 @@ import { enqueueEmail } from "../services/notificationService.js";
 import { redis } from "../utils/redis.js";
 import { normalizeEmail } from "../utils/stringUtils.js";
 import { validatePassword } from "../utils/passwordPolicy.js";
+import { TERMS_VERSION, TERMS_LABEL } from "../legal/termsVersion.js";
 import {
   applyLoginBackoff,
   registerLoginFailure,
@@ -29,6 +30,22 @@ const registerSchema = z.object({
   cpfCnpj: z.string().min(11, "CPF/CNPJ inválido"),
   oabNumber: z.string().optional(),
   oabState: z.string().length(2).optional(),
+
+  /*
+   * Aceite dos documentos jurídicos, com a VERSÃO que o usuário viu.
+   *
+   * Exigir a versão, e não um booleano, é o que torna o aceite demonstrável:
+   * documentos mudam, e sem ela qualquer cláusula invocada pode ser respondida
+   * com "isso não estava lá quando eu me cadastrei".
+   *
+   * A validação recusa versão diferente da vigente. Isso cobre o caso do
+   * formulário aberto numa aba antiga: se os termos mudaram entre o
+   * carregamento da página e o envio, a pessoa aceitou um texto que não é mais
+   * o atual, e registrar como se fosse seria falso.
+   */
+  termsVersion: z.literal(TERMS_VERSION, {
+    error: "É necessário aceitar os Termos de Uso e a Política de Privacidade.",
+  }),
 });
 
 const loginSchema = z.object({
@@ -171,6 +188,8 @@ export async function register(req, res) {
           role: "OWNER",
           oabNumber: data.oabNumber,
           isPlatformAdmin: data.email === process.env.PLATFORM_ADMIN_EMAIL,
+          termsVersion: data.termsVersion,
+          termsAcceptedAt: new Date(),
         },
       });
 
@@ -203,6 +222,28 @@ export async function register(req, res) {
           userId: user.id,
           tokenHash: hashToken(verifyToken),
           expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24h
+        },
+      });
+
+      /*
+       * Registro do aceite na trilha de auditoria.
+       *
+       * O campo em `User` guarda o ESTADO (qual versão vale agora); o audit log
+       * guarda o EVENTO, com data, hora, endereço IP e navegador. É o segundo
+       * que sustenta a alegação em juízo, porque demonstra as circunstâncias do
+       * aceite, e não apenas o seu resultado.
+       *
+       * Dentro da transação de propósito: um aceite registrado para um cadastro
+       * que não completou seria pior que nenhum registro.
+       */
+      await tx.auditLog.create({
+        data: {
+          tenantId: tenant.id,
+          userId: user.id,
+          action: "terms_accepted",
+          ipAddress: req.ip,
+          userAgent: req.headers["user-agent"],
+          metadata: { version: data.termsVersion, documento: TERMS_LABEL },
         },
       });
 

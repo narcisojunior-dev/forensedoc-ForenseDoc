@@ -4,6 +4,7 @@ import { Scale, Loader2, CheckCircle2 } from "lucide-react";
 import toast from "react-hot-toast";
 import { useAuthStore } from "../store/authStore";
 import { MIN_LENGTH, checkPassword } from "../utils/passwordRules";
+import { TERMS_VERSION } from "../utils/legalVersion";
 
 export default function Register() {
   const [formData, setFormData] = useState({
@@ -13,6 +14,7 @@ export default function Register() {
     cpfCnpj: "",
     oabNumber: "",
   });
+  const [aceitou, setAceitou] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   
@@ -38,7 +40,11 @@ export default function Register() {
     // Removendo formatação básica se houver
     const payload = {
       ...formData,
-      cpfCnpj: formData.cpfCnpj.replace(/\D/g, "")
+      cpfCnpj: formData.cpfCnpj.replace(/\D/g, ""),
+      // A VERSÃO, e não um booleano: é ela que torna o aceite demonstrável.
+      // O servidor recusa versão diferente da vigente, o que cobre o caso do
+      // formulário aberto numa aba antiga depois de os documentos mudarem.
+      termsVersion: TERMS_VERSION,
     };
 
     const result = await register(payload);
@@ -133,10 +139,38 @@ export default function Register() {
               </div>
             </div>
 
+            {/*
+              O aceite fica ANTES do botão e é obrigatório para enviar. Aceite
+              presumido por "ao continuar você concorda" é frágil: não há ato do
+              usuário para demonstrar, e a caixa desmarcada obriga a uma escolha
+              consciente, que é o que dá valor ao registro.
+            */}
+            <label className="mt-6 flex cursor-pointer items-start gap-3 text-sm text-zinc-400">
+              <input
+                type="checkbox"
+                checked={aceitou}
+                onChange={(e) => setAceitou(e.target.checked)}
+                required
+                className="mt-0.5 h-4 w-4 shrink-0 accent-primary"
+              />
+              <span>
+                Li e aceito os{" "}
+                <Link to="/termos" target="_blank" className="text-primary hover:underline">
+                  Termos de Uso
+                </Link>{" "}
+                e a{" "}
+                <Link to="/privacidade" target="_blank" className="text-primary hover:underline">
+                  Política de Privacidade
+                </Link>
+                . Declaro estar ciente de que o laudo é peça de apoio e depende de conferência
+                humana antes de qualquer uso.
+              </span>
+            </label>
+
             <button
               type="submit"
-              disabled={isSubmitting}
-              className="w-full mt-6 flex justify-center py-4 px-4 border border-transparent rounded-xl shadow-[0_0_15px_rgba(59,130,246,0.2)] text-sm font-bold text-white bg-primary hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-background focus:ring-primary disabled:opacity-50 transition-all"
+              disabled={isSubmitting || !aceitou}
+              className="w-full mt-5 flex justify-center py-4 px-4 border border-transparent rounded-xl shadow-[0_0_15px_rgba(59,130,246,0.2)] text-sm font-bold text-white bg-primary hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-background focus:ring-primary disabled:opacity-50 transition-all"
             >
               {isSubmitting ? (
                 <>

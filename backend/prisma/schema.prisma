@@ -126,6 +126,18 @@ model User {
   isPlatformAdmin Boolean   @default(false)
   active          Boolean   @default(true)
   lastLoginAt     DateTime?
+
+  // ── Aceite dos documentos jurídicos ─────────────────────────────────────
+  //
+  // Guardar apenas "aceitou" não serve de nada: o que precisa ser demonstrável
+  // é QUAL TEXTO a pessoa aceitou. Termos mudam, e sem a versão a alegação de
+  // que a expectativa estava calibrada não se sustenta — o usuário sempre
+  // poderia dizer que a cláusula invocada não existia quando ele se cadastrou.
+  //
+  // Nulo em quem se cadastrou antes desta mudança. Ver `requireCurrentTerms`.
+  termsVersion    String?
+  termsAcceptedAt DateTime?
+
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 

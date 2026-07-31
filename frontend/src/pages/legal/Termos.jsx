@@ -150,13 +150,21 @@ export default function Termos() {
           manutenção, falha de terceiros de que dependemos ou caso fortuito.
         </p>
         <p>
-          Nossa responsabilidade limita-se ao valor pago por você nos 12 meses anteriores ao evento.
-          Não respondemos por decisão processual tomada com base no laudo sem a conferência humana
-          prevista na seção 4, nem por lucros cessantes.
+          <strong>O que não limitamos.</strong> Respondemos integralmente, sem qualquer teto, por
+          dano decorrente de dolo ou culpa grave nossa, por violação de dados pessoais causada por
+          falha nossa de segurança, e por tudo que o Código de Defesa do Consumidor assegure de
+          forma irrenunciável.
         </p>
         <p>
-          Nada nesta seção afasta direitos que o Código de Defesa do Consumidor assegure de forma
-          irrenunciável.
+          <strong>O que limitamos.</strong> Ressalvado o parágrafo acima, nossa responsabilidade por
+          dano direto fica limitada ao valor que você pagou nos 12 meses anteriores ao evento, e não
+          respondemos por lucros cessantes, perda de chance ou dano indireto.
+        </p>
+        <p>
+          Também não respondemos por decisão processual tomada com base exclusiva no laudo, sem a
+          conferência humana prevista na seção 4. Isso não é isenção genérica: o laudo declara, no
+          próprio corpo, a origem de cada dado e a margem de erro de cada método, e o dever de
+          conferir decorre disso.
         </p>
       </Secao>
 
