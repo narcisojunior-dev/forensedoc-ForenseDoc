@@ -62,6 +62,7 @@ export async function buildReportPdf(analysis, result) {
   const ctx = { doc, contentWidth: doc.page.width - MARGIN * 2 };
 
   cover(ctx, analysis, result, timestamp);
+  sectionReview(ctx, result);
   sectionIdentity(ctx, result, extracted);
   sectionMetadata(ctx, result.metadata);
   sectionContract(ctx, extracted);
@@ -201,6 +202,55 @@ function cover(ctx, analysis, result, timestamp) {
   field(ctx, "Tamanho do arquivo", result.file?.sizeBytes ? `${(result.file.sizeBytes / 1024).toFixed(2)} KB` : null);
   field(ctx, "Data de geração", timestamp);
   if (result.usedOcr) field(ctx, "OCR", `Aplicado em ${result.ocrPages} página(s)`);
+}
+
+/**
+ * § 0 — campos conferidos pelo operador.
+ *
+ * A extração é automatizada e frágil a formato novo. Quando o operador confere
+ * ou completa um campo, isso NÃO pode ficar implícito: o leitor da peça precisa
+ * saber quais dados vieram da leitura automática e quais foram atestados por
+ * pessoa identificada.
+ *
+ * Declarar fortalece a peça em vez de enfraquecê-la. Um dado conferido por
+ * humano tem mais peso que um extraído por heurística, e esconder a conferência
+ * desperdiçaria exatamente o que ela agrega.
+ *
+ * O valor ANTERIOR também é declarado, porque distingue dois atos diferentes:
+ * preencher o que faltava e substituir o que o sistema havia lido. O segundo
+ * pede mais atenção de quem avalia a prova.
+ */
+function sectionReview(ctx, result) {
+  const revisados = Object.entries(result.camposRevisados || {});
+  if (revisados.length === 0) return;
+
+  heading(ctx, "§ 0 · Campos conferidos pelo operador");
+  paragraph(
+    ctx,
+    "Os campos abaixo foram conferidos ou completados manualmente pelo operador antes da emissão desta peça. A extração automatizada não os localizou, ou os localizou de forma divergente. Cada registro indica o valor anterior, o valor adotado e o momento da conferência.",
+    { size: 9 }
+  );
+
+  for (const [, r] of revisados) {
+    field(ctx, r.rotulo, r.valor ?? "não informado");
+    field(
+      ctx,
+      "   Antes da conferência",
+      r.anterior ? String(r.anterior) : "campo não localizado pela extração"
+    );
+    field(
+      ctx,
+      "   Conferido em",
+      new Date(r.em).toLocaleString("pt-BR", { timeZone: "America/Fortaleza" })
+    );
+    ctx.doc.moveDown(0.2);
+  }
+
+  paragraph(
+    ctx,
+    "A conferência humana é requisito de uso deste sistema, e não uma exceção: o laudo é instrumento de apoio e depende de validação por quem o utiliza. O registro acima documenta que essa validação ocorreu.",
+    { color: MUTED, size: 8.5 }
+  );
 }
 
 function sectionIdentity(ctx, result, extracted) {

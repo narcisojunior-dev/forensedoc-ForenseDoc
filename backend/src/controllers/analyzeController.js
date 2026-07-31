@@ -13,9 +13,27 @@ import { ocrBudgetMs } from "../services/ocrService.js";
 import { validatePdfPayload } from "../utils/pdfValidation.js";
 import { buildReportPdf } from "../services/reportPdfService.js";
 import { haversineKm } from "../utils/geoUtils.js";
+import { recomputeDerived } from "../services/analysisRecompute.js";
+import {
+  CAMPOS_REVISAVEIS,
+  validarCampos,
+  lerCaminho,
+  escreverCaminho,
+} from "../services/fieldReview.js";
+import { getIpInfo } from "../services/apiService.js";
 import { parsePagination } from "../utils/pagination.js";
 import { redis } from "../utils/redis.js";
 import { putPdf, buildKey, deletePdf } from "../services/objectStorageService.js";
+
+/** O extraído é persistido como texto JSON dentro do resultado. */
+function safeParse(raw) {
+  if (!raw) return null;
+  try {
+    return JSON.parse(String(raw).replace(/```json|```/g, "").trim());
+  } catch {
+    return null;
+  }
+}
 
 function hashFilename(filename) {
   return crypto.createHash("sha256").update(filename || "").digest("hex");
@@ -338,20 +356,19 @@ export async function correctAnalysisGeo(req, res) {
       },
     };
 
-    if (result.contractGeo) {
-      result.contractGeo.distance = haversineKm(coord.lat, coord.lon, result.contractGeo.lat, result.contractGeo.lon);
-    }
-    if (Array.isArray(result.ipAnalysis)) {
-      result.ipAnalysis = result.ipAnalysis.map((ip) => ({
-        ...ip,
-        distance: ip.geo?.lat != null && ip.geo?.lon != null
-          ? haversineKm(coord.lat, coord.lon, ip.geo.lat, ip.geo.lon)
-          : null,
-      }));
-    }
-    result.geoCorrectedAt = new Date().toISOString();
+    /*
+     * Recalcula TUDO que deriva da coordenada, e não só as distâncias.
+     *
+     * A versão anterior atualizava os quilômetros e deixava as classificações
+     * intactas: o laudo passava a exibir a distância nova ao lado do rótulo
+     * antigo, com 12 km marcados como "DIVERGÊNCIA GRAVE" porque a classificação
+     * era de quando a distância era 800. Número e veredito se contradiziam
+     * dentro da mesma linha.
+     */
+    const corrigido = recomputeDerived(result, safeParse(result.text) || {});
+    corrigido.geoCorrectedAt = new Date().toISOString();
 
-    await prisma.analysis.update({ where: { id: analysis.id }, data: { result } });
+    await prisma.analysis.update({ where: { id: analysis.id }, data: { result: corrigido } });
 
     await prisma.auditLog
       .create({
@@ -366,7 +383,7 @@ export async function correctAnalysisGeo(req, res) {
       })
       .catch(() => {});
 
-    return res.json({ result });
+    return res.json({ result: corrigido });
   } catch (error) {
     console.error("[Analyze] Erro ao corrigir geolocalização:", error);
     return res.status(500).json({ error: "Erro interno no servidor." });
@@ -465,4 +482,160 @@ export async function getAnalysisStats(req, res) {
     console.error("[Analyze] Erro ao calcular estatísticas:", error);
     return res.status(500).json({ error: "Erro interno no servidor." });
   }
+}
+
+/**
+ * Revisão dos campos extraídos, antes de emitir o laudo.
+ *
+ * ─── O que esta rota resolve ─────────────────────────────────────────────────
+ *
+ * A extração é heurística e frágil a formato novo: três documentos de bancos
+ * diferentes revelaram três falhas distintas. Corrigir cada padrão é necessário
+ * e nunca vai cobrir o próximo formato.
+ *
+ * Deixar o operador conferir e completar resolve por outro caminho, e um que
+ * FORTALECE a peça: o laudo deixa de ser saída de uma heurística e passa a ser
+ * saída conferida por pessoa identificada. É o que os Termos de Uso já exigem;
+ * aqui a exigência vira registro.
+ *
+ * ─── Conformidade com o desenho de escala ────────────────────────────────────
+ *
+ * Esta rota NÃO entra na fila e NÃO ocupa slot do semáforo. O trabalho é uma
+ * escrita no banco mais recálculo local em microssegundos, ou seja, perfil
+ * oposto ao da análise, que é CPU pesada por minutos. Enfileirá-la faria a
+ * correção esperar atrás de OCR, exatamente a inversão de prioridade que a
+ * separação de filas foi feita para eliminar.
+ *
+ * A única consulta externa possível é a geolocalização de um IP alterado, que
+ * passa pelo cache de 30 dias já existente. O limite de requisições é o do
+ * plano, que já cresce com a capacidade contratada.
+ */
+export async function reviewAnalysisFields(req, res) {
+  try {
+    const analysis = await prisma.analysis.findUnique({ where: { id: req.params.id } });
+    if (!analysis || analysis.tenantId !== req.tenantId) {
+      return res.status(404).json({ error: "Análise não encontrada." });
+    }
+    if (analysis.status !== "COMPLETED" || !analysis.result) {
+      return res.status(409).json({ error: "Só é possível revisar uma análise concluída." });
+    }
+
+    const { erros, validos, temErro } = validarCampos(req.body?.campos);
+    if (temErro) {
+      return res.status(400).json({ error: "Há campos inválidos.", campos: erros });
+    }
+    if (Object.keys(validos).length === 0) {
+      return res.status(400).json({ error: "Nenhum campo para corrigir." });
+    }
+
+    const result = { ...analysis.result };
+    const extracted = safeParse(result.text) || {};
+    const revisadoPor = {
+      userId: req.auth.userId,
+      em: new Date().toISOString(),
+    };
+
+    const registro = { ...(result.camposRevisados || {}) };
+    const alterados = [];
+    let ipMudou = null;
+
+    for (const [caminho, valor] of Object.entries(validos)) {
+      const anterior = lerCaminho(extracted, caminho) ?? null;
+      if (anterior === valor) continue;
+
+      escreverCaminho(extracted, caminho, valor);
+      alterados.push(caminho);
+
+      /*
+       * O laudo precisa DECLARAR o que foi conferido por pessoa, com o valor
+       * anterior. Sem o anterior, não há como distinguir "o operador preencheu
+       * o que faltava" de "o operador trocou o que o sistema tinha lido", e essa
+       * distinção é justamente o que dá ou tira peso ao registro.
+       */
+      registro[caminho] = {
+        rotulo: CAMPOS_REVISAVEIS[caminho].rotulo,
+        anterior,
+        valor,
+        ...revisadoPor,
+      };
+
+      if (CAMPOS_REVISAVEIS[caminho].exigeGeoIp && valor) ipMudou = valor;
+    }
+
+    if (alterados.length === 0) {
+      return res.status(200).json({ result, alterados: [] });
+    }
+
+    // ── Reflete no resultado o que os campos alimentam ──────────────────────
+    const lat = Number(String(extracted.geolocalizacao_assinatura?.latitude ?? "").replace(",", "."));
+    const lon = Number(String(extracted.geolocalizacao_assinatura?.longitude ?? "").replace(",", "."));
+    if (Number.isFinite(lat) && Number.isFinite(lon)) {
+      result.contractGeo = {
+        ...(result.contractGeo || {}),
+        lat,
+        lon,
+        // A origem muda: deixou de ser leitura automática do PDF.
+        fonte: "Informado pelo operador na revisão",
+        precision: "gps",
+        geocoded: false,
+      };
+      result.geoDeclaredPresent = true;
+    }
+
+    if (ipMudou) {
+      // Passa pelo cache de 30 dias: repetição do mesmo IP não custa consulta.
+      const geo = await getIpInfo(ipMudou);
+      const anterior = result.ipAnalysis?.[0] || {};
+      result.ipAnalysis = [
+        {
+          ...anterior,
+          endereco: ipMudou,
+          versao: ipMudou.includes(":") ? 6 : 4,
+          rotulo: anterior.rotulo || "Informado pelo operador na revisão",
+          geo,
+          geoFailure: geo ? null : "nenhum provedor de geolocalização respondeu",
+        },
+        ...(result.ipAnalysis || []).slice(1),
+      ];
+    }
+
+    result.text = JSON.stringify(extracted);
+    result.camposRevisados = registro;
+
+    const corrigido = recomputeDerived(result, extracted);
+
+    await prisma.analysis.update({ where: { id: analysis.id }, data: { result: corrigido } });
+
+    await prisma.auditLog
+      .create({
+        data: {
+          tenantId: req.tenantId,
+          userId: req.auth.userId,
+          action: "analysis_fields_reviewed",
+          ipAddress: req.ip,
+          userAgent: req.headers["user-agent"],
+          // Só os NOMES dos campos: os valores são dado pessoal de terceiro, e a
+          // trilha de auditoria não é lugar para duplicá-los.
+          metadata: { analysisId: analysis.id, campos: alterados },
+        },
+      })
+      .catch((err) => console.error("[Analyze] Falha ao registrar revisão:", err.message));
+
+    return res.json({ result: corrigido, alterados });
+  } catch (error) {
+    console.error("[Analyze] Erro ao revisar campos:", error);
+    return res.status(500).json({ error: "Erro interno no servidor." });
+  }
+}
+
+/** Catálogo dos campos revisáveis, para a tela montar o formulário. */
+export async function listReviewableFields(_req, res) {
+  return res.json({
+    campos: Object.entries(CAMPOS_REVISAVEIS).map(([caminho, d]) => ({
+      caminho,
+      rotulo: d.rotulo,
+      grupo: d.grupo,
+      critico: Boolean(d.critico),
+    })),
+  });
 }

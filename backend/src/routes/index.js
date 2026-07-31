@@ -1,5 +1,5 @@
 import { Router, json } from "express";
-import { analyzePdf, getAnalysisStatus, getAnalysisResult, getAnalysisPdf, correctAnalysisGeo, listAnalyses, getAnalysisStats } from "../controllers/analyzeController.js";
+import { analyzePdf, getAnalysisStatus, getAnalysisResult, getAnalysisPdf, correctAnalysisGeo, reviewAnalysisFields, listReviewableFields, listAnalyses, getAnalysisStats } from "../controllers/analyzeController.js";
 import { geocode, ipLocation } from "../controllers/geoController.js";
 import authRoutes from "./authRoutes.js";
 import tenantRoutes from "./tenantRoutes.js";
@@ -74,6 +74,16 @@ router.get("/analyses/:id/status", requireAuth, tenantLimiter, getAnalysisStatus
 router.get("/analyses/:id/result", requireAuth, tenantLimiter, getAnalysisResult);
 router.get("/analyses/:id/pdf", requireAuth, tenantLimiter, getAnalysisPdf);
 router.patch("/analyses/:id/geo", requireAuth, tenantLimiter, correctAnalysisGeo);
+
+// Revisão dos campos extraídos antes de emitir o laudo. Fora da fila de
+// propósito: é escrita no banco mais recálculo local, perfil oposto ao da
+// análise, que é CPU pesada por minutos. Ver o comentário em
+// `reviewAnalysisFields` sobre a conformidade com a separação de filas.
+//
+// A rota estática vem ANTES da paramétrica: registrada depois, "/analyses/:id"
+// capturaria "reviewable-fields" como se fosse um id.
+router.get("/analyses/reviewable-fields", requireAuth, tenantLimiter, listReviewableFields);
+router.patch("/analyses/:id/fields", requireAuth, tenantLimiter, reviewAnalysisFields);
 router.get("/analyses", requireAuth, tenantLimiter, listAnalyses);
 
 // Rotas Utilitárias

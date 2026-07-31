@@ -16,6 +16,7 @@ import {
 import { GeoMap } from "../components/GeoMap.jsx";
 import CadeiaCustodia from "../components/report/CadeiaCustodia.jsx";
 import IpTrace from "../components/report/IpTrace.jsx";
+import RevisaoCampos from "../components/report/RevisaoCampos.jsx";
 import { useAuthStore } from "../store/authStore.js";
 
 // Espelha o MAX_PDF_MB do backend (utils/pdfValidation.js). Checar aqui evita
@@ -302,6 +303,10 @@ export default function Analyze() {
         contractGeo: apiData.contractGeo || null,
         geoDeclaredPresent: !!apiData.geoDeclaredPresent,
         ipAnalysis: apiData.ipAnalysis || [],
+        cadeiaCustodia: apiData.cadeiaCustodia || null,
+        // Registro do que já foi conferido pelo operador, para a tela marcar os
+        // campos e o laudo declará-los.
+        camposRevisados: apiData.camposRevisados || null,
         processingNotice: apiData.warning || "",
         extractionError,
       });
@@ -546,6 +551,30 @@ export default function Analyze() {
                 </div>
               </div>
             )}
+
+            {/*
+              Conferência do operador ANTES do laudo. Fica no topo de propósito:
+              é a etapa que precede a emissão, e o laudo em PDF é montado sob
+              demanda a partir deste mesmo resultado, então uma correção aqui já
+              vale para o documento baixado.
+
+              O `data-html2canvas-ignore` mantém o bloco fora da exportação em
+              imagem: é ferramenta de trabalho, não parte da peça.
+            */}
+            <div data-html2canvas-ignore="true">
+              <RevisaoCampos
+                analysisId={report.analysisId}
+                extracted={report.extracted}
+                revisados={report.camposRevisados}
+                onAtualizado={(novo) =>
+                  setReport((prev) => ({
+                    ...prev,
+                    ...novo,
+                    extracted: parseExtraction(novo.text) || prev.extracted,
+                  }))
+                }
+              />
+            </div>
 
             {/* §1 */}
             <Section title="§ 1 · Identificação e integridade criptográfica">
