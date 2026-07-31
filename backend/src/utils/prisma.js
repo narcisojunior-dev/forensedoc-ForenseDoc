@@ -22,9 +22,16 @@ import { PrismaPg } from "@prisma/adapter-pg";
  *
  * Por isso o padrão difere por papel: o worker abre poucas conexões e as usa por
  * muito tempo (jobs longos), enquanto a API abre muitas e as devolve rápido.
- * `WORKER_MODE` já é definido no docker-compose do worker.
+ *
+ * O papel é deduzido do processo em execução, e não só de `WORKER_MODE`. A
+ * variável existe apenas no docker-compose, então qualquer outra forma de subir o
+ * worker (process manager, `node src/worker.js` direto, Railway sem a variável)
+ * cairia no dimensionamento da API e o subprovisionaria em silêncio: 15 conexões
+ * para até 19 jobs simultâneos, com o excedente esperando no pool. A variável
+ * continua valendo, para o caso de um entrypoint com outro nome.
  */
-const EH_WORKER = process.env.WORKER_MODE === "true";
+const EH_WORKER =
+  process.env.WORKER_MODE === "true" || /worker\.js$/.test(process.argv[1] || "");
 
 const POOL_MAX =
   Number(process.env.DB_POOL_MAX) ||

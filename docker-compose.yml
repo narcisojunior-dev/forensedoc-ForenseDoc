@@ -97,7 +97,28 @@ services:
   # ── Redis 7 ───────────────────────────────────────────────────
   redis:
     image: redis:7-alpine
-    command: redis-server --requirepass ${REDIS_PASSWORD} --appendonly yes
+    # ── maxmemory e política de despejo ──────────────────────────────────────
+    #
+    # Sem `maxmemory`, o Redis cresce até derrubar o host, e o sintoma (a máquina
+    # inteira travando) não aponta para ele. Mas o valor sozinho não basta: o que
+    # decide se a falha é grave ou tolerável é a POLÍTICA.
+    #
+    # O default é `noeviction`: ao encher, toda escrita falha, inclusive a de
+    # enfileirar um job. Uma análise paga deixaria de ser processada.
+    #
+    # `allkeys-lru` seria pior: despejaria os próprios jobs da fila, e um laudo
+    # pago sumiria sem deixar rastro.
+    #
+    # `volatile-lru` despeja SOMENTE chaves com prazo de validade. É exatamente a
+    # divisão que este sistema já tem: cache, rate limit e limites de plano usam
+    # `setex` (têm TTL), enquanto os jobs do BullMQ não. Sob pressão de memória o
+    # cache encolhe, que é o comportamento correto — todo o cache é fail-open e o
+    # pior caso dele é consultar o serviço externo de novo.
+    #
+    # Ajuste `REDIS_MAXMEMORY` para cerca de 70% da RAM dedicada ao container.
+    command: >
+      redis-server --requirepass ${REDIS_PASSWORD} --appendonly yes
+      --maxmemory ${REDIS_MAXMEMORY:-512mb} --maxmemory-policy volatile-lru
     expose:
       - "6379"
     volumes:

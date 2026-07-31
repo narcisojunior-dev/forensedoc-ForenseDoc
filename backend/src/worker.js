@@ -9,6 +9,7 @@ import { processEmail } from "./jobs/emailWorker.js";
 import { processRenewalReminders, processOverdueReminders } from "./jobs/reminders.js";
 import { startQueueWatch } from "./services/queueMetricsService.js";
 import { processUploadPurge } from "./jobs/purgeUploads.js";
+import { processRecordPurge } from "./jobs/purgeRecords.js";
 
 // Reexportadas por compatibilidade com quem já importava daqui.
 export { analysisQueue };
@@ -88,6 +89,7 @@ const HANDLERS = {
     "renewal-reminders": () => processRenewalReminders(),
     "overdue-reminders": () => processOverdueReminders(),
     "purge-uploads": () => processUploadPurge(),
+    "purge-records": () => processRecordPurge(),
   },
 };
 
@@ -148,6 +150,9 @@ const CRONS = [
   // Elimina o PDF original vencido. Cumprimento da política de retenção: roda
   // todo dia porque um atraso aqui é dado pessoal guardado além do declarado.
   { name: "purge-uploads", pattern: "0 3 * * *", jobId: "cron-purge-uploads" },
+  // Retenção das tabelas que crescem sem parar. Aos domingos: varre tabelas
+  // inteiras e não precisa da frequência diária do expurgo de arquivos.
+  { name: "purge-records", pattern: "30 3 * * 0", jobId: "cron-purge-records" },
 ];
 
 for (const cron of CRONS) {
