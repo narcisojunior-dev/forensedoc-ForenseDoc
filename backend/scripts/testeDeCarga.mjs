@@ -18,7 +18,6 @@
  */
 import "dotenv/config";
 import os from "node:os";
-import v8 from "node:v8";
 import fs from "node:fs/promises";
 
 const [arquivo, listaConc = "1,2,4", repeticoes = "1"] = process.argv.slice(2);
@@ -56,13 +55,13 @@ const pct = (v, p) => {
   const ord = [...v].sort((a, b) => a - b);
   return ord[Math.min(ord.length - 1, Math.floor((ord.length * p) / 100))];
 };
-const seg = (ms) => (ms == null ? "—" : (ms / 1000).toFixed(1) + "s");
+const seg = (ms) => (ms == null ? "n/d" : (ms / 1000).toFixed(1) + "s");
 
 console.log(`arquivo   ${arquivo} (${mb(pdf.length)} MB)`);
 console.log(`host      ${os.cpus().length} núcleos, ${mb(os.totalmem())} MB de RAM`);
-console.log(`heap      limite de ${mb(v8.getHeapStatistics().heap_size_limit)} MB\n`);
+console.log(`RSS base  ${mb(process.memoryUsage().rss)} MB antes de começar\n`);
 
-console.log("conc  amostras  mediana   p95     vazão      pico heap   obs");
+console.log("conc  amostras  mediana   p95     vazão       pico RSS   obs");
 console.log("─".repeat(78));
 
 let melhorVazao = 0;
@@ -70,8 +69,7 @@ let melhorConc = 1;
 
 for (const c of listaConc.split(",").map(Number)) {
   const duracoes = [];
-  // Mediana e p95 de conjunto vazio viravam NaN e escondiam que TUDO falhou.
-  let picoHeap = 0;
+  let picoRss = 0;
   // Motivo do erro, não só a contagem: a primeira execução deste roteiro
   // reportou "1 erro(s)" e escondeu QUAL, que era justamente o achado.
   const erros = new Map();
@@ -86,7 +84,16 @@ for (const c of listaConc.split(",").map(Number)) {
         erros.set(motivo, (erros.get(motivo) || 0) + 1);
       }
     }
-    picoHeap = Math.max(picoHeap, process.memoryUsage().heapUsed);
+    /*
+     * RSS, não `heapUsed`.
+     *
+     * O Tesseract roda em worker threads com memória NATIVA, e o rasterizador é
+     * um processo externo. Nada disso aparece no heap do V8: a primeira versão
+     * deste roteiro reportava ~20 MB de pico, e eu usei esse número para
+     * justificar um teto de concorrência quando ele mede quase nada do que
+     * realmente pesa.
+     */
+    picoRss = Math.max(picoRss, process.memoryUsage().rss);
   }
 
   const totalMs = Date.now() - t0;
@@ -101,7 +108,7 @@ for (const c of listaConc.split(",").map(Number)) {
       `${seg(pct(duracoes, 50)).padStart(7)}  ` +
       `${seg(pct(duracoes, 95)).padStart(6)}  ` +
       `${String(vazao.toFixed(1) + "/min").padStart(9)}  ` +
-      `${String(mb(picoHeap) + " MB").padStart(9)}   ` +
+      `${String(mb(picoRss) + " MB").padStart(9)}   ` +
       [...erros].map(([m, n]) => `${n}x ${m}`).join(" | ")
   );
 }
