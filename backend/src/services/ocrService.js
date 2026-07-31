@@ -50,6 +50,37 @@ const OCR_MAX_PAGES = Number(process.env.OCR_MAX_PAGES || 20);
  */
 const CUSTO_ESTIMADO_POR_PAGINA_MS = Number(process.env.OCR_COST_PER_PAGE_MS) || 9_000;
 
+/*
+ * ─── O orçamento precisa contar a disputa por CPU ────────────────────────────
+ *
+ * Corrigir a estimativa por página não bastou. O prazo é tempo de RELÓGIO, mas a
+ * duração de uma análise depende de quantas outras rodam ao mesmo tempo, porque
+ * o OCR é limitado por CPU. A curva de saturação mostrou isso:
+ *
+ *   concorrência   mediana    sobre a de 1
+ *    1              99,0 s     1,00x
+ *    2             109,4 s     1,11x
+ *    4             175,6 s     1,77x
+ *    6             TODAS falharam por estouro de prazo
+ *
+ * Com prazo fixo de 180 s, a concorrência 4 (que é o DEFAULT do worker) já
+ * entregava mediana de 175,6 s: metade das análises falharia sob carga
+ * sustentada. E a concorrência 6 não entregava nenhuma.
+ *
+ * A raiz quadrada da concorrência acompanha bem a curva medida (2,00 contra
+ * 1,77x observado em 4) e ainda deixa margem. Não é lei física; é ajuste ao que
+ * foi medido, e por isso o valor continua sobrescrevível.
+ *
+ * O ponto conceitual: este prazo existe para capturar caso patológico (PDF
+ * corrompido, Tesseract travado), NÃO para impor tempo de resposta. Um prazo que
+ * dispara sob carga legítima está fazendo o trabalho errado, e o preço é o
+ * crédito do cliente sendo estornado por um laudo que ia sair.
+ */
+function fatorContencao() {
+  const conc = Math.max(1, Number(process.env.WORKER_CONCURRENCY_ANALYSIS) || 4);
+  return Math.sqrt(conc);
+}
+
 /**
  * Orçamento de tempo do OCR, em milissegundos.
  *
@@ -61,7 +92,7 @@ const CUSTO_ESTIMADO_POR_PAGINA_MS = Number(process.env.OCR_COST_PER_PAGE_MS) ||
 export function ocrBudgetMs() {
   return (
     Number(process.env.OCR_TIMEOUT_MS) ||
-    Math.max(60_000, OCR_MAX_PAGES * CUSTO_ESTIMADO_POR_PAGINA_MS)
+    Math.max(60_000, Math.round(OCR_MAX_PAGES * CUSTO_ESTIMADO_POR_PAGINA_MS * fatorContencao()))
   );
 }
 
