@@ -10,6 +10,7 @@ import { processRenewalReminders, processOverdueReminders } from "./jobs/reminde
 import { startQueueWatch } from "./services/queueMetricsService.js";
 import { processUploadPurge } from "./jobs/purgeUploads.js";
 import { processRecordPurge } from "./jobs/purgeRecords.js";
+import { ensureStorageReady } from "./services/objectStorageService.js";
 
 // Reexportadas por compatibilidade com quem já importava daqui.
 export { analysisQueue };
@@ -142,6 +143,10 @@ console.log(
 // Vigia a saturação e avisa antes do cliente reclamar. Roda aqui, e não na API,
 // porque a API pode ter várias instâncias e cada uma emitiria o mesmo alerta.
 startQueueWatch();
+
+// Falha de permissão no diretório de uploads degrada em silêncio para base64 no
+// Redis. Conferir no start faz o problema aparecer como erro, não como consumo.
+await ensureStorageReady();
 
 // ─── Cron Jobs (BullMQ Repeatable Jobs) ──────────────────────────────────────
 // O jobId fixo garante um único agendamento por cron, mesmo com várias

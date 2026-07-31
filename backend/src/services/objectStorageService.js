@@ -1,182 +1,177 @@
 import crypto from "node:crypto";
+import path from "node:path";
+import { mkdir, readFile, writeFile, unlink, access } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
 import "dotenv/config";
-import {
-  S3Client,
-  PutObjectCommand,
-  GetObjectCommand,
-  DeleteObjectCommand,
-  DeleteObjectsCommand,
-} from "@aws-sdk/client-s3";
 
 /**
- * Armazenamento do PDF enviado, em Cloudflare R2.
+ * Armazenamento do PDF enviado, em disco local.
  *
  * ─── Por que o arquivo saiu da fila ──────────────────────────────────────────
  *
- * O PDF trafegava dentro do payload do job, em base64. O BullMQ guarda o payload
- * no Redis, que é MEMÓRIA: base64 acrescenta cerca de 33%, então um PDF de 30 MB
- * ocupava perto de 40 MB de RAM enquanto o job estivesse enfileirado, e cem
- * análises em pico chegavam a aproximadamente 4 GB.
+ * O PDF trafegava dentro do payload do job, e o BullMQ guarda payload no
+ * **Redis, que é MEMÓRIA**: base64 acrescenta cerca de 33%, então um dossiê de
+ * 10 MB ocupava perto de 13 MB de RAM enquanto esperasse na fila, e um pico de
+ * cem análises chegava a gigabytes. O Redis também guarda sessão, rate limit e
+ * cache; quando ele estoura, começa a despejar chaves e a degradação aparece
+ * espalhada, sem nada apontar para a causa.
  *
- * O Redis também guarda sessão, rate limit e cache. Quando ele estoura a
- * memória, começa a despejar chaves, e a degradação aparece como sintomas
- * espalhados (usuário deslogado, rate limit sumindo, cache frio) sem nada apontar
- * para a causa. Agora o job carrega só a chave do objeto, algumas dezenas de
- * bytes.
+ * Disco nunca foi o problema. MEMÓRIA era. Por isso qualquer armazenamento fora
+ * do Redis resolve, e o job passou a carregar só a chave do arquivo.
  *
- * ─── R2 e não S3 ─────────────────────────────────────────────────────────────
+ * ─── Por que disco local e não armazenamento de objetos ──────────────────────
  *
- * A API é a mesma (o R2 é compatível com S3), e a diferença que pesa é o egresso:
- * o R2 não cobra transferência de saída. Cada PDF é lido ao menos uma vez pelo
- * worker, e potencialmente de novo a cada regeração de laudo.
+ * A primeira implementação usava Cloudflare R2. Foi trocada por decisão de
+ * PROTEÇÃO DE DADOS, não técnica: o dossiê contém CPF, endereço e por vezes
+ * referência biométrica de terceiro, e mandá-lo para fora do país configura
+ * transferência internacional sob a LGPD (art. 33), com base legal e
+ * salvaguardas contratuais próprias. Mantendo o arquivo no disco do próprio
+ * servidor, essa discussão deixa de existir.
  *
- * ─── Degradação sem credenciais ──────────────────────────────────────────────
+ * O que se abre mão, e vale saber:
  *
- * Sem as variáveis configuradas, `isConfigured()` devolve false e o sistema volta
- * ao caminho anterior (base64 no payload). É o que mantém o ambiente de
- * desenvolvimento e a suíte de testes funcionando sem conta na Cloudflare, e o
- * que evita que uma credencial ausente em produção derrube a análise inteira em
- * vez de apenas piorar o consumo de memória.
+ *   - o arquivo não sobrevive à perda do servidor (mas o laudo sim, e com ele os
+ *     hashes que provam a integridade do que foi analisado);
+ *   - um worker em OUTRO host não enxerga este disco. Ao escalar por réplica,
+ *     todas precisam compartilhar o volume, ou o armazenamento volta a ser
+ *     externo;
+ *   - o disco é finito. Com retenção de 30 dias e ~10 MB por dossiê escaneado,
+ *     50 análises/dia ocupam cerca de 15 GB.
+ *
+ * ─── Degradação sem diretório utilizável ─────────────────────────────────────
+ *
+ * Se o diretório não puder ser criado ou escrito, `putPdf` devolve null e o
+ * sistema volta ao payload em base64. Disco cheio ou permissão errada é problema
+ * de operação, e a resposta certa é piorar o consumo de memória, não recusar a
+ * análise que o cliente pagou. A falha é registrada para aparecer no
+ * monitoramento.
  */
 
-const {
-  R2_ACCOUNT_ID,
-  R2_ACCESS_KEY_ID,
-  R2_SECRET_ACCESS_KEY,
-  R2_BUCKET,
-} = process.env;
+/** Raiz do armazenamento. No container, precisa ser um volume compartilhado. */
+const RAIZ = path.resolve(process.env.UPLOAD_DIR || "./data/uploads");
 
 /**
  * Retenção do PDF ORIGINAL.
  *
- * Prazo curto por decisão de proteção de dados, não por economia: o arquivo é o
- * dossiê do banco e carrega dado pessoal de terceiro (CPF, endereço, biometria
- * declarada). O laudo já preserva o SHA-256 e o SHA-1 do arquivo, então a
- * integridade continua demonstrável depois que o original for apagado.
+ * Trinta dias. O prazo é curto por decisão de proteção de dados: o arquivo é o
+ * dossiê do banco e carrega dado pessoal de terceiro. O laudo preserva SHA-256 e
+ * SHA-1, então a integridade do que foi analisado continua demonstrável depois
+ * que o original deixa de existir.
  *
- * A janela existe para o que precisa do arquivo em si: regerar o laudo após
- * correção da coordenada de referência, refazer a extração depois de um ajuste,
- * e responder a contestação imediata do cliente.
+ * Nada no sistema lê este arquivo depois que a análise termina: o laudo é gerado
+ * a partir do `result` já persistido, e a correção de coordenada recalcula as
+ * distâncias sem tocar no PDF. A janela existe para o que é excepcional, ou seja
+ * reprocessar a extração após um ajuste do sistema e responder a contestação
+ * imediata do cliente.
  *
  * Ver o documento de auditoria, §12.6, para o racional completo e para a
  * distinção entre controlador e operador.
  */
-export const RETENCAO_DIAS = Number(process.env.R2_RETENTION_DAYS) || 90;
+export const RETENCAO_DIAS = Number(process.env.UPLOAD_RETENTION_DAYS) || 30;
 
-let cliente = null;
-
+/** Disco local está sempre disponível; a checagem existe pela interface. */
 export function isConfigured() {
-  return Boolean(R2_ACCOUNT_ID && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY && R2_BUCKET);
-}
-
-function getClient() {
-  if (!isConfigured()) return null;
-  if (!cliente) {
-    cliente = new S3Client({
-      region: "auto", // R2 não usa regiões no sentido da AWS
-      endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-      credentials: {
-        accessKeyId: R2_ACCESS_KEY_ID,
-        secretAccessKey: R2_SECRET_ACCESS_KEY,
-      },
-    });
-  }
-  return cliente;
+  return true;
 }
 
 /**
- * Chave do objeto.
+ * Chave do arquivo, relativa à raiz.
  *
- * Prefixada por tenant para que uma política de exclusão em massa (encerramento
- * de contrato, pedido de eliminação sob a LGPD) seja um prefixo, e não uma
- * varredura do bucket inteiro. A data facilita inspeção manual e eventual regra
- * de ciclo de vida no bucket.
+ * Prefixada por tenant para que uma exclusão em massa (encerramento de contrato,
+ * pedido de eliminação sob a LGPD, art. 18) seja uma subárvore, e não uma
+ * varredura. A data facilita inspeção manual.
  *
- * O nome do arquivo NÃO entra na chave: nomes de dossiê costumam trazer o nome
- * do contratante e o número do contrato, e a chave aparece em log, em métrica e
- * na listagem do bucket.
+ * O nome do arquivo original NÃO entra: nomes de dossiê costumam trazer o nome
+ * do contratante e o número do contrato, e a chave aparece em log e em métrica.
  */
 export function buildKey(tenantId, analysisId) {
   const dia = new Date().toISOString().slice(0, 10);
   const aleatorio = crypto.randomBytes(6).toString("hex");
-  return `uploads/${tenantId}/${dia}/${analysisId}-${aleatorio}.pdf`;
+  return `${tenantId}/${dia}/${analysisId}-${aleatorio}.pdf`;
 }
 
 /**
- * Envia o PDF. Devolve a chave, ou null se o armazenamento não estiver
- * configurado ou o envio falhar (o chamador cai no payload em base64).
+ * Resolve a chave para um caminho absoluto, recusando fuga da raiz.
+ *
+ * As chaves vêm do próprio banco, mas isto é defesa em profundidade: um `..`
+ * numa chave corrompida transformaria leitura de dossiê em leitura de qualquer
+ * arquivo do servidor, e exclusão de dossiê em exclusão arbitrária.
+ */
+function caminhoDe(key) {
+  const destino = path.resolve(RAIZ, key);
+  if (destino !== RAIZ && !destino.startsWith(RAIZ + path.sep)) {
+    throw new Error(`Chave de arquivo fora da raiz de armazenamento: ${key}`);
+  }
+  return destino;
+}
+
+/**
+ * Grava o PDF. Devolve a chave, ou null se não foi possível (o chamador cai no
+ * payload em base64).
  */
 export async function putPdf(key, buffer) {
-  const s3 = getClient();
-  if (!s3) return null;
-
   try {
-    await s3.send(
-      new PutObjectCommand({
-        Bucket: R2_BUCKET,
-        Key: key,
-        Body: buffer,
-        ContentType: "application/pdf",
-        // Metadado informativo: quem inspecionar o bucket vê o prazo previsto
-        // sem precisar consultar o banco.
-        Metadata: { retencao_dias: String(RETENCAO_DIAS) },
-      })
-    );
+    const destino = caminhoDe(key);
+    await mkdir(path.dirname(destino), { recursive: true });
+    await writeFile(destino, buffer, { mode: 0o640 });
     return key;
   } catch (err) {
-    console.error("[R2] Falha ao enviar PDF:", err.message);
+    console.error(`[Storage] Falha ao gravar '${key}':`, err.message);
     return null;
   }
 }
 
-/** Baixa o PDF. Lança se falhar: sem o arquivo não há análise a fazer. */
+/** Lê o PDF. Lança se falhar: sem o arquivo não há análise a fazer. */
 export async function getPdf(key) {
-  const s3 = getClient();
-  if (!s3) throw new Error("Armazenamento de objetos não configurado.");
-
-  const resposta = await s3.send(new GetObjectCommand({ Bucket: R2_BUCKET, Key: key }));
-  const partes = [];
-  for await (const parte of resposta.Body) partes.push(parte);
-  return Buffer.concat(partes);
+  return readFile(caminhoDe(key));
 }
 
 export async function deletePdf(key) {
-  const s3 = getClient();
-  if (!s3 || !key) return;
+  if (!key) return;
   try {
-    await s3.send(new DeleteObjectCommand({ Bucket: R2_BUCKET, Key: key }));
+    await unlink(caminhoDe(key));
   } catch (err) {
-    console.error(`[R2] Falha ao apagar '${key}':`, err.message);
+    // Arquivo já ausente é sucesso: o objetivo é que ele não exista.
+    if (err.code !== "ENOENT") console.error(`[Storage] Falha ao apagar '${key}':`, err.message);
   }
 }
 
-/**
- * Apaga em lote. Devolve quantos foram efetivamente removidos.
- *
- * A API aceita no máximo mil chaves por chamada, e a rotina de expurgo pode ter
- * muito mais que isso num dia de volume alto.
- */
+/** Apaga em lote. Devolve quantos deixaram de existir. */
 export async function deletePdfs(keys) {
-  const s3 = getClient();
-  if (!s3 || !keys?.length) return 0;
-
+  if (!keys?.length) return 0;
   let removidos = 0;
-  for (let i = 0; i < keys.length; i += 1000) {
-    const lote = keys.slice(i, i + 1000);
+  for (const key of keys) {
     try {
-      const r = await s3.send(
-        new DeleteObjectsCommand({
-          Bucket: R2_BUCKET,
-          Delete: { Objects: lote.map((Key) => ({ Key })), Quiet: true },
-        })
-      );
-      removidos += lote.length - (r.Errors?.length || 0);
-      for (const erro of r.Errors || []) {
-        console.error(`[R2] Falha ao apagar '${erro.Key}': ${erro.Message}`);
-      }
+      await unlink(caminhoDe(key));
+      removidos++;
     } catch (err) {
-      console.error("[R2] Falha no expurgo em lote:", err.message);
+      // ENOENT conta como removido: o arquivo não está mais lá, que é o fim
+      // pretendido. Tratá-lo como falha faria a rotina reprocessar para sempre.
+      if (err.code === "ENOENT") removidos++;
+      else console.error(`[Storage] Falha ao apagar '${key}':`, err.message);
     }
   }
   return removidos;
+}
+
+/**
+ * Confere no start que a raiz existe e é gravável.
+ *
+ * Sem isto, a primeira falha só apareceria na primeira análise, e como o sistema
+ * degrada para base64 em silêncio, ela apareceria como consumo alto de memória
+ * em vez de erro de permissão.
+ */
+export async function ensureStorageReady() {
+  try {
+    await mkdir(RAIZ, { recursive: true });
+    await access(RAIZ, fsConstants.W_OK);
+    console.log(`[Storage] Diretório de uploads: ${RAIZ} (retenção de ${RETENCAO_DIAS} dias)`);
+    return true;
+  } catch (err) {
+    console.error(
+      `[Storage] Diretório '${RAIZ}' não é gravável (${err.message}). ` +
+        `As análises seguirão com o PDF no payload do job, consumindo memória do Redis.`
+    );
+    return false;
+  }
 }

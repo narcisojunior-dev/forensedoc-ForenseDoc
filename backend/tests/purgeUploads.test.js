@@ -10,8 +10,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const analises = { findMany: vi.fn(), updateMany: vi.fn() };
 const armazenamento = {
   deletePdfs: vi.fn(),
-  RETENCAO_DIAS: 90,
-  isConfigured: vi.fn(() => true),
+  RETENCAO_DIAS: 30,
 };
 
 vi.mock("../src/utils/prisma.js", () => ({ prisma: { analysis: analises } }));
@@ -25,7 +24,6 @@ beforeEach(() => {
   // `clearAllMocks` limpa as chamadas mas NÃO a fila de `mockResolvedValueOnce`,
   // então valores enfileirados por um teste vazavam para o seguinte.
   vi.resetAllMocks();
-  armazenamento.isConfigured.mockReturnValue(true);
   analises.findMany.mockResolvedValue([]);
   analises.updateMany.mockResolvedValue({ count: 0 });
   armazenamento.deletePdfs.mockImplementation(async (ks) => ks.length);
@@ -57,7 +55,7 @@ describe("processUploadPurge", () => {
 
     const limite = where.createdAt.lt;
     const diasAtras = (Date.now() - limite.getTime()) / (24 * 3600 * 1000);
-    expect(Math.round(diasAtras)).toBe(90);
+    expect(Math.round(diasAtras)).toBe(30);
   });
 
   it("NÃO toca no laudo: a integridade sobrevive ao original", async () => {
@@ -92,12 +90,6 @@ describe("processUploadPurge", () => {
 
     expect(analises.findMany).toHaveBeenCalledTimes(2);
     expect(r.removidos).toBe(501);
-  });
-
-  it("não faz nada sem armazenamento configurado", async () => {
-    armazenamento.isConfigured.mockReturnValue(false);
-    expect(await processUploadPurge()).toEqual({ removidos: 0 });
-    expect(analises.findMany).not.toHaveBeenCalled();
   });
 
   it("nada vencido não gera escrita no banco", async () => {

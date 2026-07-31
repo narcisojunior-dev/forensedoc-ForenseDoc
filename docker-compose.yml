@@ -31,6 +31,11 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     env_file: ./backend/.env.production
+    # O dossiê enviado é gravado aqui pela API e lido pelo worker. Precisa ser o
+    # MESMO volume nos dois containers: se cada um tiver o seu, o worker procura
+    # um arquivo que não existe e a análise falha.
+    volumes:
+      - uploads:/app/data/uploads
     expose:
       - "8787"
     depends_on:
@@ -63,6 +68,8 @@ services:
     env_file: ./backend/.env.production
     environment:
       - WORKER_MODE=true
+    volumes:
+      - uploads:/app/data/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -133,6 +140,13 @@ services:
       - forensedoc_net
 
 volumes:
+  # Dossiês enviados, com retenção de 30 dias (rotina purge-uploads, 3h).
+  #
+  # Precisa entrar no BACKUP junto do banco: sem o arquivo, uma análise dentro da
+  # janela de retenção não pode ser reprocessada. Não precisa de retenção longa
+  # no backup, pelo contrário: guardar cópia por anos anula a política de 30 dias.
+  uploads:
+    driver: local
   pgdata:
     driver: local
   redisdata:

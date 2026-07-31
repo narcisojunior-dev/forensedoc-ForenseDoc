@@ -1,21 +1,19 @@
 import { prisma } from "../utils/prisma.js";
-import { deletePdfs, RETENCAO_DIAS, isConfigured } from "../services/objectStorageService.js";
+import { deletePdfs, RETENCAO_DIAS } from "../services/objectStorageService.js";
 
 /**
  * Expurgo do PDF original vencido.
  *
- * ─── Por que isto existe, se o bucket tem regra de ciclo de vida ─────────────
+ * ─── A política precisa estar no código ──────────────────────────────────────
  *
- * A regra do bucket é configuração de infraestrutura: some num restore, numa
- * migração de conta, ou quando alguém a desativa para investigar algo e esquece
- * de religar. Uma política de retenção que existe só como configuração externa é
- * uma intenção, não uma garantia.
+ * Uma retenção que existisse só como tarefa de sistema operacional (um `find`
+ * num cron, uma regra de ciclo de vida no armazenamento) é intenção, não
+ * garantia: some numa restauração, numa migração de servidor, ou quando alguém a
+ * desativa para investigar algo e esquece de religar.
  *
- * Executando o expurgo aqui, ele fica no código, é versionado, tem teste e
- * DEIXA REGISTRO no banco (`pdfPurgedAt`). Esse registro é o que demonstra
- * cumprimento: sob a LGPD não basta ter apagado, é preciso poder comprovar
- * quando e o quê. Recomenda-se manter a regra do bucket também, como segunda
- * camada.
+ * Executando aqui, ela é versionada, tem teste, e DEIXA REGISTRO no banco
+ * (`pdfPurgedAt`). Esse registro é o que demonstra cumprimento: sob a LGPD não
+ * basta ter apagado, é preciso poder comprovar quando e o quê.
  *
  * ─── O que NÃO é apagado ─────────────────────────────────────────────────────
  *
@@ -29,11 +27,6 @@ import { deletePdfs, RETENCAO_DIAS, isConfigured } from "../services/objectStora
 const LOTE = 500;
 
 export async function processUploadPurge() {
-  if (!isConfigured()) {
-    console.log("[Purge] Armazenamento de objetos não configurado. Nada a expurgar.");
-    return { removidos: 0 };
-  }
-
   const limite = new Date(Date.now() - RETENCAO_DIAS * 24 * 60 * 60 * 1000);
   let removidosTotal = 0;
 
