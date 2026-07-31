@@ -53,9 +53,15 @@ const NUCLEOS = Math.max(1, os.cpus()?.length || 1);
  * próximo de 1,4 GB só de análise. Numa VPS de 2 GB isso derruba o processo por
  * falta de memória, e o sintoma (worker reiniciando) não aponta para a causa.
  *
- * O teto de 4 é conservador de propósito: sobe para o valor certo do host via
- * WORKER_CONCURRENCY_ANALYSIS depois de medir, e o caminho de escala preferido é
- * aumentar réplicas do container, que distribui memória entre hosts.
+ * O teto de 4 é conservador de propósito, e a razão é MEMÓRIA, não CPU. A curva
+ * de saturação medida (ver ESCALABILIDADE.md §2.2) mostra a vazão ainda subindo
+ * em 6, com 29% de ganho sobre 4, então este valor NÃO é o pico de desempenho:
+ * é um ponto de partida seguro para host desconhecido.
+ *
+ * Suba via WORKER_CONCURRENCY_ANALYSIS depois de rodar scripts/testeDeCarga.mjs
+ * no host real, observando o pico de memória junto da vazão. O caminho de escala
+ * preferido continua sendo aumentar réplicas do container, que distribui memória
+ * entre hosts em vez de concentrar num só.
  */
 const MAX_ANALISE_PADRAO = 4;
 
