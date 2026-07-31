@@ -18,7 +18,14 @@ services:
     volumes:
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
       - ./nginx/certs:/etc/letsencrypt:ro
-      - frontend_dist:/var/www/html:ro
+      # Bind mount do build, e não volume nomeado: o volume anterior não era
+      # preenchido por serviço nenhum, então o nginx serviria um diretório
+      # vazio. O frontend é construído no host (`npm run build`) e entregue
+      # daqui, o que também torna um redeploy de tela uma cópia de arquivos,
+      # sem rebuild de imagem.
+      - ./frontend/dist:/var/www/html:ro
+      # Webroot do certbot, para a renovação não exigir parar o nginx.
+      - ./nginx/certbot:/var/www/certbot
     depends_on:
       - backend
     restart: unless-stopped
@@ -150,8 +157,6 @@ volumes:
   pgdata:
     driver: local
   redisdata:
-    driver: local
-  frontend_dist:
     driver: local
 
 networks:
