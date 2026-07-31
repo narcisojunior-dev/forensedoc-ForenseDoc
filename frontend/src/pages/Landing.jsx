@@ -372,9 +372,23 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* FOOTER SIMPLE */}
-      <footer className="border-t border-surface-border py-8 px-4 bg-background text-center text-sm text-zinc-500">
-        <p>© {new Date().getFullYear()} ForenseDoc. Todos os direitos reservados.</p>
+      {/* FOOTER */}
+      <footer className="border-t border-surface-border bg-background px-4 py-8">
+        <div className="mx-auto flex max-w-5xl flex-col items-center gap-4 text-sm text-zinc-500 sm:flex-row sm:justify-between">
+          <p>© {new Date().getFullYear()} ForenseDoc. Todos os direitos reservados.</p>
+
+          {/* Os dois documentos precisam ser alcançáveis SEM login: quem ainda
+              não é cliente lê antes de decidir, e o titular de dado que aparece
+              num contrato analisado nunca terá conta aqui. */}
+          <nav className="flex items-center gap-5">
+            <Link to="/termos" className="transition-colors hover:text-foreground">
+              Termos de Uso
+            </Link>
+            <Link to="/privacidade" className="transition-colors hover:text-foreground">
+              Política de Privacidade
+            </Link>
+          </nav>
+        </div>
       </footer>
     </div>
   );

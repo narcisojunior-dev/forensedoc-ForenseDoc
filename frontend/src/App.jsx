@@ -32,6 +32,8 @@ import AdminRoute from "./components/AdminRoute.jsx";
 
 // Temporário para manter a v2.2 acessível enquanto construímos o dashboard do v3.0
 import ForenseDocOld from "./ForenseDoc.jsx";
+import Termos from "./pages/legal/Termos.jsx";
+import Privacidade from "./pages/legal/Privacidade.jsx";
 
 function App() {
   return (
@@ -45,6 +47,12 @@ function App() {
       }} />
       <Routes>
         <Route path="/" element={<Landing />} />
+
+        {/* Páginas jurídicas: PÚBLICAS de propósito. Quem ainda não é cliente
+            precisa poder ler antes de decidir, e o titular de dado que aparece
+            num contrato analisado não tem conta aqui (LGPD, art. 9º). */}
+        <Route path="/termos" element={<Termos />} />
+        <Route path="/privacidade" element={<Privacidade />} />
         {/* A v2.2 continua acessível, mas atrás de login.
             Como rota pública ela aceitava upload de contrato — documento com
             dados pessoais do cliente — de qualquer visitante, e o enviava para
