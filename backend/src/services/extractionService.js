@@ -1,6 +1,112 @@
 import { firstMatch, allMatches, titleCaseName } from "../utils/stringUtils.js";
 import { extractIpAddresses } from "../utils/ipExtraction.js";
 
+/*
+ * ─── Par de coordenadas solto, validado por PLAUSIBILIDADE ───────────────────
+ *
+ * O padrão anterior exigia 4 ou mais casas decimais nos DOIS números, como forma
+ * de não confundir coordenada com qualquer par de números do documento. O preço
+ * apareceu num contrato real: o log de assinatura registrava
+ *
+ *   -7.115, -34.86306
+ *
+ * quatro vezes, e a latitude tem TRÊS casas. Nenhuma foi extraída, e o laudo saiu
+ * afirmando "não foi localizada geolocalização declarada no log de assinatura
+ * deste documento".
+ *
+ * Esse é o pior tipo de erro possível neste sistema: não é campo em branco, é
+ * afirmação de AUSÊNCIA de um dado que está no documento. Ela também rebaixou a
+ * cadeia de custódia (o elemento "geolocalização do ato" contou como faltante) e
+ * suprimiu o Confronto 2 inteiro, que teria mostrado o local declarado a
+ * centenas de quilômetros da referência.
+ *
+ * A precisão decimal era o critério errado. Contar casas mede formatação, não
+ * plausibilidade: coordenada com 3 casas é comum, e um par de valores monetários
+ * com 4 casas continuaria passando.
+ *
+ * O critério certo é geográfico. As faixas abaixo cobrem o território brasileiro
+ * com folga, e é praticamente impossível que um par arbitrário de números do
+ * documento caia nas duas ao mesmo tempo, com sinal negativo na longitude.
+ */
+const LAT_BR = [-34, 6];
+const LON_BR = [-74, -33];
+
+function numeroDeCoordenada(bruto) {
+  return Number(String(bruto).replace(",", "."));
+}
+
+function parCoordenadaBrasileira(flat) {
+  const candidatos = flat.matchAll(
+    /(-?\d{1,2}[,.]\d{3,})\s*[,; ]\s*(-?\d{1,3}[,.]\d{3,})/g
+  );
+  for (const m of candidatos) {
+    const lat = numeroDeCoordenada(m[1]);
+    const lon = numeroDeCoordenada(m[2]);
+    if (
+      Number.isFinite(lat) && lat >= LAT_BR[0] && lat <= LAT_BR[1] &&
+      Number.isFinite(lon) && lon >= LON_BR[0] && lon <= LON_BR[1]
+    ) {
+      return m;
+    }
+  }
+  return null;
+}
+
+/*
+ * ─── Nome do contratante ─────────────────────────────────────────────────────
+ *
+ * O padrão anterior usava a flag `/i` junto de uma classe de caixa alta
+ * (`[A-ZÁÀÂÃ...]`), o que anula a classe: com `/i`, ela passa a aceitar
+ * minúsculas. O efeito foi capturar o próprio rótulo do formulário.
+ *
+ * Num contrato real, o cabeçalho de tabela "Nome do cliente CPF ID da sessão"
+ * fez o motor retroceder, tratar "do cliente" como o VALOR e "CPF" como o
+ * delimitador seguinte. O laudo saiu com o contratante chamado "Do Cliente",
+ * enquanto o nome verdadeiro aparecia três linhas adiante.
+ *
+ * Num documento pericial isso é pior que campo vazio: um nome errado no
+ * cabeçalho compromete a peça inteira aos olhos de quem lê.
+ *
+ * A correção separa as duas coisas que a regex misturava. O RÓTULO é procurado
+ * sem distinção de caixa, porque documentos escrevem "Nome", "NOME" e "nome". O
+ * VALOR é validado à parte, exigindo caixa alta de verdade e recusando palavras
+ * que só aparecem em rótulo.
+ */
+const ROTULOS_NOME = /\b(?:nome\s+do\s+cliente|nome\s+completo|nome\s+do\s+contratante|nome|contratante|benefici[aá]rio)\b/gi;
+
+/** Delimitador que fecha o valor: o campo seguinte do formulário. */
+const FIM_DO_NOME = /^\s*[:\-]?\s*([A-ZÁÀÂÃÉÊÍÓÔÕÚÇ][A-ZÁÀÂÃÉÊÍÓÔÕÚÇ\s]{7,79}?)(?=\s+(?:CPF|RG|CELULAR|BANCO|AG[ÊE]NCIA|DATA|FILIA|MATR[ÍI]CULA|BENEF[ÍI]CIO)\b)/;
+
+/**
+ * Rótulos de PARENTESCO, que trazem nome de outra pessoa.
+ *
+ * "Nome da mãe LUCIA FRANCA ABREU" está no mesmo contrato, e capturá-lo poria a
+ * mãe do contratante como parte do negócio.
+ */
+const ROTULO_DE_TERCEIRO = /\b(?:m[ãa]e|pai|c[ôo]njuge|representante|testemunha|procurador|fantasia)\b/i;
+
+/** Palavras que aparecem em rótulo e nunca são nome de pessoa. */
+const NAO_E_NOME = /^(?:do|da|de|dos|das)\s|^(?:cliente|completo|contratante|titular|benefici[aá]rio|social)\b/i;
+
+function extrairNomeContratante(flat) {
+  for (const m of flat.matchAll(ROTULOS_NOME)) {
+    // "Nome da mãe" e afins: o valor pertence a outra pessoa.
+    const depoisDoRotulo = flat.slice(m.index + m[0].length, m.index + m[0].length + 20);
+    if (ROTULO_DE_TERCEIRO.test(depoisDoRotulo)) continue;
+
+    const candidato = flat.slice(m.index + m[0].length, m.index + m[0].length + 120).match(FIM_DO_NOME);
+    if (!candidato) continue;
+
+    const valor = candidato[1].trim().replace(/\s+/g, " ");
+    if (NAO_E_NOME.test(valor)) continue;
+    // Nome de pessoa tem ao menos duas partes; uma palavra só costuma ser rótulo.
+    if (valor.split(" ").length < 2) continue;
+
+    return valor;
+  }
+  return null;
+}
+
 export function heuristicExtractionFromText(rawText) {
   const text = String(rawText || "").replace(/\r/g, "\n");
   const flat = text.replace(/\s+/g, " ").trim();
@@ -61,7 +167,7 @@ export function heuristicExtractionFromText(rawText) {
     /\b([a-f0-9]{32})\b/i,
     /\b([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\b/i,
   ]);
-  const coordPair = flat.match(/(-?\d{1,2}[,.]\d{4,})\s*[,; ]\s*(-?\d{1,3}[,.]\d{4,})/);
+  const coordPair = parCoordenadaBrasileira(flat);
   /*
    * O rótulo COMBINADO tem precedência sobre os isolados.
    *
@@ -110,10 +216,7 @@ export function heuristicExtractionFromText(rawText) {
   const hasSignature = /assinad|assinatura|signat[aá]rio|biometr|token|selfie|certificado|ip\b/i.test(flat);
   const hasAudit = /auditoria|log|trilha|evid[eê]ncia|carimbo|data\s+e\s+hora/i.test(flat);
   const hasGeo = Boolean((latitudeValue && longitudeValue) || declaredGeoAddress);
-  const name = titleCaseName(firstMatch(flat, [
-    /(?:nome\s*(?:do\s+cliente|completo)?|contratante|benefici[aá]rio)\s*[:\-]?\s*([A-ZÁÀÂÃÉÊÍÓÔÕÚÇ][A-ZÁÀÂÃÉÊÍÓÔÕÚÇ\s]{8,80}?)(?=\s+(?:CPF|RG|CELULAR|BANCO|AG[ÊE]NCIA)\b)/i,
-    /NOME\s+([A-ZÁÀÂÃÉÊÍÓÔÕÚÇ][A-ZÁÀÂÃÉÊÍÓÔÕÚÇ\s]{8,80})\s+(?:CPF|RG|DATA|FILIA)/i,
-  ]));
+  const name = titleCaseName(extrairNomeContratante(flat));
   const endereco = firstMatch(flat, [
     /endere[cç]o\s*[:\-]?\s*([^.;\n]{8,100}?)(?=\s+(?:n[uú]mero\s+do\s+endere[cç]o|numero\s+do\s+endere[cç]o|complemento|cep|promotor)\b)/i,
     /((?:rua|avenida|av\.|travessa|tv\.|rodovia|estrada)\s+[^.]{8,120})/i,
