@@ -560,7 +560,18 @@ function sectionGeo(ctx, result, mapas = {}) {
 
   sectionIpTrace(ctx, result);
 
-  if (!cg && !ips.length && !result.home?.query) {
+  /*
+   * `ips` era uma variável local desta função e ficou para trás na separação dos
+   * dois confrontos: o nome sobreviveu aqui, mas a declaração passou a viver em
+   * `sectionIpTrace`. O erro só aparece quando NÃO há geolocalização declarada no
+   * documento, porque as condições são avaliadas da esquerda para a direita e
+   * `!cg` curto-circuitava em todos os documentos de teste anteriores, que
+   * traziam coordenada.
+   *
+   * Efeito: `ReferenceError` no meio da geração, ou seja, laudo nenhum para um
+   * contrato sem GPS declarado, que é um caso comum.
+   */
+  if (!cg && !(result.ipAnalysis || []).length && !result.home?.query) {
     paragraph(ctx, "Não foram extraídos dados de geolocalização (IP, coordenadas ou endereço) suficientes para o confronto geográfico neste documento.", { color: MUTED });
   }
   paragraph(ctx, NOTA_DISTANCIA, { color: MUTED, size: 8.5 });
