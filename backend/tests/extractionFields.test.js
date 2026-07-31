@@ -47,6 +47,35 @@ describe("nome do contratante", () => {
   it("exige nome com mais de uma palavra", () => {
     expect(heuristicExtractionFromText("Contratante TITULAR CPF 000").cliente.nome).toBeNull();
   });
+
+  it("aceita nome em Title Case, não só em caixa alta", () => {
+    /*
+     * Regressão da PRIMEIRA correção. Exigir caixa alta de verdade resolveu o
+     * "Do Cliente", e passou a rejeitar "Francisco Chaves Da Silva", que é como
+     * outro banco escreve. Trocar falso positivo por falso negativo não é
+     * corrigir: o laudo saía sem contratante nenhum.
+     */
+    const r = heuristicExtractionFromText("Nome do cliente: Francisco Chaves Da Silva CPF: 01768926301");
+    expect(r.cliente.nome).toBe("Francisco Chaves Da Silva");
+  });
+
+  it("para no campo seguinte em vez de engolir o rótulo", () => {
+    // "CPF" é sigla em caixa alta e casaria como palavra de nome. A exclusão
+    // precisa barrar a PALAVRA, não descartar o conjunto por contê-la.
+    const r = heuristicExtractionFromText("Nome do cliente: Maria Souza CPF: 123 Endereco: RUA X");
+    expect(r.cliente.nome).toBe("Maria Souza");
+  });
+
+  it("NÃO captura o nome do consultor do banco", () => {
+    // Está no dossiê de trilha, e é o vendedor, não o contratante.
+    const r = heuristicExtractionFromText("Nome do consultor: LAECIO JUNIOR DE SOUSA Latitude: -4.17");
+    expect(r.cliente.nome ?? "").not.toMatch(/laecio/i);
+  });
+
+  it("conectivo minúsculo no meio do nome é preservado", () => {
+    const r = heuristicExtractionFromText("Nome: Jose da Silva dos Santos CPF: 000");
+    expect(r.cliente.nome).toBe("Jose Da Silva Dos Santos");
+  });
 });
 
 describe("geolocalização declarada", () => {

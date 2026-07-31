@@ -55,52 +55,71 @@ function parCoordenadaBrasileira(flat) {
 /*
  * ─── Nome do contratante ─────────────────────────────────────────────────────
  *
- * O padrão anterior usava a flag `/i` junto de uma classe de caixa alta
- * (`[A-ZÁÀÂÃ...]`), o que anula a classe: com `/i`, ela passa a aceitar
- * minúsculas. O efeito foi capturar o próprio rótulo do formulário.
+ * Duas armadilhas, encontradas em dois contratos de bancos diferentes.
  *
- * Num contrato real, o cabeçalho de tabela "Nome do cliente CPF ID da sessão"
- * fez o motor retroceder, tratar "do cliente" como o VALOR e "CPF" como o
- * delimitador seguinte. O laudo saiu com o contratante chamado "Do Cliente",
- * enquanto o nome verdadeiro aparecia três linhas adiante.
+ * A PRIMEIRA foi usar a flag `/i` junto de uma classe de caixa alta
+ * (`[A-ZÁÀÂÃ...]`), o que anula a classe: com `/i` ela aceita minúsculas. No
+ * cabeçalho de tabela "Nome do cliente CPF ID da sessão", o motor retrocedia,
+ * tratava "do cliente" como o VALOR e "CPF" como o delimitador seguinte. O laudo
+ * saía com o contratante chamado "Do Cliente".
  *
- * Num documento pericial isso é pior que campo vazio: um nome errado no
- * cabeçalho compromete a peça inteira aos olhos de quem lê.
+ * A SEGUNDA foi a minha correção da primeira: exigir caixa alta de verdade.
+ * Funcionou para "LUCILENE FRANCA ABREU" e passou a REJEITAR
+ * "Francisco Chaves Da Silva", que é como o outro banco escreve. Trocar um falso
+ * positivo por um falso negativo não é corrigir.
  *
- * A correção separa as duas coisas que a regex misturava. O RÓTULO é procurado
- * sem distinção de caixa, porque documentos escrevem "Nome", "NOME" e "nome". O
- * VALOR é validado à parte, exigindo caixa alta de verdade e recusando palavras
- * que só aparecem em rótulo.
+ * O critério certo não é a caixa, é a FORMA de um nome de pessoa: uma sequência
+ * de palavras em que cada uma começa com maiúscula, admitindo conectivos
+ * minúsculos no meio ("da", "de", "dos"). Isso aceita tanto CAIXA ALTA quanto
+ * Title Case, e recusa "do cliente" porque nome nenhum começa por conectivo.
  */
-const ROTULOS_NOME = /\b(?:nome\s+do\s+cliente|nome\s+completo|nome\s+do\s+contratante|nome|contratante|benefici[aá]rio)\b/gi;
-
-/** Delimitador que fecha o valor: o campo seguinte do formulário. */
-const FIM_DO_NOME = /^\s*[:\-]?\s*([A-ZÁÀÂÃÉÊÍÓÔÕÚÇ][A-ZÁÀÂÃÉÊÍÓÔÕÚÇ\s]{7,79}?)(?=\s+(?:CPF|RG|CELULAR|BANCO|AG[ÊE]NCIA|DATA|FILIA|MATR[ÍI]CULA|BENEF[ÍI]CIO)\b)/;
 
 /**
- * Rótulos de PARENTESCO, que trazem nome de outra pessoa.
+ * Termos de formulário que nunca fazem parte de um nome.
  *
- * "Nome da mãe LUCIA FRANCA ABREU" está no mesmo contrato, e capturá-lo poria a
- * mãe do contratante como parte do negócio.
+ * Precisam ser barrados DENTRO da palavra, não depois: "CPF" é uma sigla em
+ * caixa alta e casaria como palavra de nome, fazendo a captura de
+ * "Nome do cliente: Francisco Chaves Da Silva CPF: 017..." engolir o "CPF" e o
+ * conjunto inteiro ser descartado por conter termo proibido. O resultado era
+ * nome nenhum, num documento que traz o nome de forma explícita.
  */
-const ROTULO_DE_TERCEIRO = /\b(?:m[ãa]e|pai|c[ôo]njuge|representante|testemunha|procurador|fantasia)\b/i;
+const TERMO_DE_FORMULARIO_FONTE =
+  "CPF|CNPJ|RG|ID|Data|Banco|Ag[êe]ncia|Conta|Matr[íi]cula|Benef[íi]cio|Sess[ãa]o|Cliente|Titular|Anexo|Propriedades|Endere[çc]o|Bairro|CEP|Telefone|E-?mail|Latitude|Longitude";
 
-/** Palavras que aparecem em rótulo e nunca são nome de pessoa. */
-const NAO_E_NOME = /^(?:do|da|de|dos|das)\s|^(?:cliente|completo|contratante|titular|benefici[aá]rio|social)\b/i;
+/** Palavra de nome: inicial maiúscula, ou sigla toda em caixa alta. */
+const PALAVRA_DE_NOME =
+  `(?!(?:${TERMO_DE_FORMULARIO_FONTE})\\b)` +
+  "(?:[A-ZÁÀÂÃÉÊÍÓÔÕÚÜÇ][A-Za-zÁÀÂÃÉÊÍÓÔÕÚÜÇáàâãéêíóôõúüç']+|[A-ZÁÀÂÃÉÊÍÓÔÕÚÜÇ]{2,})";
+/** Conectivos que aparecem no MEIO de um nome, nunca no começo. */
+const CONECTIVO_DE_NOME = "(?:d[aeo]s?|e|del|von|van)";
+
+const FORMA_DE_NOME = new RegExp(
+  `^\\s*[:\\-]?\\s*(${PALAVRA_DE_NOME}(?:\\s+(?:${PALAVRA_DE_NOME}|${CONECTIVO_DE_NOME})){1,5})`
+);
+
+const ROTULOS_NOME =
+  /\b(?:nome\s+do\s+cliente|nome\s+completo|nome\s+do\s+contratante|nome|contratante|benefici[aá]rio)\b/gi;
+
+/**
+ * Rótulos de outra pessoa. "Nome da mãe LUCIA FRANCA ABREU" está no contrato, e
+ * capturá-lo poria a mãe do contratante como parte do negócio. "Nome do
+ * consultor" está no dossiê, e é o vendedor do banco.
+ */
+const ROTULO_DE_TERCEIRO =
+  /\b(?:m[ãa]e|pai|c[ôo]njuge|representante|testemunha|procurador|consultor|vendedor|promotor|correspondente|fantasia)\b/i;
 
 function extrairNomeContratante(flat) {
   for (const m of flat.matchAll(ROTULOS_NOME)) {
-    // "Nome da mãe" e afins: o valor pertence a outra pessoa.
-    const depoisDoRotulo = flat.slice(m.index + m[0].length, m.index + m[0].length + 20);
-    if (ROTULO_DE_TERCEIRO.test(depoisDoRotulo)) continue;
+    const inicio = m.index + m[0].length;
 
-    const candidato = flat.slice(m.index + m[0].length, m.index + m[0].length + 120).match(FIM_DO_NOME);
+    // "Nome da mãe", "Nome do consultor": o valor pertence a outra pessoa.
+    if (ROTULO_DE_TERCEIRO.test(flat.slice(inicio, inicio + 20))) continue;
+
+    const candidato = flat.slice(inicio, inicio + 140).match(FORMA_DE_NOME);
     if (!candidato) continue;
 
     const valor = candidato[1].trim().replace(/\s+/g, " ");
-    if (NAO_E_NOME.test(valor)) continue;
-    // Nome de pessoa tem ao menos duas partes; uma palavra só costuma ser rótulo.
-    if (valor.split(" ").length < 2) continue;
+    if (valor.length < 8) continue;
 
     return valor;
   }
