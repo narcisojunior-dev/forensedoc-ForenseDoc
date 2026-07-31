@@ -75,25 +75,38 @@ for (const c of listaConc.split(",").map(Number)) {
   const erros = new Map();
   const t0 = Date.now();
 
-  for (let r = 0; r < Number(repeticoes); r++) {
-    const resultados = await Promise.allSettled(Array.from({ length: c }, analisar));
-    for (const res of resultados) {
-      if (res.status === "fulfilled") duracoes.push(res.value.ms);
-      else {
-        const motivo = res.reason?.message || String(res.reason);
-        erros.set(motivo, (erros.get(motivo) || 0) + 1);
+  /*
+   * ─── O pico tem que ser amostrado DURANTE, não depois ──────────────────────
+   *
+   * As duas versões anteriores mediam a memória logo após o `allSettled`, ou
+   * seja, quando todas as análises já haviam terminado e os workers do Tesseract
+   * já haviam sido encerrados. O momento de maior consumo nunca era observado.
+   *
+   * O erro produziu um número plausível e errado: 313 MB com concorrência 8,
+   * que eu quase usei para dimensionar host. Um dado colhido no instante errado
+   * é pior que dado nenhum, porque parece resposta.
+   *
+   * RSS, e não `heapUsed`, porque o Tesseract roda em worker threads com memória
+   * NATIVA e o rasterizador é um processo externo: nada disso aparece no heap
+   * do V8.
+   */
+  const amostrador = setInterval(() => {
+    picoRss = Math.max(picoRss, process.memoryUsage().rss);
+  }, 250);
+
+  try {
+    for (let r = 0; r < Number(repeticoes); r++) {
+      const resultados = await Promise.allSettled(Array.from({ length: c }, analisar));
+      for (const res of resultados) {
+        if (res.status === "fulfilled") duracoes.push(res.value.ms);
+        else {
+          const motivo = res.reason?.message || String(res.reason);
+          erros.set(motivo, (erros.get(motivo) || 0) + 1);
+        }
       }
     }
-    /*
-     * RSS, não `heapUsed`.
-     *
-     * O Tesseract roda em worker threads com memória NATIVA, e o rasterizador é
-     * um processo externo. Nada disso aparece no heap do V8: a primeira versão
-     * deste roteiro reportava ~20 MB de pico, e eu usei esse número para
-     * justificar um teto de concorrência quando ele mede quase nada do que
-     * realmente pesa.
-     */
-    picoRss = Math.max(picoRss, process.memoryUsage().rss);
+  } finally {
+    clearInterval(amostrador);
   }
 
   const totalMs = Date.now() - t0;
