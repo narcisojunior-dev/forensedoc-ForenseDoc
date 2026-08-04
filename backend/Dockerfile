@@ -38,6 +38,21 @@ COPY --from=build --chown=nodeuser:nodejs /app/node_modules ./node_modules
 COPY --from=build --chown=nodeuser:nodejs /app/prisma ./prisma
 COPY --chown=nodeuser:nodejs . .
 
+# ── Diretório dos dossiês ────────────────────────────
+#
+# Precisa existir NA IMAGEM, e com o dono certo. Um volume nomeado montado sobre
+# um caminho que não existe na imagem nasce pertencendo ao root, e o processo
+# (que roda como nodeuser) não consegue escrever nele.
+#
+# A falha seria silenciosa, e é justamente esse o problema: `putPdf` devolve null
+# e o sistema volta a mandar o PDF em base64 dentro do payload do job, ou seja,
+# desfaz a migração que tirou os arquivos do Redis. O sintoma apareceria como
+# Redis estourando memória sob carga, sem nada apontar para permissão de disco.
+#
+# Docker copia dono e permissão deste caminho ao criar o volume, então o
+# `chown` aqui é o que faz o volume nascer gravável.
+RUN mkdir -p /app/data/uploads && chown -R nodeuser:nodejs /app/data
+
 USER nodeuser
 
 EXPOSE 8787

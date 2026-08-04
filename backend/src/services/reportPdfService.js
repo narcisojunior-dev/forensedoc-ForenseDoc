@@ -1,6 +1,6 @@
 import PDFDocument from "pdfkit";
-import { riskFromDistance } from "../utils/geoUtils.js";
-import { fetchStaticMap, signatureMapPoints } from "./staticMapService.js";
+import { classifyDeclaredDivergence } from "../utils/geoDivergence.js";
+import { fetchStaticMap, mapPointsIpVsHome, mapPointsHomeVsDeclared } from "./staticMapService.js";
 import {
   FIRM,
   NOTA_ASSINATURA,
@@ -10,6 +10,7 @@ import {
   NOTA_FUNDAMENTACAO_RESSALVA,
   avisoLegal,
 } from "../reports/laudoTexts.js";
+import { buildCustodyChain } from "../reports/custodyChain.js";
 
 // Paleta sóbria para peça processual (impressão em preto e branco continua legível).
 const INK = "#1a1a1a";
@@ -34,8 +35,13 @@ const MARGIN = 50;
  * @param {object} result   Analysis.result já parseado
  */
 export async function buildReportPdf(analysis, result) {
-  // Pré-busca do mapa (não bloqueia o laudo se falhar).
-  const mapBuffer = await fetchStaticMap(signatureMapPoints(result)).catch(() => null);
+  // Pré-busca dos DOIS mapas do § 5, em paralelo. Cada um responde a uma
+  // pergunta pericial distinta (ver staticMapService.js) e nenhum é requisito:
+  // se a busca falhar, a seção sai com as coordenadas e as distâncias.
+  const [mapaIpResidencia, mapaResidenciaDeclarado] = await Promise.all([
+    fetchStaticMap(mapPointsIpVsHome(result)).catch(() => null),
+    fetchStaticMap(mapPointsHomeVsDeclared(result)).catch(() => null),
+  ]);
 
   const doc = new PDFDocument({
     size: "A4",
@@ -56,12 +62,13 @@ export async function buildReportPdf(analysis, result) {
   const ctx = { doc, contentWidth: doc.page.width - MARGIN * 2 };
 
   cover(ctx, analysis, result, timestamp);
+  sectionReview(ctx, result);
   sectionIdentity(ctx, result, extracted);
   sectionMetadata(ctx, result.metadata);
   sectionContract(ctx, extracted);
   sectionClient(ctx, extracted);
-  sectionSignature(ctx, extracted);
-  sectionGeo(ctx, result, mapBuffer);
+  sectionSignature(ctx, extracted, result);
+  sectionGeo(ctx, result, { mapaIpResidencia, mapaResidenciaDeclarado });
   sectionIrregularities(ctx, extracted);
   sectionRemarks(ctx, extracted);
   sectionLegal(ctx);
@@ -84,6 +91,19 @@ function safeParse(raw) {
   } catch {
     return null;
   }
+}
+
+/** Subtítulo de subseção (§ 4.1), sem a régua do heading principal. */
+function subheading(ctx, title) {
+  const { doc, contentWidth } = ctx;
+  if (doc.y > doc.page.height - 160) doc.addPage();
+  doc.moveDown(0.4);
+  doc
+    .fontSize(10.5)
+    .fillColor(INK)
+    .font("Helvetica-Bold")
+    .text(title, MARGIN, doc.y, { width: contentWidth });
+  doc.moveDown(0.2);
 }
 
 function heading(ctx, title, { danger = false } = {}) {
@@ -133,6 +153,19 @@ function paragraph(ctx, text, { color = INK, size = 9.5, italic = false } = {}) 
   doc.moveDown(0.5);
 }
 
+/**
+ * Reserva espaço para um bloco que não deve ser partido pela quebra de página.
+ *
+ * Os guardas espalhados pelos helpers medem cada elemento isoladamente, então um
+ * veredito e a frase que o explica podiam caber "cada um" e ainda assim acabar em
+ * páginas diferentes: o § 5.2 saía com o rótulo COMPATÍVEL no pé de uma página e
+ * "O documento situa a assinatura praticamente no mesmo local" solto no topo da
+ * seguinte, sem o número a que se referia.
+ */
+function reserve(ctx, pontos) {
+  if (ctx.doc.y > ctx.doc.page.height - pontos) ctx.doc.addPage();
+}
+
 function badge(ctx, label, value, ok) {
   const { doc, contentWidth } = ctx;
   if (doc.y > doc.page.height - 90) doc.addPage();
@@ -165,10 +198,59 @@ function cover(ctx, analysis, result, timestamp) {
   doc.moveDown(0.6);
 
   field(ctx, "Identificador do laudo", analysis.id);
-  field(ctx, "Arquivo analisado", result.file?.name || "—");
+  field(ctx, "Arquivo analisado", result.file?.name || "nome não informado");
   field(ctx, "Tamanho do arquivo", result.file?.sizeBytes ? `${(result.file.sizeBytes / 1024).toFixed(2)} KB` : null);
   field(ctx, "Data de geração", timestamp);
   if (result.usedOcr) field(ctx, "OCR", `Aplicado em ${result.ocrPages} página(s)`);
+}
+
+/**
+ * § 0 — campos conferidos pelo operador.
+ *
+ * A extração é automatizada e frágil a formato novo. Quando o operador confere
+ * ou completa um campo, isso NÃO pode ficar implícito: o leitor da peça precisa
+ * saber quais dados vieram da leitura automática e quais foram atestados por
+ * pessoa identificada.
+ *
+ * Declarar fortalece a peça em vez de enfraquecê-la. Um dado conferido por
+ * humano tem mais peso que um extraído por heurística, e esconder a conferência
+ * desperdiçaria exatamente o que ela agrega.
+ *
+ * O valor ANTERIOR também é declarado, porque distingue dois atos diferentes:
+ * preencher o que faltava e substituir o que o sistema havia lido. O segundo
+ * pede mais atenção de quem avalia a prova.
+ */
+function sectionReview(ctx, result) {
+  const revisados = Object.entries(result.camposRevisados || {});
+  if (revisados.length === 0) return;
+
+  heading(ctx, "§ 0 · Campos conferidos pelo operador");
+  paragraph(
+    ctx,
+    "Os campos abaixo foram conferidos ou completados manualmente pelo operador antes da emissão desta peça. A extração automatizada não os localizou, ou os localizou de forma divergente. Cada registro indica o valor anterior, o valor adotado e o momento da conferência.",
+    { size: 9 }
+  );
+
+  for (const [, r] of revisados) {
+    field(ctx, r.rotulo, r.valor ?? "não informado");
+    field(
+      ctx,
+      "   Antes da conferência",
+      r.anterior ? String(r.anterior) : "campo não localizado pela extração"
+    );
+    field(
+      ctx,
+      "   Conferido em",
+      new Date(r.em).toLocaleString("pt-BR", { timeZone: "America/Fortaleza" })
+    );
+    ctx.doc.moveDown(0.2);
+  }
+
+  paragraph(
+    ctx,
+    "A conferência humana é requisito de uso deste sistema, e não uma exceção: o laudo é instrumento de apoio e depende de validação por quem o utiliza. O registro acima documenta que essa validação ocorreu.",
+    { color: MUTED, size: 8.5 }
+  );
 }
 
 function sectionIdentity(ctx, result, extracted) {
@@ -228,7 +310,7 @@ function sectionClient(ctx, extracted) {
   field(ctx, "Número do benefício", c.numero_beneficio);
 }
 
-function sectionSignature(ctx, extracted) {
+function sectionSignature(ctx, extracted, result = {}) {
   const a = extracted.assinatura || {};
   heading(ctx, "§ 4 · Assinatura eletrônica e cadeia de custódia");
   badge(ctx, "Assinatura presente", a.presente ? "CONFIRMADA" : "AUSENTE", !!a.presente);
@@ -240,19 +322,81 @@ function sectionSignature(ctx, extracted) {
   field(ctx, "Algoritmo de hash", a.algoritmo_hash);
   if (a.metodos_autenticacao?.length) field(ctx, "Métodos de autenticação", a.metodos_autenticacao.join(" · "));
 
-  const cc = extracted.cadeia_custodia || {};
-  const itens = [
-    ["Identificação do signatário", cc.identificacao_signatario],
-    ["Registro de IP", cc.registro_ip],
-    ["Carimbo de tempo", cc.carimbo_tempo],
-    ["Geolocalização", cc.geolocalizacao],
-    ["Método de autenticação", cc.metodo_autenticacao],
-    ["Hash de integridade", cc.hash_integridade],
-    ["Trilha de auditoria", cc.trilha_auditoria],
-    ["Evidência de aceite", cc.evidencia_aceite],
-  ];
-  ctx.doc.moveDown(0.2);
-  for (const [label, ok] of itens) badge(ctx, label, ok ? "PRESENTE" : "AUSENTE", !!ok);
+  sectionCustodyChain(ctx, extracted, result.ipAnalysis || [], !!result.geoDeclaredPresent, result.cadeiaCustodia);
+}
+
+/**
+ * § 4.1 — cadeia de custódia elemento por elemento.
+ *
+ * Antes eram oito selos "PRESENTE / AUSENTE" e nada mais: o laudo concluía que a
+ * cadeia estava incompleta sem dizer o que cada elemento comprova, qual norma o
+ * exige ou que efeito a ausência produz. Uma conclusão sem demonstração não
+ * sustenta impugnação.
+ */
+function sectionCustodyChain(ctx, extracted, ipAnalysis = [], geoPresente = false, persistida = null) {
+  const { doc, contentWidth } = ctx;
+  // Prefere a avaliação persistida pelo worker; recalcula apenas para laudos
+  // gerados antes de ela passar a ser gravada.
+  const cadeia = persistida?.elementos?.length
+    ? persistida
+    : buildCustodyChain(extracted, ipAnalysis, geoPresente);
+
+  doc.moveDown(0.5);
+  subheading(ctx, "§ 4.1 · Cadeia de custódia do ato de assinatura");
+
+  paragraph(ctx, cadeia.definicao, { color: MUTED, size: 8.5 });
+
+  // Placar antes do detalhamento: quem lê o laudo em diagonal precisa do
+  // veredito, quem lê a fundo encontra o porquê abaixo.
+  const av = cadeia.avaliacao;
+  badge(
+    ctx,
+    "Completude da cadeia",
+    `${cadeia.presentes}/${cadeia.total} · ${av.pct}% · ${av.rotulo}`,
+    av.tom === "ok"
+  );
+  paragraph(ctx, av.leitura, { size: 9 });
+
+  doc.moveDown(0.3);
+  for (const e of cadeia.elementos) {
+    if (doc.y + 68 > doc.page.height - 80) doc.addPage();
+
+    const cor = e.presente ? ACCENT : DANGER;
+    doc
+      .fontSize(9)
+      .font("Helvetica-Bold")
+      .fillColor(cor)
+      .text(`${e.presente ? "[PRESENTE]" : "[AUSENTE]"} ${e.nome}`, MARGIN, doc.y, {
+        width: contentWidth,
+      });
+
+    doc.fontSize(8.5).font("Helvetica").fillColor(INK);
+    doc.text(`Função probatória: ${e.comprova}`, MARGIN + 12, doc.y + 1, {
+      width: contentWidth - 12,
+    });
+    doc.fillColor(MUTED).text(`Base normativa: ${e.norma}`, MARGIN + 12, doc.y + 1, {
+      width: contentWidth - 12,
+    });
+
+    // O efeito da ausência só é impresso quando o elemento falta — no laudo, o
+    // que importa é a consequência concreta, não a hipótese.
+    if (!e.presente) {
+      doc.fillColor(DANGER).text(`Efeito da ausência: ${e.ausencia}`, MARGIN + 12, doc.y + 1, {
+        width: contentWidth - 12,
+      });
+    }
+    doc.moveDown(0.35);
+  }
+
+  if (cadeia.faltantes.length) {
+    paragraph(
+      ctx,
+      `Elementos ausentes (${cadeia.faltantes.length}): ${cadeia.faltantes.map((e) => e.nome.toLowerCase()).join("; ")}.`,
+      { color: DANGER, size: 9 }
+    );
+  }
+
+  paragraph(ctx, cadeia.efeitoProcessual, { size: 9 });
 }
 
 // Rótulo legível da precisão de uma coordenada.
@@ -270,23 +414,13 @@ function precisionText(geoLike) {
   return p && PRECISION_LABEL[p] ? PRECISION_LABEL[p] : "precisão não determinada";
 }
 
-// Compatibilidade entre a origem do IP e o local declarado da assinatura.
-// Geo por IP é de nível de operadora (dezenas de km de margem, VPN distorce),
-// então as faixas são largas: o sinal útil é "mesma região" vs "regiões
-// distintas", não uma distância exata.
-function ipSignatureCompat(km) {
-  if (km == null) return { label: "indeterminada", ok: null };
-  if (km < 100) return { label: "COMPATÍVEL (mesma região)", ok: true };
-  if (km < 500) return { label: "DIVERGÊNCIA RELEVANTE", ok: false };
-  return { label: "INCOMPATÍVEL (regiões distintas)", ok: false };
-}
 
 // Insere a imagem do mapa estático (residência × assinatura declarada) com
 // legenda. Quebra de página se não couber no espaço restante.
-function drawMap(ctx, mapBuffer) {
+function drawMap(ctx, mapBuffer, legenda) {
   const { doc, contentWidth } = ctx;
   const imgH = contentWidth * (460 / 780); // mesma proporção da imagem buscada
-  if (doc.y + imgH + 40 > doc.page.height - 60) doc.addPage();
+  if (doc.y + imgH + 52 > doc.page.height - 60) doc.addPage();
   doc.moveDown(0.4);
   try {
     doc.image(mapBuffer, MARGIN, doc.y, { width: contentWidth });
@@ -299,89 +433,333 @@ function drawMap(ctx, mapBuffer) {
     .fontSize(8)
     .font("Helvetica-Oblique")
     .fillColor(MUTED)
-    .text(
-      "Mapa: residência do cliente (R, azul) × local declarado da assinatura (A, âmbar). A linha vermelha representa a distância geodésica entre os dois pontos. Base cartográfica OpenStreetMap.",
-      MARGIN,
-      doc.y,
-      { width: contentWidth, align: "center" }
-    );
+    .text(legenda, MARGIN, doc.y, { width: contentWidth, align: "center" });
   doc.moveDown(0.4);
 }
 
-function sectionGeo(ctx, result, mapBuffer) {
+function sectionGeo(ctx, result, mapas = {}) {
+  // O § 5 abre sempre com o parágrafo de enquadramento e o bloco de referência.
+  // O guarda padrão do `heading` (140pt) deixava o título e a introdução órfãos
+  // no pé da página, com o resto da seção começando só na página seguinte.
+  if (ctx.doc.y > ctx.doc.page.height - 300) ctx.doc.addPage();
+
   heading(ctx, "§ 5 · Geolocalização da assinatura · confronto geográfico");
 
   const home = result.home?.geo;
-  if (result.home?.query || home) {
-    if (result.home?.query) field(ctx, `Residência (${result.home.source || "referência"})`, result.home.query);
-    if (home?.display) field(ctx, "Coordenada da residência", `${home.display} — precisão ${precisionText(home)}`);
-    // Aviso explícito quando a residência é só aproximada (nível de cidade):
-    // a distância derivada dela não pode ser tratada como exata.
-    if (home && (home.precision === "city" || !home.precision)) {
-      paragraph(
-        ctx,
-        "Atenção: a coordenada da residência foi resolvida apenas em nível de cidade. A distância abaixo é aproximada e não deve ser usada como medida exata sem confirmação da coordenada pelo operador.",
-        { color: DANGER, size: 8.5 }
-      );
-    }
-  }
-
   const cg = result.contractGeo;
-  if (cg) {
-    field(ctx, "Local declarado da assinatura", cg.endereco || `${cg.lat}, ${cg.lon}`);
-    field(ctx, "Coordenadas", `${cg.lat}, ${cg.lon} — precisão ${precisionText(cg)}`);
-    if (cg.distance != null) {
-      const r = riskFromDistance(cg.distance);
-      badge(ctx, "Distância assinatura ate residência", `${cg.distance.toFixed(2)} km · ${r.label}`, r.score <= 1);
-    }
-  }
+  const ipRef = (result.ipAnalysis || []).find((ip) => ip.geo?.lat != null);
+  // Prefere a classificação persistida pelo enriquecimento; recalcula só para
+  // análises gravadas antes de `contractGeo.divergencia` existir.
+  const declarado =
+    cg?.divergencia ||
+    (cg?.distance != null
+      ? classifyDeclaredDivergence(cg.distance, {
+          referenciaConfirmada: home?.precision === "manual",
+        })
+      : null);
 
-  // Mapa real dos dois pontos, quando disponível.
-  if (mapBuffer) drawMap(ctx, mapBuffer);
+  // ─── Ponto de referência ───────────────────────────────────────────────────
+  paragraph(
+    ctx,
+    "Esta seção apresenta DOIS confrontos independentes, cada um com seu mapa. Eles respondem a perguntas diferentes e não se somam: o primeiro verifica de onde partiu a CONEXÃO que gerou o ato; o segundo verifica o que o DOCUMENTO afirma sobre o local do ato. Ambos usam como referência a residência informada.",
+    { size: 9 }
+  );
 
-  const ips = result.ipAnalysis || [];
-  if (ips.length) {
-    ctx.doc.moveDown(0.3);
-    const anySignature = ips.some((ip) => ip.distanceToSignature != null);
+  subheading(ctx, "Ponto de referência · residência do contratante");
+  if (result.home?.query) field(ctx, `Endereço (${result.home.source || "referência"})`, result.home.query);
+  if (home && Number.isFinite(home.lat) && Number.isFinite(home.lon)) {
+    // A coordenada NUMÉRICA é obrigatória: todas as distâncias abaixo derivam
+    // dela, e sem o valor o laudo deixa de ser reproduzível por terceiro.
+    field(ctx, "Coordenada adotada", `${home.lat}, ${home.lon}`, { mono: true });
     field(
       ctx,
-      "Confronto de IPs",
-      anySignature
-        ? "cada IP é confrontado com a residência e com a geolocalização declarada da assinatura"
-        : "cada IP é confrontado com a residência"
+      "   Origem da coordenada",
+      home.precision === "manual"
+        ? "confirmada pelo operador (padrão-ouro deste laudo)"
+        : `${home.display || "não informada"} (precisão ${precisionText(home)})`
     );
-    for (const ip of ips) {
-      const local = ip.geo?.city ? `${ip.geo.city}/${ip.geo.region || ""}` : "localização indeterminada";
-      ctx.doc.moveDown(0.15);
-      field(ctx, `IP ${ip.endereco}`, local);
-      if (ip.distance != null) {
-        const r = riskFromDistance(ip.distance);
-        badge(ctx, "   distância até a residência", `${ip.distance.toFixed(2)} km · ${r.label}`, r.score <= 1);
-      }
-      if (ip.distanceToSignature != null) {
-        const c = ipSignatureCompat(ip.distanceToSignature);
-        badge(ctx, "   IP × assinatura declarada", `${ip.distanceToSignature.toFixed(2)} km · ${c.label}`, c.ok === true);
-      }
+  }
+  if (home && (home.precision === "city" || !home.precision)) {
+    paragraph(
+      ctx,
+      "Atenção: a coordenada da residência foi resolvida apenas em nível de cidade. As distâncias derivadas dela são aproximadas e não devem ser tratadas como medidas exatas sem confirmação da coordenada pelo operador.",
+      { color: DANGER, size: 8.5 }
+    );
+  }
+  if (!home) {
+    paragraph(
+      ctx,
+      "Não foi possível estabelecer a coordenada de referência da residência. Sem ela, nenhum dos dois confrontos abaixo pode ser calculado.",
+      { color: DANGER, size: 9 }
+    );
+  }
+
+  // ─── Confronto 1: origem da conexão × residência ──────────────────────────
+  subheading(ctx, "§ 5.1 · Confronto 1 · origem da conexão (IP) × residência informada");
+  paragraph(
+    ctx,
+    "Pergunta: a conexão que originou a assinatura partiu da região onde o contratante reside? A localização do IP tem precisão de nível de operadora, isto é, aponta o roteador de saída e não o aparelho. A margem, portanto, é de dezenas de quilômetros, e só a incompatibilidade de ordem de grandeza tem valor indiciário.",
+    { color: MUTED, size: 8.5 }
+  );
+
+  if (!ipRef) {
+    paragraph(
+      ctx,
+      (result.ipAnalysis || []).length
+        ? "Confronto não realizado: há endereço IP no documento, mas nenhuma coordenada foi obtida para ele (ver § 5.3)."
+        : "Confronto não realizado: não foi extraído endereço IP do documento.",
+      { color: MUTED, size: 9 }
+    );
+  } else {
+    field(ctx, "Endereço IP", ipRef.endereco, { mono: true });
+    field(
+      ctx,
+      "Origem da conexão",
+      `${[ipRef.geo.city, ipRef.geo.region, ipRef.geo.country].filter(Boolean).join(" / ")} (${ipRef.geo.lat}, ${ipRef.geo.lon})`
+    );
+    const d = ipRef.divergenciaResidencia;
+    if (d) {
+      reserve(ctx, 170); // mesmo motivo do § 5.2: veredito e síntese juntos
+      badge(ctx, "Distância entre a origem do IP e a residência", `${d.km.toFixed(2)} km · ${d.rotulo}`, d.tom === "ok");
+      paragraph(ctx, d.sintese, { size: 9, color: d.tom === "danger" ? DANGER : INK });
+    } else if (!home) {
+      paragraph(ctx, "Distância não calculada: falta a coordenada de referência.", { color: MUTED, size: 8.5 });
     }
-    if (anySignature) {
-      paragraph(
+
+    if (mapas.mapaIpResidencia) {
+      drawMap(
         ctx,
-        "A geolocalização por IP é de nível de operadora (margem de dezenas de quilômetros; VPN/proxy podem distorcê-la). Divergência entre a origem do IP e a geolocalização declarada da assinatura é indício de larga escala — GPS potencialmente forjado ou ato praticado por terceiro — e não uma medida exata de distância.",
-        { color: MUTED, size: 8.5 }
+        mapas.mapaIpResidencia,
+        "Mapa 1. Origem da conexão pelo endereço IP (I, vermelho) × residência informada (R, azul). A linha representa a distância geodésica (Haversine). O ponto I indica o ponto de presença da operadora, NÃO a posição do aparelho. Base cartográfica OpenStreetMap."
       );
     }
   }
 
-  if (!cg && !ips.length && !result.home?.query) {
+  // ─── Confronto 2: residência × geolocalização declarada ───────────────────
+  subheading(ctx, "§ 5.2 · Confronto 2 · residência informada × geolocalização declarada no documento");
+  paragraph(
+    ctx,
+    "Pergunta: a coordenada que o próprio documento registra como local da assinatura corresponde à residência do contratante? Aqui as duas coordenadas são de precisão métrica (GPS declarado e ponto confirmado). A comparação é direta e, ao contrário do Confronto 1, uma divergência de poucos quilômetros já é significativa.",
+    { color: MUTED, size: 8.5 }
+  );
+
+  if (!cg) {
+    paragraph(
+      ctx,
+      result.geoDeclaredPresent
+        ? "Confronto não realizado: o documento indica geolocalização da assinatura, mas não foi possível obter coordenadas válidas nem geocodificar o endereço declarado."
+        : "Confronto não realizado: não foi localizada geolocalização (coordenadas GPS) declarada no log de assinatura deste documento.",
+      { color: MUTED, size: 9 }
+    );
+  } else {
+    if (cg.endereco) field(ctx, "Endereço declarado", cg.endereco);
+    field(ctx, "Coordenada declarada", `${cg.lat}, ${cg.lon}`, { mono: true });
+    field(ctx, "   Origem da coordenada", `${cg.fonte || "não informada"} (precisão ${precisionText(cg)})`);
+    if (cg.dataHora) field(ctx, "   Data / hora do registro", cg.dataHora);
+
+    // Régua PRÓPRIA deste confronto. `riskFromDistance` (50/300/1000 km) é
+    // calibrada para geolocalização de IP e rotulava 1,47 km como "RISCO BAIXO"
+    // logo abaixo do parágrafo que afirma o contrário — ver geoDivergence.js.
+    if (declarado) {
+      // Veredito + síntese + eventual ressalva formam um bloco só.
+      reserve(ctx, 170);
+      badge(
+        ctx,
+        "Distância entre o local declarado e a residência",
+        `${declarado.km.toFixed(2)} km · ${declarado.rotulo}`,
+        declarado.nivel === "compativel"
+      );
+      paragraph(ctx, declarado.sintese, { size: 9 });
+      if (declarado.ressalva) paragraph(ctx, declarado.ressalva, { color: MUTED, size: 8.5 });
+    }
+
+    if (mapas.mapaResidenciaDeclarado) {
+      drawMap(
+        ctx,
+        mapas.mapaResidenciaDeclarado,
+        "Mapa 2. Residência informada (R, azul) × geolocalização declarada no documento (A, âmbar). A linha representa a distância geodésica (Haversine). Ambos os pontos têm precisão métrica, ao contrário do Mapa 1. Base cartográfica OpenStreetMap."
+      );
+    }
+  }
+
+  // ─── Leitura conjunta ─────────────────────────────────────────────────────
+  // O cruzamento dos dois confrontos é o achado que nenhum deles produz
+  // isoladamente, e era exatamente o que o mapa único não permitia enxergar.
+  // O gatilho segue a CLASSIFICAÇÃO dos dois confrontos, não um limite solto em
+  // km: o texto afirma "praticamente no mesmo local", e isso só é verdade na
+  // faixa compatível. O `< 30 km` anterior faria o laudo escrever essa frase
+  // para uma divergência de 29 km, que é justamente um achado relevante.
+  if (ipRef?.divergenciaResidencia && declarado) {
+    const ipLonge = ipRef.divergenciaResidencia.nivel !== "compativel";
+    if (ipLonge && declarado.nivel === "compativel") {
+      paragraph(
+        ctx,
+        `Leitura conjunta dos dois confrontos: o documento declara que a assinatura ocorreu a ${declarado.km.toFixed(2)} km da residência do contratante, praticamente no mesmo local, mas a conexão que originou o ato partiu de ${ipRef.divergenciaResidencia.km.toFixed(2)} km de distância. A coordenada declarada e a origem real da conexão apontam regiões distintas. A divergência não comprova fraude e admite explicações legítimas (uso de rede de terceiro, imprecisão da base de geolocalização, roteamento da operadora), mas é ponto que exige esclarecimento da instituição financeira, a quem incumbe demonstrar a autenticidade do ato (STJ, Tema 1.061).`,
+        { color: DANGER, size: 9 }
+      );
+    } else if (ipLonge && declarado.nivel !== "compativel") {
+      // Os dois confrontos divergem. Vale dizer isso explicitamente, senão o
+      // leitor precisa cruzar duas seções para perceber que nada fecha.
+      paragraph(
+        ctx,
+        `Leitura conjunta dos dois confrontos: nenhum dos dois pontos coincide com a residência informada. O local declarado no documento está a ${declarado.km.toFixed(2)} km e a origem da conexão a ${ipRef.divergenciaResidencia.km.toFixed(2)} km. As duas divergências são independentes e devem ser esclarecidas separadamente, confrontadas com a data e hora do registro, com a versão do contratante sobre onde esteve e com a localização do correspondente bancário.`,
+        { color: DANGER, size: 9 }
+      );
+    }
+  }
+
+  sectionIpTrace(ctx, result);
+
+  /*
+   * `ips` era uma variável local desta função e ficou para trás na separação dos
+   * dois confrontos: o nome sobreviveu aqui, mas a declaração passou a viver em
+   * `sectionIpTrace`. O erro só aparece quando NÃO há geolocalização declarada no
+   * documento, porque as condições são avaliadas da esquerda para a direita e
+   * `!cg` curto-circuitava em todos os documentos de teste anteriores, que
+   * traziam coordenada.
+   *
+   * Efeito: `ReferenceError` no meio da geração, ou seja, laudo nenhum para um
+   * contrato sem GPS declarado, que é um caso comum.
+   */
+  if (!cg && !(result.ipAnalysis || []).length && !result.home?.query) {
     paragraph(ctx, "Não foram extraídos dados de geolocalização (IP, coordenadas ou endereço) suficientes para o confronto geográfico neste documento.", { color: MUTED });
   }
   paragraph(ctx, NOTA_DISTANCIA, { color: MUTED, size: 8.5 });
 }
 
+/**
+ * § 5.3 — detalhamento do rastro de conexão.
+ *
+ * A versão anterior imprimia "IP <endereço> — cidade/UF" e duas distâncias.
+ * Faltava o que dá valor probatório ao dado: o rótulo com que o assinador
+ * registrou o endereço, a versão do protocolo, a porta lógica, a data/hora
+ * associada, o provedor de geolocalização consultado e — principalmente — a
+ * leitura pericial da divergência, que antes o leitor tinha de inferir de um
+ * número em quilômetros.
+ */
+function sectionIpTrace(ctx, result) {
+  const { doc, contentWidth } = ctx;
+  const ips = result.ipAnalysis || [];
+  if (!ips.length) return;
+
+  doc.moveDown(0.5);
+  subheading(ctx, "§ 5.3 · Rastro de conexão · detalhamento dos endereços IP");
+
+  paragraph(
+    ctx,
+    "Um endereço IP não carrega coordenada. A localização abaixo vem de base que mapeia blocos de IP ao ponto de presença da operadora, ou seja, ao roteador de saída, não ao aparelho. Em rede móvel brasileira, com CGNAT e blocos IPv6 alocados por região, o ponto devolvido tende à capital ou ao centro de operação do estado. Divergências de dezenas de quilômetros são esperadas; o que tem valor indiciário é a incompatibilidade de ordem de grandeza.",
+    { color: MUTED, size: 8.5 }
+  );
+
+  for (const ip of ips) {
+    if (doc.y + 110 > doc.page.height - 80) doc.addPage();
+    doc.moveDown(0.35);
+
+    // Cabeçalho do IP: endereço + como o documento o registrou.
+    doc
+      .fontSize(9.5)
+      .font("Helvetica-Bold")
+      .fillColor(INK)
+      .text(`${ip.endereco}${ip.porta ? ` (porta lógica ${ip.porta})` : ""}`, MARGIN, doc.y, {
+        width: contentWidth,
+      });
+    doc
+      .fontSize(8.5)
+      .font("Helvetica")
+      .fillColor(MUTED)
+      .text(
+        `IPv${ip.versao || "?"} · ${ip.rotulo ? `registrado como “${ip.rotulo}”` : "sem rótulo explícito no documento"}`,
+        MARGIN + 12,
+        doc.y + 1,
+        { width: contentWidth - 12 }
+      );
+
+    if (ip.data_hora) field(ctx, "   Data / hora do registro", ip.data_hora);
+    if (ip.user_agent) field(ctx, "   Dispositivo declarado", ip.user_agent);
+
+    // Endereço de CGNAT não é ausência de dado nem falha de consulta: é um
+    // endereço que, por natureza, não localiza ninguém. Tratá-lo com a mesma
+    // frase de "o provedor não respondeu" seria impreciso, e a consequência
+    // probatória (o endereço sozinho não individualiza o assinante) é o ponto
+    // mais importante a registrar quando o documento traz IPv4.
+    if (ip.compartilhado) {
+      paragraph(
+        ctx,
+        "Este endereço pertence ao espaço compartilhado entre assinantes (CGNAT, RFC 6598, faixa 100.64.0.0/10). Trata-se de endereço interno da operadora, atribuído simultaneamente a um grande número de clientes, razão pela qual não corresponde a uma localização geográfica do usuário e não é possível confrontá-lo com a residência informada. A identificação de quem utilizava a conexão depende de requisição à operadora do conjunto endereço, PORTA LÓGICA e data e hora do acesso (Marco Civil da Internet, arts. 13 e 15, c/c art. 22). A ausência de qualquer um desses três elementos no documento inviabiliza a identificação, ainda que o endereço esteja registrado.",
+        { color: DANGER, size: 8.5 }
+      );
+      if (!ip.porta) {
+        paragraph(
+          ctx,
+          "Observa-se que o documento NÃO registra a porta lógica, elemento sem o qual a operadora não consegue individualizar o assinante em conexão sob CGNAT.",
+          { color: DANGER, size: 8.5 }
+        );
+      }
+      continue;
+    }
+
+    if (!ip.geo) {
+      // Distinção essencial num laudo: o documento trazia o dado, a CONSULTA
+      // falhou. Tratar as duas ausências como iguais induziria a erro.
+      paragraph(
+        ctx,
+        `Geolocalização não obtida (${ip.geoFailure || "motivo não registrado"}). O endereço consta do documento; a ausência de coordenada decorre de falha na consulta ao provedor, não de omissão do instrumento.`,
+        { color: DANGER, size: 8.5 }
+      );
+      continue;
+    }
+
+    field(
+      ctx,
+      "   Origem da conexão",
+      `${[ip.geo.city, ip.geo.region, ip.geo.country].filter(Boolean).join(" / ")} (${ip.geo.lat}, ${ip.geo.lon})`
+    );
+    if (ip.geo.isp) field(ctx, "   Operadora (ISP)", ip.geo.isp);
+    field(ctx, "   Fonte da geolocalização", ip.geo.source || "não informada");
+
+    // Confronto com a referência do operador — o coração do § 5.1.
+    const dr = ip.divergenciaResidencia;
+    if (dr) {
+      badge(ctx, "   IP × residência informada", `${dr.km.toFixed(2)} km · ${dr.rotulo}`, dr.tom === "ok");
+      paragraph(ctx, dr.sintese, { size: 8.5, color: dr.tom === "danger" ? DANGER : INK });
+      paragraph(ctx, dr.ressalva, { size: 8, color: MUTED });
+    }
+
+    const da = ip.divergenciaAssinatura;
+    if (da) {
+      badge(ctx, "   IP × GPS declarado no contrato", `${da.km.toFixed(2)} km · ${da.rotulo}`, da.tom === "ok");
+      paragraph(ctx, da.sintese, { size: 8.5, color: da.tom === "danger" ? DANGER : INK });
+    }
+  }
+}
+
+/*
+ * ─── Numeração contígua ───────────────────────────────────────────────────────
+ *
+ * O rastro de IP era o § 6 e passou a ser o § 5.3, mas as seções seguintes
+ * mantiveram 7, 8 e 9. Somado ao fato de que irregularidades e observações só
+ * eram impressas quando havia conteúdo, o laudo do documento de teste saía com a
+ * numeração pulando de § 5 para § 8 — o tipo de detalhe que faz um leitor
+ * técnico duvidar de que o documento esteja completo.
+ *
+ * As duas seções passam a ser SEMPRE impressas. Além de fechar o buraco, é a
+ * postura correta num laudo: afirmar que não se encontrou irregularidade é
+ * conclusão pericial; omitir a seção deixa o leitor sem saber se o exame foi
+ * feito.
+ */
 function sectionIrregularities(ctx, extracted) {
   const evs = extracted.evidencias_irregularidade || [];
-  if (!evs.length) return;
-  heading(ctx, "§ 7 · Evidências de irregularidade", { danger: true });
+  heading(ctx, "§ 6 · Evidências de irregularidade", { danger: evs.length > 0 });
+
+  if (!evs.length) {
+    paragraph(
+      ctx,
+      "A análise dos elementos extraídos deste documento não identificou evidência autônoma de irregularidade. A ausência de achado nesta seção não convalida o instrumento: as ressalvas dos §§ 4 e 5 subsistem e devem ser lidas em conjunto.",
+      { size: 9 }
+    );
+    return;
+  }
+
   for (const ev of evs) {
     const { doc, contentWidth } = ctx;
     if (doc.y > doc.page.height - 100) doc.addPage();
@@ -392,13 +770,16 @@ function sectionIrregularities(ctx, extracted) {
 }
 
 function sectionRemarks(ctx, extracted) {
-  if (!extracted.observacoes_periciais) return;
-  heading(ctx, "§ 8 · Observações periciais complementares");
-  paragraph(ctx, extracted.observacoes_periciais);
+  heading(ctx, "§ 7 · Observações periciais complementares");
+  paragraph(
+    ctx,
+    extracted.observacoes_periciais ||
+      "Não há observação complementar além do que já consta das seções anteriores."
+  );
 }
 
 function sectionLegal(ctx) {
-  heading(ctx, "§ 9 · Fundamentação normativa aplicável");
+  heading(ctx, "§ 8 · Fundamentação normativa aplicável");
   for (const { grupo, itens } of FUNDAMENTACAO) {
     const { doc, contentWidth } = ctx;
     if (doc.y > doc.page.height - 130) doc.addPage();

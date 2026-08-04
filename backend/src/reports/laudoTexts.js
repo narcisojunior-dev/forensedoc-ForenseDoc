@@ -24,7 +24,7 @@ export const NOTA_HASH_SISTEMA =
 
 // §5 — ressalva sobre distância não provar fraude.
 export const NOTA_DISTANCIA =
-  "A distância geográfica, isoladamente, não determina fraude. Deslocamentos compatíveis com a rotina do cliente — por exemplo, ir da zona rural à capital do estado — podem ser plenamente legítimos. Este resultado deve ser confrontado com a entrevista do cliente, com a data e hora da assinatura e com a localização do correspondente bancário antes de qualquer conclusão sobre irregularidade.";
+  "A distância geográfica, isoladamente, não determina fraude. Deslocamentos compatíveis com a rotina do cliente, como ir da zona rural à capital do estado, podem ser plenamente legítimos. Este resultado deve ser confrontado com a entrevista do cliente, com a data e hora da assinatura e com a localização do correspondente bancário antes de qualquer conclusão sobre irregularidade.";
 
 // §9 — fundamentação normativa, agrupada por tema.
 export const FUNDAMENTACAO = [

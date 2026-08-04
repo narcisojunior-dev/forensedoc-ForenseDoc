@@ -4,6 +4,7 @@ import toast from "react-hot-toast";
 import { api } from "../lib/axios";
 import { useAuthStore } from "../store/authStore";
 import { getFounderCode, clearFounderCode } from "../utils/founderInvite";
+import ConfirmDialog from "../components/ConfirmDialog";
 
 // Mensagens dos erros que o backend devolve ao validar o convite de fundador.
 // Cada caso tem tratamento próprio: "inválido" pede conferência do link,
@@ -45,6 +46,7 @@ export default function Plans() {
   const [busyPlanId, setBusyPlanId] = useState(null);
   const [busyAvulso, setBusyAvulso] = useState(false);
   const [busyCancel, setBusyCancel] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
   // Convite de fundador: `founder` só é preenchido depois que o backend
   // confirma o código. `founderError` guarda o motivo da recusa, para explicar
   // ao convidado em vez de simplesmente não mostrar o plano.
@@ -147,11 +149,11 @@ export default function Plans() {
   };
 
   const handleCancel = async () => {
-    if (!window.confirm("Cancelar sua assinatura? Os créditos mensais restantes serão perdidos ao final do ciclo.")) return;
     setBusyCancel(true);
     try {
       await api.post("/billing/subscription/cancel");
       toast.success("Assinatura cancelada.");
+      setConfirmCancel(false);
       await fetchAll();
     } catch (error) {
       toast.error(error.response?.data?.error || "Erro ao cancelar assinatura.");
@@ -167,9 +169,26 @@ export default function Plans() {
       // O valor entra na mensagem porque o preço do avulso varia com o plano e
       // com o limite do ciclo — o cliente precisa ver quanto foi cobrado.
       const valor = data.pricing ? formatBRL(data.pricing.amountBrl) : "";
-      toast.success(`Cobrança de ${valor} gerada! Finalize o pagamento para receber o crédito.`);
-      if (data.invoiceUrl) window.open(data.invoiceUrl, "_blank");
+
+      // Recarrega ANTES de tentar abrir a cobrança: o card "Cobrança pendente"
+      // passa a existir na tela, então há um caminho visível para o pagamento
+      // mesmo se o popup for barrado.
       await fetchAll();
+
+      // `window.open` depois de um `await` costuma ser bloqueado: o navegador
+      // já considerou o gesto do usuário consumido e trata a chamada como popup
+      // não solicitado. O cliente gerava a cobrança e a página de pagamento
+      // simplesmente não abria, sem nenhum aviso.
+      const aberta = data.invoiceUrl
+        ? window.open(data.invoiceUrl, "_blank", "noopener,noreferrer")
+        : null;
+
+      toast.success(
+        aberta || !data.invoiceUrl
+          ? `Cobrança de ${valor} gerada! Finalize o pagamento para receber o crédito.`
+          : `Cobrança de ${valor} gerada! Use o botão "Ver cobrança" abaixo para pagar — o navegador bloqueou a abertura automática.`,
+        { duration: 8000 }
+      );
     } catch (error) {
       toast.error(error.response?.data?.error || "Erro ao comprar crédito avulso.");
     } finally {
@@ -269,7 +288,7 @@ export default function Plans() {
           </div>
           {subscription.status !== "CANCELLED" && (
             <button
-              onClick={handleCancel}
+              onClick={() => setConfirmCancel(true)}
               disabled={busyCancel}
               className="text-red-400 hover:bg-red-400/10 border border-red-400/20 px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 shrink-0"
             >
@@ -404,6 +423,17 @@ export default function Plans() {
           Comprar
         </button>
       </div>
+
+      <ConfirmDialog
+        open={confirmCancel}
+        title="Cancelar sua assinatura?"
+        message="Os créditos mensais restantes serão perdidos ao final do ciclo. Créditos avulsos não expiram e continuam disponíveis."
+        confirmLabel="Cancelar assinatura"
+        cancelLabel="Manter assinatura"
+        busy={busyCancel}
+        onConfirm={handleCancel}
+        onCancel={() => setConfirmCancel(false)}
+      />
     </div>
   );
 }

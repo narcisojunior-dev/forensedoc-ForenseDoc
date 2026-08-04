@@ -1,5 +1,6 @@
 import { buildGeocodeQueries, normalizeGeoText } from "../utils/geoUtils.js";
 import { stripDiacritics } from "../utils/stringUtils.js";
+import { buildSearchUrl, NOMINATIM_UA } from "./nominatimClient.js";
 
 /**
  * Geocodificação confiável para laudo pericial (Brasil).
@@ -25,13 +26,12 @@ import { stripDiacritics } from "../utils/stringUtils.js";
  */
 
 const FETCH_TIMEOUT_MS = 8_000;
-const UA = "ForenseDoc/3.0 (Ronney Menezes Advocacia)";
 
 async function fetchJson(url) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    const r = await fetch(url, { headers: { "User-Agent": UA }, signal: controller.signal });
+    const r = await fetch(url, { headers: { "User-Agent": NOMINATIM_UA }, signal: controller.signal });
     if (!r.ok) return null;
     return await r.json();
   } catch {
@@ -137,9 +137,7 @@ async function geocodeByNominatim(rawQuery) {
   for (const query of buildGeocodeQueries(rawQuery)) {
     // countrycodes=br é filtro rígido; addressdetails=1 traz a cidade casada
     // para verificação; limit=5 para escolher o melhor que bate a cidade.
-    const url =
-      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}` +
-      `&format=json&addressdetails=1&countrycodes=br&limit=5&accept-language=pt-BR`;
+    const url = buildSearchUrl(query, { addressdetails: 1, countrycodes: "br", limit: 5 });
     const results = await fetchJson(url);
     if (!Array.isArray(results) || results.length === 0) continue;
 

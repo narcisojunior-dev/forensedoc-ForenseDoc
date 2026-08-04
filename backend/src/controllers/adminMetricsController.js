@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { prisma } from "../utils/prisma.js";
 import { countOccupiedSeats } from "./tenantController.js";
+import { parsePagination } from "../utils/pagination.js";
+import { queueMetrics } from "../services/queueMetricsService.js";
 
 /**
  * Métricas e gestão de planos do Admin Panel (Módulo 6 — RF-18/RF-20).
@@ -143,6 +145,28 @@ const updatePlanSchema = z
     avulsoDiscountLimit: z.number({ error: "Limite de avulsos inválido." }).int().nonnegative("O limite não pode ser negativo.").optional(),
     isActive: z.boolean().optional(),
     founderSlotsRemaining: z.number().int().nonnegative().nullable().optional(),
+
+    // ── Capacidade operacional vendida no plano ──────────────────────────
+    //
+    // Mínimo 1 nos dois: zero bloquearia o cliente por completo, e um zero
+    // gravado por engano aqui viraria um incidente difícil de diagnosticar
+    // (o cliente vê 409 em tudo, sem erro no servidor).
+    //
+    // Os tetos existem para que um valor digitado errado no painel não
+    // consiga esgotar a infraestrutura: quatro análises simultâneas por
+    // tenant já ocupam todos os workers de um host típico.
+    maxConcurrentAnalyses: z
+      .number({ error: "Limite de análises simultâneas inválido." })
+      .int()
+      .min(1, "O plano deve permitir ao menos 1 análise simultânea.")
+      .max(50, "Acima de 50 simultâneas por cliente, avalie a infraestrutura antes.")
+      .optional(),
+    analysesPerMinute: z
+      .number({ error: "Vazão por minuto inválida." })
+      .int()
+      .min(1, "O plano deve permitir ao menos 1 análise por minuto.")
+      .max(600, "Acima de 600 por minuto, avalie a infraestrutura antes.")
+      .optional(),
   })
   .refine((d) => Object.keys(d).length > 0, "Nenhum campo para atualizar.");
 
@@ -200,20 +224,33 @@ export async function updatePlan(req, res) {
 // Audit log (RF-19 apoio)
 // ─────────────────────────────────────────────────────────────
 
+/**
+ * Filtros do audit log, coagidos a string/data antes de entrar no `where`.
+ *
+ * `?action[not]=login` chega como objeto pelo qs e o Prisma o interpretaria
+ * como operador. As datas também passam a ser validadas: `new Date("qualquer
+ * coisa")` produzia `Invalid Date` e derrubava a consulta com 500.
+ */
+const auditLogQuerySchema = z.object({
+  action: z.string().trim().max(100).optional(),
+  tenantId: z.string().trim().max(100).optional(),
+  from: z.coerce.date().optional(),
+  to: z.coerce.date().optional(),
+});
+
 export async function listAuditLogs(req, res) {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = Math.min(parseInt(req.query.limit) || 30, 100);
-    const skip = (page - 1) * limit;
+    const { page, limit, skip } = parsePagination(req.query, { def: 30 });
+    const filters = auditLogQuerySchema.parse(req.query);
 
     const where = {
-      ...(req.query.action ? { action: req.query.action } : {}),
-      ...(req.query.tenantId ? { tenantId: req.query.tenantId } : {}),
-      ...(req.query.from || req.query.to
+      ...(filters.action ? { action: filters.action } : {}),
+      ...(filters.tenantId ? { tenantId: filters.tenantId } : {}),
+      ...(filters.from || filters.to
         ? {
             createdAt: {
-              ...(req.query.from ? { gte: new Date(req.query.from) } : {}),
-              ...(req.query.to ? { lte: new Date(req.query.to) } : {}),
+              ...(filters.from ? { gte: filters.from } : {}),
+              ...(filters.to ? { lte: filters.to } : {}),
             },
           }
         : {}),
@@ -241,6 +278,9 @@ export async function listAuditLogs(req, res) {
       pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
     });
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: "Filtro inválido." });
+    }
     console.error("[AdminMetrics] Erro ao listar audit logs:", error);
     return res.status(500).json({ error: "Erro interno no servidor." });
   }
@@ -252,10 +292,13 @@ export async function listAuditLogs(req, res) {
 
 export async function listAllPayments(req, res) {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = Math.min(parseInt(req.query.limit) || 30, 100);
-    const skip = (page - 1) * limit;
-    const where = req.query.status ? { status: req.query.status } : {};
+    const { page, limit, skip } = parsePagination(req.query, { def: 30 });
+    // Mesmo motivo do audit log: sem o enum, `?status[not]=PAID` entraria no
+    // where como operador do Prisma.
+    const { status } = z
+      .object({ status: z.enum(["PENDING", "PAID", "OVERDUE", "CANCELLED"]).optional() })
+      .parse(req.query);
+    const where = status ? { status } : {};
 
     const [payments, total] = await Promise.all([
       prisma.payment.findMany({
@@ -273,7 +316,34 @@ export async function listAllPayments(req, res) {
       pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
     });
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: "Filtro inválido." });
+    }
     console.error("[AdminMetrics] Erro ao listar pagamentos:", error);
     return res.status(500).json({ error: "Erro interno no servidor." });
+  }
+}
+
+/**
+ * Estado operacional das filas.
+ *
+ * Fica no painel administrativo, e não no /health, por dois motivos. O /health é
+ * público e foi deliberadamente reduzido na auditoria (B4) para não entregar
+ * superfície a quem mapeia o alvo, e profundidade de fila diz a um atacante
+ * exatamente quando o sistema está sob pressão. Além disso, o /health precisa
+ * responder rápido sem tocar em dependência externa, e isto consulta o Redis.
+ *
+ * A rota é a única forma de saber se a concorrência configurada dá conta do
+ * volume. Sem ela, o primeiro sinal de saturação é a reclamação do cliente.
+ */
+export async function getQueueMetrics(_req, res) {
+  try {
+    return res.json(await queueMetrics());
+  } catch (error) {
+    console.error("[AdminMetrics] Erro ao coletar métricas de fila:", error);
+    return res.status(503).json({
+      error: "Não foi possível consultar as filas.",
+      code: "QUEUE_METRICS_UNAVAILABLE",
+    });
   }
 }

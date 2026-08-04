@@ -51,3 +51,17 @@ export function titleCaseName(value) {
 export function stripDiacritics(value) {
   return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
+
+/**
+ * Forma can\u00f4nica do e-mail para grava\u00e7\u00e3o e busca.
+ *
+ * O banco trata `Joao@x.com` e `joao@x.com` como valores diferentes, ent\u00e3o sem
+ * normalizar o mesmo endere\u00e7o vira duas contas: quem se cadastrou com mai\u00fascula
+ * n\u00e3o consegue logar digitando min\u00fascula, e a checagem de unicidade do cadastro
+ * \u00e9 contorn\u00e1vel. Precisa ser aplicada em TODOS os pontos que gravam ou
+ * consultam usu\u00e1rio por e-mail \u2014 cadastro, login, recupera\u00e7\u00e3o de senha e
+ * convite de membro.
+ */
+export function normalizeEmail(value) {
+  return String(value || "").trim().toLowerCase();
+}

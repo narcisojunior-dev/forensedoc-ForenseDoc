@@ -126,6 +126,38 @@ model User {
   isPlatformAdmin Boolean   @default(false)
   active          Boolean   @default(true)
   lastLoginAt     DateTime?
+
+  // ── Aceite dos documentos jurídicos ─────────────────────────────────────
+  //
+  // Guardar apenas "aceitou" não serve de nada: o que precisa ser demonstrável
+  // é QUAL TEXTO a pessoa aceitou. Termos mudam, e sem a versão a alegação de
+  // que a expectativa estava calibrada não se sustenta — o usuário sempre
+  // poderia dizer que a cláusula invocada não existia quando ele se cadastrou.
+  //
+  // Nulo em quem se cadastrou antes desta mudança. Ver `requireCurrentTerms`.
+  termsVersion    String?
+  termsAcceptedAt DateTime?
+
+  // ── Segundo fator (TOTP) ────────────────────────────────────────────────
+  //
+  // `totpSecret` é o segredo base32 do autenticador. Fica em texto claro, e
+  // isso é uma decisão consciente: cifrá-lo exigiria uma chave que, guardada no
+  // mesmo servidor, é comprometida junto com o banco, e guardada fora exigiria
+  // um KMS que este projeto não tem. Quem obtém o banco obtém o segundo fator,
+  // e é por isso que a allowlist de IP do painel CONTINUA valendo: são camadas
+  // com modos de falha diferentes.
+  //
+  // `totpLastStep` impede reuso: o mesmo código vale durante toda a janela de
+  // tempo, então sem isto um código observado uma vez pode ser reapresentado.
+  //
+  // `totpRecoveryCodes` guarda HASHES bcrypt dos códigos de uso único. Eles
+  // valem tanto quanto a senha (dispensam o app), então são tratados como
+  // senha: nunca em texto claro, exibidos uma única vez na geração.
+  totpSecret        String?
+  totpEnabledAt     DateTime?
+  totpLastStep      BigInt?
+  totpRecoveryCodes String[]  @default([])
+
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -154,6 +186,16 @@ model RefreshToken {
   expiresAt DateTime
   revoked   Boolean  @default(false)
   createdAt DateTime @default(now())
+
+  // A sessão foi aberta com o segundo fator?
+  //
+  // Mora aqui, e não só no access token, porque o refresh emite token novo a
+  // cada 15 minutos sem pedir nada ao usuário. Se a marca vivesse apenas no
+  // access token, ou ela se perderia no primeiro refresh (derrubando o admin do
+  // painel a cada 15 min), ou seria reafirmada sem base. Presa à sessão, ela
+  // significa o que precisa significar: ESTA sessão nasceu de uma verificação
+  // TOTP, e a rotação apenas carrega esse fato adiante.
+  mfaVerified Boolean @default(false)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -229,6 +271,19 @@ model Plan {
   // zera junto com a renovação.
   avulsoPriceBrl        Decimal? @db.Decimal(10, 2)
   avulsoDiscountLimit   Int      @default(1)
+
+  // ── Limites operacionais por plano ──────────────────────────────────────
+  //
+  // Os dois nasceram como constantes globais calibradas para escritório de um
+  // operador só: mutex de uma análise por vez e janela de 30s entre envios.
+  // Num cliente B2B com dez funcionários, os dez disputavam um único slot, e o
+  // teto de 120 laudos/hora valia independentemente da infraestrutura.
+  //
+  // Viram atributo comercial: o plano define quanta capacidade o cliente
+  // compra, e o default preserva o comportamento anterior para quem já assina.
+  maxConcurrentAnalyses Int      @default(1)
+  analysesPerMinute     Int      @default(2)
+
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 
@@ -337,6 +392,21 @@ model Analysis {
   filenameHash          String // hash SHA-256 do nome do arquivo (não do conteúdo)
   status                AnalysisStatus @default(PROCESSING)
   result                Json? // laudo estruturado (JSONB) — sem dados binários do PDF
+
+  // ── PDF original no armazenamento de objetos ────────────────────────────
+  //
+  // O arquivo saiu do payload do job (que vive no Redis, em memória) e passou
+  // para o R2. Guardar a chave aqui permite regerar o laudo e, principalmente,
+  // permite o EXPURGO ser preciso: a rotina de retenção seleciona por data no
+  // banco em vez de varrer o bucket.
+  //
+  // `pdfPurgedAt` registra a eliminação. Um laudo cujo original já foi apagado
+  // continua íntegro (os hashes estão no `result`), mas quem lê o histórico
+  // precisa saber que o arquivo não está mais disponível, e a data é o que
+  // demonstra o cumprimento da política de retenção.
+  pdfObjectKey          String?
+  pdfPurgedAt           DateTime?
+
   processingStartedAt   DateTime?
   processingCompletedAt DateTime?
   createdAt             DateTime       @default(now())

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { api } from "../lib/axios";
+import { api, setAccessToken, clearAccessToken, getAccessToken, bootstrapAuth } from "../lib/axios";
 
 export const useAuthStore = create((set) => ({
   user: null,
@@ -11,16 +11,51 @@ export const useAuthStore = create((set) => ({
   login: async (email, password) => {
     try {
       const response = await api.post("/auth/login", { email, password });
-      const { accessToken } = response.data;
-      localStorage.setItem("accessToken", accessToken);
-      
+
+      /*
+       * Conta com segundo fator: o servidor não devolve token nenhum, só um
+       * desafio de 5 minutos. A tela troca para o passo do código, e a sessão
+       * só nasce em `verifyTotp`.
+       */
+      if (response.data.totpRequired) {
+        return {
+          success: false,
+          totpRequired: true,
+          challenge: response.data.challenge,
+          recuperacaoDisponivel: response.data.recuperacaoDisponivel,
+        };
+      }
+
+      setAccessToken(response.data.accessToken);
+
       // Busca dados do usuário após login
       await useAuthStore.getState().checkAuth();
       return { success: true };
     } catch (error) {
-      return { 
-        success: false, 
-        error: error.response?.data?.error || "Erro ao fazer login." 
+      return {
+        success: false,
+        error: error.response?.data?.error || "Erro ao fazer login."
+      };
+    }
+  },
+
+  /** Segundo passo: o desafio prova a senha, o código prova o aplicativo. */
+  verifyTotp: async (challenge, codigo) => {
+    try {
+      const response = await api.post("/auth/totp/verify", { challenge, codigo });
+      setAccessToken(response.data.accessToken);
+      await useAuthStore.getState().checkAuth();
+      return {
+        success: true,
+        codigosDeRecuperacaoRestantes: response.data.codigosDeRecuperacaoRestantes,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        // O desafio venceu: não adianta insistir no código, tem que refazer o
+        // login. A tela precisa do código para voltar ao passo da senha.
+        expirado: error.response?.data?.code === "TOTP_CHALLENGE_EXPIRED",
+        error: error.response?.data?.error || "Não foi possível verificar o código.",
       };
     }
   },
@@ -43,16 +78,21 @@ export const useAuthStore = create((set) => ({
     } catch (err) {
       console.error("Logout silencioso falhou:", err);
     } finally {
-      localStorage.removeItem("accessToken");
+      clearAccessToken();
       set({ user: null, isAuthenticated: false });
     }
   },
 
   checkAuth: async () => {
-    const token = localStorage.getItem("accessToken");
-    if (!token) {
-      set({ user: null, isAuthenticated: false, isLoading: false });
-      return;
+    // Com o token em memória, um F5 zera tudo — quem diz se a sessão existe é o
+    // cookie httpOnly de refresh. Só tenta restaurar quando não há token vivo,
+    // para não gastar um refresh a cada montagem de rota protegida.
+    if (!getAccessToken()) {
+      const restaurada = await bootstrapAuth();
+      if (!restaurada) {
+        set({ user: null, isAuthenticated: false, isLoading: false });
+        return;
+      }
     }
 
     try {
@@ -63,7 +103,7 @@ export const useAuthStore = create((set) => ({
       await useAuthStore.getState().fetchBalance();
     } catch (error) {
       console.error("Sessão inválida ou expirada", error);
-      localStorage.removeItem("accessToken");
+      clearAccessToken();
       set({ user: null, isAuthenticated: false, isLoading: false });
     }
   },

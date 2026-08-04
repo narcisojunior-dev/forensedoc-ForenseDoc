@@ -47,7 +47,7 @@ export async function exportReportPDF(setBusy, setPdfDownload) {
 
     const reportRect = el.getBoundingClientRect();
     const canvasScale = canvas.width / reportRect.width;
-    const geoNode = el.querySelector(".geo-visual-block");
+    const geoNode = el.querySelector("[data-geo-visual], .geo-visual-block");
     let geoRange = null;
     if (geoNode) {
       const rect = geoNode.getBoundingClientRect();
@@ -57,8 +57,11 @@ export async function exportReportPDF(setBusy, setPdfDownload) {
       };
       if (geoRange.end <= geoRange.start) geoRange = null;
     }
+    // `[data-report-block]` é a âncora do laudo v3; os nomes de classe cobrem a
+    // tela legada /v2, que ainda usa a CSS antiga. Manter os dois evita que a
+    // paginação do PDF fique amarrada à aparência dos componentes.
     const avoidCutRanges = Array.from(el.querySelectorAll(
-      ".row, .note, .grid-2, .dist-banner, .ip-block, .norm, .legal, .report-cover, .report-notice, .hash-card, .geo-card",
+      "[data-report-block], .row, .note, .grid-2, .dist-banner, .ip-block, .norm, .legal, .report-cover, .report-notice, .hash-card, .geo-card",
     ))
       .map((node) => {
         const rect = node.getBoundingClientRect();

@@ -6,3 +6,7 @@ node_modules
 
 # Tesseract.js baixa os dados de idioma no cwd em runtime
 *.traineddata
+
+# Dossiês enviados (armazenamento local, retenção de 30 dias).
+# Contêm dado pessoal de terceiro: nunca versionar.
+data/

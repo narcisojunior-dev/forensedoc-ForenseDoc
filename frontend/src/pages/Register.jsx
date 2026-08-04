@@ -3,6 +3,8 @@ import { Link, useNavigate } from "react-router-dom";
 import { Scale, Loader2, CheckCircle2 } from "lucide-react";
 import toast from "react-hot-toast";
 import { useAuthStore } from "../store/authStore";
+import { MIN_LENGTH, checkPassword } from "../utils/passwordRules";
+import { TERMS_VERSION } from "../utils/legalVersion";
 
 export default function Register() {
   const [formData, setFormData] = useState({
@@ -12,6 +14,7 @@ export default function Register() {
     cpfCnpj: "",
     oabNumber: "",
   });
+  const [aceitou, setAceitou] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   
@@ -22,12 +25,26 @@ export default function Register() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    // Mesma checagem do aceite de convite: o `minLength` do input cobre só o
+    // comprimento, e descobrir "a senha contém seu nome" depois de digitar nome,
+    // CPF/CNPJ e OAB é o pior momento possível.
+    const politica = checkPassword(formData.password, {
+      email: formData.email,
+      name: formData.name,
+    });
+    if (!politica.ok) return toast.error(politica.error);
+
     setIsSubmitting(true);
     
     // Removendo formatação básica se houver
     const payload = {
       ...formData,
-      cpfCnpj: formData.cpfCnpj.replace(/\D/g, "")
+      cpfCnpj: formData.cpfCnpj.replace(/\D/g, ""),
+      // A VERSÃO, e não um booleano: é ela que torna o aceite demonstrável.
+      // O servidor recusa versão diferente da vigente, o que cobre o caso do
+      // formulário aberto numa aba antiga depois de os documentos mudarem.
+      termsVersion: TERMS_VERSION,
     };
 
     const result = await register(payload);
@@ -115,17 +132,45 @@ export default function Register() {
 
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-zinc-300 mb-1">Senha Segura</label>
-                <input type="password" name="password" value={formData.password} onChange={handleChange} required minLength={8}
+                <input type="password" name="password" value={formData.password} onChange={handleChange} required minLength={MIN_LENGTH}
                   className="w-full px-4 py-3 bg-surface border border-surface-border rounded-xl text-foreground placeholder-zinc-500 focus:ring-2 focus:ring-primary focus:outline-none" 
                   placeholder="••••••••" />
-                <p className="text-xs text-zinc-500 mt-2">Mínimo de 8 caracteres.</p>
+                <p className="text-xs text-zinc-500 mt-2">Mínimo de {MIN_LENGTH} caracteres, sem usar seu nome ou e-mail.</p>
               </div>
             </div>
 
+            {/*
+              O aceite fica ANTES do botão e é obrigatório para enviar. Aceite
+              presumido por "ao continuar você concorda" é frágil: não há ato do
+              usuário para demonstrar, e a caixa desmarcada obriga a uma escolha
+              consciente, que é o que dá valor ao registro.
+            */}
+            <label className="mt-6 flex cursor-pointer items-start gap-3 text-sm text-zinc-400">
+              <input
+                type="checkbox"
+                checked={aceitou}
+                onChange={(e) => setAceitou(e.target.checked)}
+                required
+                className="mt-0.5 h-4 w-4 shrink-0 accent-primary"
+              />
+              <span>
+                Li e aceito os{" "}
+                <Link to="/termos" target="_blank" className="text-primary hover:underline">
+                  Termos de Uso
+                </Link>{" "}
+                e a{" "}
+                <Link to="/privacidade" target="_blank" className="text-primary hover:underline">
+                  Política de Privacidade
+                </Link>
+                . Declaro estar ciente de que o laudo é peça de apoio e depende de conferência
+                humana antes de qualquer uso.
+              </span>
+            </label>
+
             <button
               type="submit"
-              disabled={isSubmitting}
-              className="w-full mt-6 flex justify-center py-4 px-4 border border-transparent rounded-xl shadow-[0_0_15px_rgba(59,130,246,0.2)] text-sm font-bold text-white bg-primary hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-background focus:ring-primary disabled:opacity-50 transition-all"
+              disabled={isSubmitting || !aceitou}
+              className="w-full mt-5 flex justify-center py-4 px-4 border border-transparent rounded-xl shadow-[0_0_15px_rgba(59,130,246,0.2)] text-sm font-bold text-white bg-primary hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-background focus:ring-primary disabled:opacity-50 transition-all"
             >
               {isSubmitting ? (
                 <>

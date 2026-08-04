@@ -3,20 +3,60 @@ import { Loader2, Pencil, Check, X } from "lucide-react";
 import toast from "react-hot-toast";
 import { api } from "../../lib/axios";
 
-function PlanRow({ plan, onSaved }) {
-  const [editing, setEditing] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({
+/** Valores do formulário derivados do plano — fonte única para abrir e cancelar. */
+function formFromPlan(plan) {
+  return {
     priceBrl: Number(plan.priceBrl),
     creditsMonthly: plan.creditsMonthly,
     maxUsers: plan.maxUsers,
     // Campo vazio = sem desconto de avulso para este plano.
     avulsoPriceBrl: plan.avulsoPriceBrl == null ? "" : Number(plan.avulsoPriceBrl),
     avulsoDiscountLimit: plan.avulsoDiscountLimit,
+    // Capacidade operacional vendida no plano. Ver planLimitsService.js: eram
+    // constantes globais calibradas para escritório de um operador só.
+    maxConcurrentAnalyses: plan.maxConcurrentAnalyses,
+    analysesPerMinute: plan.analysesPerMinute,
     isActive: plan.isActive,
-  });
+  };
+}
+
+function PlanRow({ plan, onSaved }) {
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState(() => formFromPlan(plan));
+
+  /** Abre a edição sempre a partir do plano atual, nunca do rascunho anterior. */
+  const startEditing = () => {
+    setForm(formFromPlan(plan));
+    setEditing(true);
+  };
+
+  /**
+   * Cancelar precisa DESCARTAR o rascunho. O `useState` só usa o valor inicial
+   * na primeira montagem, e a linha não é remontada entre edições (a `key` é o
+   * id do plano) — sem restaurar aqui, reabrir a edição trazia de volta o que o
+   * operador tinha digitado e abandonado.
+   */
+  const cancelEditing = () => {
+    setForm(formFromPlan(plan));
+    setEditing(false);
+  };
 
   const save = async () => {
+    // `Number("")` é 0: um campo de preço apagado por engano salvava o plano a
+    // R$ 0,00 sem nenhum aviso. O backend aceita (`nonnegative`), então a
+    // proteção tem de estar aqui.
+    const obrigatorios = [
+      ["Preço/mês", form.priceBrl],
+      ["Créditos", form.creditsMonthly],
+      ["Usuários", form.maxUsers],
+      ["Limite/ciclo", form.avulsoDiscountLimit],
+      ["Simultâneas", form.maxConcurrentAnalyses],
+      ["Por minuto", form.analysesPerMinute],
+    ];
+    const vazio = obrigatorios.find(([, v]) => v === "" || v === null || v === undefined);
+    if (vazio) return toast.error(`Preencha o campo "${vazio[0]}".`);
+
     setSaving(true);
     try {
       const { data } = await api.patch(`/admin/plans/${plan.id}`, {
@@ -25,6 +65,8 @@ function PlanRow({ plan, onSaved }) {
         maxUsers: Number(form.maxUsers),
         avulsoPriceBrl: form.avulsoPriceBrl === "" ? null : Number(form.avulsoPriceBrl),
         avulsoDiscountLimit: Number(form.avulsoDiscountLimit),
+        maxConcurrentAnalyses: Number(form.maxConcurrentAnalyses),
+        analysesPerMinute: Number(form.analysesPerMinute),
         isActive: form.isActive,
       });
       toast.success(`Plano ${data.plan.name} atualizado.`);
@@ -63,6 +105,8 @@ function PlanRow({ plan, onSaved }) {
             {plan.avulsoDiscountLimit}
           </span>
         </td>
+        <td className={`${cell} text-right text-zinc-400`}>{plan.maxConcurrentAnalyses}</td>
+        <td className={`${cell} text-right text-zinc-400`}>{plan.analysesPerMinute}</td>
         <td className={`${cell} text-center`}>
           <span className={plan.isActive ? "text-emerald-400" : "text-zinc-500"}>
             {plan.isActive ? "Ativo" : "Inativo"}
@@ -70,7 +114,7 @@ function PlanRow({ plan, onSaved }) {
         </td>
         <td className={`${cell} text-right text-zinc-400`}>{plan.activeSubscriptions}</td>
         <td className={`${cell} text-right`}>
-          <button onClick={() => setEditing(true)} className="text-zinc-400 hover:text-primary p-1" title="Editar">
+          <button onClick={startEditing} className="text-zinc-400 hover:text-primary p-1" title="Editar">
             <Pencil className="w-4 h-4" />
           </button>
         </td>
@@ -113,6 +157,28 @@ function PlanRow({ plan, onSaved }) {
           onChange={(e) => setForm({ ...form, avulsoDiscountLimit: e.target.value })}
         />
       </td>
+      <td className={`${cell} text-right`}>
+        <input
+          type="number"
+          min="1"
+          max="50"
+          title="Análises que o cliente pode processar ao MESMO TEMPO. Cada uma ocupa um worker: valores altos aqui competem com os outros clientes."
+          className={input}
+          value={form.maxConcurrentAnalyses}
+          onChange={(e) => setForm({ ...form, maxConcurrentAnalyses: e.target.value })}
+        />
+      </td>
+      <td className={`${cell} text-right`}>
+        <input
+          type="number"
+          min="1"
+          max="600"
+          title="Análises que o cliente pode INICIAR por minuto. Controla a vazão contratada; o reenvio do mesmo arquivo já é tratado por idempotência e não consome a cota."
+          className={input}
+          value={form.analysesPerMinute}
+          onChange={(e) => setForm({ ...form, analysesPerMinute: e.target.value })}
+        />
+      </td>
       <td className={`${cell} text-center`}>
         <input type="checkbox" checked={form.isActive} onChange={(e) => setForm({ ...form, isActive: e.target.checked })} />
       </td>
@@ -121,7 +187,7 @@ function PlanRow({ plan, onSaved }) {
         <button onClick={save} disabled={saving} className="text-emerald-400 hover:text-emerald-300 p-1 disabled:opacity-50" title="Salvar">
           {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
         </button>
-        <button onClick={() => setEditing(false)} disabled={saving} className="text-zinc-400 hover:text-foreground p-1" title="Cancelar">
+        <button onClick={cancelEditing} disabled={saving} className="text-zinc-400 hover:text-foreground p-1" title="Cancelar">
           <X className="w-4 h-4" />
         </button>
       </td>
@@ -162,6 +228,12 @@ export default function AdminPlans() {
                 </th>
                 <th className="px-4 py-3 font-medium text-zinc-400 text-right" title="Quantos avulsos com desconto por ciclo de faturamento">
                   Limite/ciclo
+                </th>
+                <th className="px-4 py-3 font-medium text-zinc-400 text-right" title="Quantas análises o cliente pode processar ao mesmo tempo">
+                  Simultâneas
+                </th>
+                <th className="px-4 py-3 font-medium text-zinc-400 text-right" title="Quantas análises o cliente pode iniciar por minuto">
+                  Por minuto
                 </th>
                 <th className="px-4 py-3 font-medium text-zinc-400 text-center">Status</th>
                 <th className="px-4 py-3 font-medium text-zinc-400 text-right">Assinantes</th>

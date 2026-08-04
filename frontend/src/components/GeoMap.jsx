@@ -30,12 +30,48 @@ function pinIcon(color, letter) {
   });
 }
 
-export function GeoMap({ home, sign, distanceKm, riskColor }) {
+/**
+ * Mapa de UM confronto: dois pontos e a distância entre eles.
+ *
+ * Antes o componente era fixo em "residência × assinatura declarada", com
+ * rótulos R/A e cores embutidos. O § 5 do laudo passou a ter DOIS confrontos
+ * independentes — origem do IP × residência, e residência × geolocalização
+ * declarada —, cada um com seu mapa e sua escala. Um único quadro com os três
+ * pontos misturava as duas perguntas e, pior, a escala do confronto de IP
+ * (centenas de km) achatava o outro: os pontos ficavam sobrepostos em um pixel.
+ *
+ * Agora recebe um par genérico `{ lat, lon, label, color, titulo }`.
+ */
+export function GeoMap({ from, to, distanceKm, riskColor, legenda }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
 
+  /*
+   * As dependências são PRIMITIVAS, não os objetos `home`/`sign`.
+   *
+   * O chamador monta `sign={{ lat: ..., lon: ... }}` — um objeto novo a cada
+   * render. Com o objeto na lista de dependências, qualquer re-render do pai
+   * derrubava e reconstruía o mapa inteiro: digitar no campo de correção de
+   * coordenada, logo abaixo do mapa, fazia o Leaflet piscar a cada tecla.
+   *
+   * Comparar por valor mantém o mapa vivo enquanto as coordenadas não mudam.
+   */
+  const homeLat = from?.lat;
+  const homeLon = from?.lon;
+  const signLat = to?.lat;
+  const signLon = to?.lon;
+  const fromLabel = from?.label || "A";
+  const fromColor = from?.color || "#3b82f6";
+  const fromTitulo = from?.titulo || "Ponto de referência";
+  const toLabel = to?.label || "B";
+  const toColor = to?.color || "#f59e0b";
+  const toTitulo = to?.titulo || "Ponto confrontado";
+
   useEffect(() => {
-    if (!containerRef.current || !home || !sign) return;
+    if (!containerRef.current || homeLat == null || signLat == null) return;
+
+    const home = { lat: homeLat, lon: homeLon };
+    const sign = { lat: signLat, lon: signLon };
 
     const map = L.map(containerRef.current, {
       scrollWheelZoom: false, // evita "prender" o scroll da página
@@ -51,12 +87,12 @@ export function GeoMap({ home, sign, distanceKm, riskColor }) {
     const homeLL = [home.lat, home.lon];
     const signLL = [sign.lat, sign.lon];
 
-    L.marker(homeLL, { icon: pinIcon("#2563eb", "R") })
+    L.marker(homeLL, { icon: pinIcon(fromColor, fromLabel) })
       .addTo(map)
-      .bindPopup(`<b>Residência do cliente</b><br>${home.lat.toFixed(5)}, ${home.lon.toFixed(5)}`);
-    L.marker(signLL, { icon: pinIcon("#f59e0b", "A") })
+      .bindPopup(`<b>${fromTitulo}</b><br>${home.lat.toFixed(5)}, ${home.lon.toFixed(5)}`);
+    L.marker(signLL, { icon: pinIcon(toColor, toLabel) })
       .addTo(map)
-      .bindPopup(`<b>Assinatura declarada</b><br>${sign.lat.toFixed(5)}, ${sign.lon.toFixed(5)}`);
+      .bindPopup(`<b>${toTitulo}</b><br>${sign.lat.toFixed(5)}, ${sign.lon.toFixed(5)}`);
 
     // Linha da distância, cor pelo risco.
     const line = L.polyline([homeLL, signLL], {
@@ -85,18 +121,17 @@ export function GeoMap({ home, sign, distanceKm, riskColor }) {
       map.remove();
       mapRef.current = null;
     };
-  }, [home, sign, distanceKm, riskColor]);
+  }, [homeLat, homeLon, signLat, signLon, distanceKm, riskColor,
+      fromLabel, fromColor, fromTitulo, toLabel, toColor, toTitulo]);
 
-  if (!home || !sign) return null;
+  if (!from || !to) return null;
 
   return (
-    <div className="geo-map" style={{ marginTop: 14, borderRadius: 10, overflow: "hidden", border: "1px solid #2a3647" }}>
-      <div ref={containerRef} style={{ height: 380, width: "100%", background: "#0c1320" }} />
-      <div style={{ fontSize: 11.5, color: "#6b7a8d", padding: "8px 12px", background: "#0f1722", lineHeight: 1.5 }}>
-        Mapa real (OpenStreetMap). Marcador <b style={{ color: "#4f9cf9" }}>R</b> = residência do cliente ·
-        <b style={{ color: "#f2b03d" }}> A</b> = local declarado da assinatura. A linha tracejada representa a
-        distância geodésica (Haversine) entre os dois pontos. Arraste e use o zoom para explorar.
-      </div>
+    <div className="overflow-hidden rounded-xl border border-surface-border">
+      <div ref={containerRef} className="h-[380px] w-full bg-background" />
+      <p className="border-t border-surface-border bg-surface/40 px-3 py-2 text-[11.5px] leading-relaxed text-zinc-500">
+        {legenda}
+      </p>
     </div>
   );
 }

@@ -14,8 +14,10 @@ import {
   updatePlan,
   listAuditLogs,
   listAllPayments,
+  getQueueMetrics,
 } from "../controllers/adminMetricsController.js";
-import { requireAuth, requirePlatformAdmin } from "../middleware/auth.js";
+import { requireAuth, requirePlatformAdmin, requireMfaForAdmin } from "../middleware/auth.js";
+import { adminIpAllowlist } from "../middleware/adminIpAllowlist.js";
 import { createLimiter } from "../utils/rateLimitStore.js";
 
 const router = Router();
@@ -29,7 +31,14 @@ const adminLimiter = createLimiter({
   prefix: "rl:admin:",
 });
 
-router.use(requireAuth, requirePlatformAdmin, adminLimiter);
+// A allowlist vem DEPOIS do requirePlatformAdmin: quem não é admin recebe o 403
+// genérico de sempre e não descobre que existe restrição de origem no painel.
+//
+// O segundo fator vem depois da allowlist, e pela mesma razão: quem não passa
+// da origem não precisa saber que existe TOTP aqui dentro. A ordem também
+// economiza a consulta ao banco do `requireMfaForAdmin` para quem já foi
+// recusado antes.
+router.use(requireAuth, requirePlatformAdmin, adminIpAllowlist, requireMfaForAdmin, adminLimiter);
 
 // Convites do plano fundador
 router.get("/founder-invites", listFounderInvites);
@@ -52,5 +61,9 @@ router.patch("/plans/:id", updatePlan);
 // Auditoria e pagamentos
 router.get("/audit-logs", listAuditLogs);
 router.get("/payments", listAllPayments);
+
+// Operação: estado das filas. Ver comentário em getQueueMetrics sobre por que
+// não fica no /health.
+router.get("/queues", getQueueMetrics);
 
 export default router;

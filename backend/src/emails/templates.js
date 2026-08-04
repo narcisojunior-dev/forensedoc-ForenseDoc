@@ -102,6 +102,26 @@ export const EMAIL_TEMPLATES = {
     }),
   }),
 
+  /**
+   * Enviado quando alguém tenta se cadastrar com um e-mail que já tem conta.
+   *
+   * A rota de cadastro responde sucesso nos dois casos para não confirmar a
+   * existência da conta a quem está sondando endereços. Este e-mail é o que
+   * fecha a lacuna para o dono legítimo: sem ele, quem esqueceu que já tinha
+   * conta ficaria esperando uma confirmação que nunca chega.
+   */
+  PASSWORD_RESET_HINT: ({ name, loginUrl }) => ({
+    subject: "Você já tem uma conta no ForenseDoc",
+    html: layout({
+      heading: `Olá, ${escapeHtml(name)}.`,
+      bodyHtml:
+        p("Recebemos uma tentativa de cadastro com este e-mail, mas você já tem uma conta no ForenseDoc.") +
+        button("Entrar na minha conta", loginUrl) +
+        p("Se não lembra a senha, use a opção <strong>Esqueci minha senha</strong> na tela de login."),
+      footerNote: "Se não foi você quem tentou se cadastrar, pode ignorar este e-mail.",
+    }),
+  }),
+
   INVITE_RECEIVED: ({ tenantName, inviterName, inviteUrl }) => ({
     subject: `👥 Você foi convidado para a equipe ${tenantName} — ForenseDoc`,
     html: layout({

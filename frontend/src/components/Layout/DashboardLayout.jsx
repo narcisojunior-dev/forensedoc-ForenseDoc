@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useLocation, Outlet } from "react-router-dom";
 import { 
   LayoutDashboard, 
@@ -21,6 +21,15 @@ export default function DashboardLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
   const { user, logout } = useAuthStore();
+
+  // Escape fecha a sidebar mobile. Todos os outros overlays do sistema fazem
+  // isso; deixar um de fora é atrito gratuito para quem navega por teclado.
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    const onKey = (e) => e.key === "Escape" && setSidebarOpen(false);
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [sidebarOpen]);
 
   const navItems = [
     { name: "Visão Geral", path: "/dashboard", icon: LayoutDashboard },
@@ -123,9 +132,36 @@ export default function DashboardLayout() {
         </header>
 
         {/* Page Content */}
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 relative">
+        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 relative flex flex-col">
           {/* Outlet renderiza a rota filha correspondente (Dashboard, History, etc) */}
-          <Outlet />
+          <div className="flex-1">
+            <Outlet />
+          </div>
+
+          {/*
+            O rodapé fica DENTRO da área rolável, e não abaixo dela, para não
+            ocupar altura útil de forma permanente numa tela que já é densa. O
+            `flex-1` acima empurra o rodapé para o fim quando a página é curta,
+            e ele acompanha o conteúdo quando é longa.
+
+            Os dois documentos precisam estar alcançáveis também aqui: o usuário
+            que já entrou é justamente quem consulta prazo de retenção e direitos
+            quando um cliente pergunta, e obrigá-lo a sair para a página inicial
+            para achá-los é atrito sem motivo.
+          */}
+          <footer className="mt-10 border-t border-surface-border pt-5 text-xs text-zinc-500">
+            <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-between">
+              <p>© {new Date().getFullYear()} ForenseDoc</p>
+              <nav className="flex items-center gap-5">
+                <Link to="/termos" className="transition-colors hover:text-zinc-300">
+                  Termos de Uso
+                </Link>
+                <Link to="/privacidade" className="transition-colors hover:text-zinc-300">
+                  Política de Privacidade
+                </Link>
+              </nav>
+            </div>
+          </footer>
         </main>
       </div>
     </div>

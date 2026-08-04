@@ -127,7 +127,25 @@ export default function Landing() {
         </h1>
         
         <p className="hero-desc text-lg md:text-xl text-zinc-400 max-w-2xl mb-10 leading-relaxed">
-          Encontre a prova que você precisa em segundos. A inteligência artificial que lê, analisa e estrutura laudos precisos de PDFs gigantes enquanto você foca na estratégia jurídica.
+          {/*
+            Este texto é publicidade, e pelo CDC (art. 30) ela VINCULA o
+            fornecedor e integra o contrato. A versão anterior prometia
+            "encontre a prova", "laudos precisos" e "inteligência artificial".
+
+            As três eram problema. O laudo declara que divergência é indício e
+            NÃO prova de fraude, então a primeira contradizia o próprio produto.
+            A segunda prometia precisão a uma extração heurística. E a terceira
+            era simplesmente falsa: não há IA no sistema, a extração é textual e
+            o próprio laudo declara a fonte como local.
+
+            O efeito era o oposto do pretendido: publicidade que promete mais do
+            que os Termos de Uso entregam derruba a limitação de responsabilidade
+            em vez de conviver com ela.
+          */}
+          Analise contratos de consignado em segundos. O ForenseDoc extrai os dados do
+          documento, avalia a cadeia de custódia da assinatura e confronta as
+          geolocalizações, entregando um laudo estruturado para você focar na estratégia
+          jurídica.
         </p>
 
         <div className="flex flex-col sm:flex-row items-center gap-4 hero-cta">
@@ -209,7 +227,7 @@ export default function Landing() {
         <div className="container mx-auto max-w-5xl">
           <div className="text-center mb-16 fade-up">
             <h2 className="text-3xl md:text-5xl font-bold mb-4">Em 3 passos simples</h2>
-            <p className="text-zinc-400 text-lg">Deixe o trabalho duro com a nossa IA.</p>
+            <p className="text-zinc-400 text-lg">Deixe a leitura mecânica com o ForenseDoc.</p>
           </div>
 
           <div className="space-y-12 relative before:absolute before:inset-0 before:ml-5 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-surface-border before:to-transparent">
@@ -372,9 +390,23 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* FOOTER SIMPLE */}
-      <footer className="border-t border-surface-border py-8 px-4 bg-background text-center text-sm text-zinc-500">
-        <p>© {new Date().getFullYear()} ForenseDoc. Todos os direitos reservados.</p>
+      {/* FOOTER */}
+      <footer className="border-t border-surface-border bg-background px-4 py-8">
+        <div className="mx-auto flex max-w-5xl flex-col items-center gap-4 text-sm text-zinc-500 sm:flex-row sm:justify-between">
+          <p>© {new Date().getFullYear()} ForenseDoc. Todos os direitos reservados.</p>
+
+          {/* Os dois documentos precisam ser alcançáveis SEM login: quem ainda
+              não é cliente lê antes de decidir, e o titular de dado que aparece
+              num contrato analisado nunca terá conta aqui. */}
+          <nav className="flex items-center gap-5">
+            <Link to="/termos" className="transition-colors hover:text-foreground">
+              Termos de Uso
+            </Link>
+            <Link to="/privacidade" className="transition-colors hover:text-foreground">
+              Política de Privacidade
+            </Link>
+          </nav>
+        </div>
       </footer>
     </div>
   );

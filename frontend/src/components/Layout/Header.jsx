@@ -11,7 +11,9 @@ export default function Header() {
     const handleScroll = () => {
       setScrolled(window.scrollY > 20);
     };
-    window.addEventListener("scroll", handleScroll);
+    // `passive`: o handler nunca chama preventDefault, e sem a marcação o
+    // navegador espera por ela antes de rolar a página.
+    window.addEventListener("scroll", handleScroll, { passive: true });
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 

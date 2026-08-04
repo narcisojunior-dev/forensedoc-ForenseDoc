@@ -2,12 +2,14 @@ import crypto from "node:crypto";
 import { prisma } from "../utils/prisma.js";
 import { refundCredit } from "../services/creditService.js";
 import { notify } from "../services/notificationService.js";
-import { releaseLock, analysisLockKey } from "../utils/lock.js";
+import { releaseSlot, analysisLockKey } from "../utils/lock.js";
 import { extractPdfTextWithOcr } from "../services/ocrService.js";
 import { extractPdfMetadata } from "../services/pdfService.js";
 import { heuristicExtractionFromText } from "../services/extractionService.js";
 import { enrichGeography } from "../services/geoEnrichmentService.js";
 import { cleanPdfBase64, stripDiacritics } from "../utils/stringUtils.js";
+import { buildCustodyChain } from "../reports/custodyChain.js";
+import { getPdf } from "../services/objectStorageService.js";
 
 function fileHashes(buffer) {
   return {
@@ -17,10 +19,18 @@ function fileHashes(buffer) {
 }
 
 export async function processAnalysis(job) {
-  const { analysisId, pdfBase64, tenantId, userId, lockToken, homeAddress, homeCoord, filename } = job.data;
+  const { analysisId, pdfKey, pdfBase64, tenantId, userId, lockToken, homeAddress, homeCoord, filename } =
+    job.data;
 
   try {
-    const pdfBuffer = Buffer.from(cleanPdfBase64(pdfBase64), "base64");
+    /*
+     * O PDF vem do armazenamento de objetos (caminho normal) ou do próprio
+     * payload (compatibilidade: R2 não configurado, ou jobs enfileirados antes
+     * desta mudança e ainda na fila no momento do deploy).
+     */
+    const pdfBuffer = pdfKey
+      ? await getPdf(pdfKey)
+      : Buffer.from(cleanPdfBase64(pdfBase64), "base64");
 
     // Hash do arquivo calculado sobre o que o SERVIDOR recebeu e analisou —
     // origem autoritativa da cadeia de custódia. Antes vinha do navegador.
@@ -67,6 +77,10 @@ export async function processAnalysis(job) {
       contractGeo: geo.contractGeo,
       geoDeclaredPresent: geo.geoDeclaredPresent,
       ipAnalysis: geo.ipAnalysis,
+      // Cadeia de custódia já avaliada e persistida: o PDF do servidor e a tela
+      // passam a ler a MESMA análise, em vez de cada um recalcular a sua. Era
+      // por aí que as duas versões do § 4 divergiam.
+      cadeiaCustodia: buildCustodyChain(fallback, geo.ipAnalysis, geo.geoDeclaredPresent),
       generatedAt: new Date().toISOString(),
     };
 
@@ -109,8 +123,9 @@ export async function processAnalysis(job) {
       emailData: { reason: error.message },
     });
   } finally {
-    // Libera o mutex de "uma análise por vez" tanto no sucesso quanto na
-    // falha — sem isso o tenant ficaria bloqueado até o TTL do lock expirar.
-    await releaseLock(analysisLockKey(tenantId), lockToken);
+    // Devolve o slot do semáforo tanto no sucesso quanto na falha. Sem isto o
+    // tenant perderia uma vaga até o TTL expirar, e num plano de vaga única isso
+    // é o bloqueio total que o mutex antigo já causava.
+    await releaseSlot(analysisLockKey(tenantId), lockToken);
   }
 }

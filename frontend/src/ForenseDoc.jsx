@@ -2,6 +2,7 @@ import { useState, useRef, useCallback } from "react";
 
 import "./styles/ForenseDoc.css";
 import { API_BASE, geolocateIP, geocodeAddress, checkBackendReady } from "./utils/api.js";
+import { api as apiClient } from "./lib/axios.js";
 import { digestHash, classifyHashString } from "./utils/crypto.js";
 import { haversineKm, riskFromDistance } from "./utils/geo.js";
 import { exportReportPDF } from "./utils/pdfExport.js";
@@ -68,26 +69,22 @@ export default function ForenseDoc() {
       const base64 = arrayBufferToBase64(buffer);
 
       setProgress({ label: "Extraindo dados do PDF e aplicando OCR local quando necessário...", pct: 18 });
-      const apiRes = await fetch(`${API_BASE}/api/analyze`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pdfBase64: base64 }),
-      });
+      // Pelo client `api`, não por fetch cru: /api/analyze exige autenticação
+      // desde a v3, e o fetch sem header Authorization levava todo upload a um
+      // 401 silencioso que a tela reportava como "erro do motor de análise".
+      const apiRes = await apiClient
+        .post("/analyze", { pdfBase64: base64 })
+        .then((r) => ({ ok: true, status: r.status, data: r.data }))
+        .catch((e) => ({ ok: false, status: e.response?.status ?? 0, data: e.response?.data }));
 
       setProgress({ label: "Interpretando dados extraídos...", pct: 46 });
       let extracted = null;
       let pdfMetadata = null;
       let extractionError = "";
       try {
-        const responseText = await apiRes.text();
-        let apiData = null;
-        if (responseText) {
-          try {
-            apiData = JSON.parse(responseText);
-          } catch {
-            apiData = null;
-          }
-        }
+        // O axios já entrega o JSON desserializado — não há mais texto cru para
+        // interpretar como havia com o fetch.
+        const apiData = apiRes.data ?? null;
         if (!apiRes.ok || (apiData && apiData.error)) {
           const apiError = apiData?.error;
           extractionError = typeof apiError === "string"

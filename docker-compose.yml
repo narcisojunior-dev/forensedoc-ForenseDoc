@@ -4,6 +4,18 @@
 # ATENÇÃO: Este arquivo é para a fase de PRODUÇÃO na VPS dedicada.
 # Durante o lançamento com fundadores, a infra roda no Railway.
 # Referência: implementation-plan.md → Seção "Migração Railway → VPS"
+#
+# ── DOIS arquivos de ambiente, e não um ──────────────────────────
+#
+# `backend/.env.production` alimenta a APLICAÇÃO, via `env_file`.
+# `.env` NESTE diretório alimenta o COMPOSE, nos `${...}` abaixo.
+#
+# O Compose resolve `${POSTGRES_PASSWORD}` e `${REDIS_PASSWORD}` lendo apenas o
+# shell e o `.env` daqui: `env_file` injeta variáveis dentro do container e não
+# participa dessa substituição. Sem o `.env` deste diretório, o Postgres não
+# inicia e o Redis sobe sem a senha que a aplicação usa.
+#
+# Ponto de partida: `cp .env.example .env`
 # ─────────────────────────────────────────────────────────────────
 
 version: "3.9"
@@ -12,14 +24,20 @@ services:
   # ── Proxy Reverso / TLS ──────────────────────────────────────
   nginx:
     image: nginx:alpine
-    container_name: forensedoc_nginx
     ports:
       - "80:80"
       - "443:443"
     volumes:
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
       - ./nginx/certs:/etc/letsencrypt:ro
-      - frontend_dist:/var/www/html:ro
+      # Bind mount do build, e não volume nomeado: o volume anterior não era
+      # preenchido por serviço nenhum, então o nginx serviria um diretório
+      # vazio. O frontend é construído no host (`npm run build`) e entregue
+      # daqui, o que também torna um redeploy de tela uma cópia de arquivos,
+      # sem rebuild de imagem.
+      - ./frontend/dist:/var/www/html:ro
+      # Webroot do certbot, para a renovação não exigir parar o nginx.
+      - ./nginx/certbot:/var/www/certbot
     depends_on:
       - backend
     restart: unless-stopped
@@ -31,8 +49,12 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: forensedoc_backend
     env_file: ./backend/.env.production
+    # O dossiê enviado é gravado aqui pela API e lido pelo worker. Precisa ser o
+    # MESMO volume nos dois containers: se cada um tiver o seu, o worker procura
+    # um arquivo que não existe e a análise falha.
+    volumes:
+      - uploads:/app/data/uploads
     expose:
       - "8787"
     depends_on:
@@ -41,7 +63,11 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
-    user: node
+    # Sem `user:` aqui: o Dockerfile já define USER nodeuser (uid 1001), que é o
+    # dono dos arquivos da aplicação e do diretório de uploads. Sobrescrever com
+    # `user: node` (uid 1000, herdado da imagem base) fazia o processo rodar como
+    # um usuário sem permissão de escrita no volume, e a gravação do dossiê caía
+    # em silêncio para o payload em base64.
     networks:
       - forensedoc_net
 
@@ -50,25 +76,36 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: forensedoc_worker
+    # Sem `container_name`: nome fixo impede subir mais de uma réplica, porque
+    # dois containers não podem compartilhar o mesmo nome. Aumentar capacidade
+    # exigia editar este arquivo.
+    #
+    #   docker compose up -d --scale worker=4
+    #
+    # Cada réplica tem a sua própria concorrência por fila (ver src/worker.js),
+    # então a vazão total é réplicas x concorrência. A análise é limitada por
+    # CPU: não adianta passar do número de núcleos do host somados.
+    deploy:
+      replicas: ${WORKER_REPLICAS:-1}
     command: node src/worker.js
     env_file: ./backend/.env.production
     environment:
       - WORKER_MODE=true
+    volumes:
+      - uploads:/app/data/uploads
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     restart: unless-stopped
-    user: node
+    # Ver a nota do serviço `backend`: quem define o usuário é o Dockerfile.
     networks:
       - forensedoc_net
 
   # ── PostgreSQL 16 ─────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
-    container_name: forensedoc_postgres
     env_file: ./backend/.env.production
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-forensedoc_app}
@@ -90,8 +127,28 @@ services:
   # ── Redis 7 ───────────────────────────────────────────────────
   redis:
     image: redis:7-alpine
-    container_name: forensedoc_redis
-    command: redis-server --requirepass ${REDIS_PASSWORD} --appendonly yes
+    # ── maxmemory e política de despejo ──────────────────────────────────────
+    #
+    # Sem `maxmemory`, o Redis cresce até derrubar o host, e o sintoma (a máquina
+    # inteira travando) não aponta para ele. Mas o valor sozinho não basta: o que
+    # decide se a falha é grave ou tolerável é a POLÍTICA.
+    #
+    # O default é `noeviction`: ao encher, toda escrita falha, inclusive a de
+    # enfileirar um job. Uma análise paga deixaria de ser processada.
+    #
+    # `allkeys-lru` seria pior: despejaria os próprios jobs da fila, e um laudo
+    # pago sumiria sem deixar rastro.
+    #
+    # `volatile-lru` despeja SOMENTE chaves com prazo de validade. É exatamente a
+    # divisão que este sistema já tem: cache, rate limit e limites de plano usam
+    # `setex` (têm TTL), enquanto os jobs do BullMQ não. Sob pressão de memória o
+    # cache encolhe, que é o comportamento correto — todo o cache é fail-open e o
+    # pior caso dele é consultar o serviço externo de novo.
+    #
+    # Ajuste `REDIS_MAXMEMORY` para cerca de 70% da RAM dedicada ao container.
+    command: >
+      redis-server --requirepass ${REDIS_PASSWORD} --appendonly yes
+      --maxmemory ${REDIS_MAXMEMORY:-512mb} --maxmemory-policy volatile-lru
     expose:
       - "6379"
     volumes:
@@ -106,11 +163,16 @@ services:
       - forensedoc_net
 
 volumes:
+  # Dossiês enviados, com retenção de 30 dias (rotina purge-uploads, 3h).
+  #
+  # Precisa entrar no BACKUP junto do banco: sem o arquivo, uma análise dentro da
+  # janela de retenção não pode ser reprocessada. Não precisa de retenção longa
+  # no backup, pelo contrário: guardar cópia por anos anula a política de 30 dias.
+  uploads:
+    driver: local
   pgdata:
     driver: local
   redisdata:
-    driver: local
-  frontend_dist:
     driver: local
 
 networks:

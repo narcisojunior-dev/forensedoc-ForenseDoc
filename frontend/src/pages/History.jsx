@@ -1,9 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { FileSearch, Loader2, X, ChevronLeft, ChevronRight, Eye, Download } from "lucide-react";
 import toast from "react-hot-toast";
-import "../styles/ForenseDoc.css";
 import { api } from "../lib/axios";
-import { Row, Badge, Section } from "../components/UiComponents.jsx";
+import { Row, Badge, Section, Note, Flag, TONES } from "../components/UiComponents.jsx";
 import { riskFromDistance, ipSignatureCompat } from "../utils/geo.js";
 import { downloadReportPdf } from "../utils/reportDownload.js";
 
@@ -19,11 +18,13 @@ function parseExtraction(raw) {
   return null;
 }
 
+// Tons vindos de UiComponents: as cores da v2.2 estavam fixas aqui e ficaram
+// fora da padronização, porque não moravam na CSS legada que foi removida.
 const STATUS_LABELS = {
-  PROCESSING: { label: "Processando", color: "#4fc3e8" },
-  COMPLETED: { label: "Concluída", color: "#3ddc97" },
-  ERROR: { label: "Erro", color: "#f06363" },
-  REFUNDED: { label: "Estornada", color: "#f2b03d" },
+  PROCESSING: { label: "Processando", color: TONES.info.hex },
+  COMPLETED: { label: "Concluída", color: TONES.ok.hex },
+  ERROR: { label: "Erro", color: TONES.danger.hex },
+  REFUNDED: { label: "Estornada", color: TONES.warn.hex },
 };
 
 function AnalysisDetailModal({ analysisId, onClose }) {
@@ -48,6 +49,14 @@ function AnalysisDetailModal({ analysisId, onClose }) {
     };
     load();
   }, [analysisId]);
+
+  // Escape fecha o modal — o de detalhes do tenant já se comportava assim, e a
+  // divergência entre dois modais do mesmo produto é atrito gratuito.
+  useEffect(() => {
+    const onKey = (e) => e.key === "Escape" && onClose();
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   const metadata = result?.metadata || null;
   // Laudos gerados antes da Fase A não têm os artefatos forenses persistidos.
@@ -101,10 +110,10 @@ function AnalysisDetailModal({ analysisId, onClose }) {
           {!loading && !error && extracted && (
             <div className="space-y-4">
               {!hasForensics && (
-                <div className="note" style={{ borderLeftColor: "var(--muted)", background: "rgba(133,149,168,0.07)" }}>
+                <Note>
                   Este laudo foi gerado antes do confronto geográfico e dos hashes passarem a ser
                   arquivados. Gere uma nova análise para obter o laudo completo com §5 e cadeia de custódia.
-                </div>
+                </Note>
               )}
 
               {result?.hashes && (
@@ -140,9 +149,9 @@ function AnalysisDetailModal({ analysisId, onClose }) {
               </Section>
 
               <Section title="Assinatura eletrônica">
-                <div className="row">
-                  <span className="row-label">Assinatura presente</span>
-                  <Badge label={extracted.assinatura?.presente ? "CONFIRMADA" : "AUSENTE"} color={extracted.assinatura?.presente ? "#3ddc97" : "#f06363"} />
+                <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 border-b border-surface-border/60 py-2.5">
+                  <span className="text-[13px] text-zinc-400">Assinatura presente</span>
+                  <Badge label={extracted.assinatura?.presente ? "CONFIRMADA" : "AUSENTE"} tone={extracted.assinatura?.presente ? "ok" : "danger"} />
                 </div>
                 <Row label="Plataforma" value={extracted.assinatura?.plataforma} />
                 <Row label="Tipo" value={extracted.assinatura?.tipo} />
@@ -158,9 +167,9 @@ function AnalysisDetailModal({ analysisId, onClose }) {
                     <Row label={`Residência (${result.home.source})`} value={result.home.query} />
                   )}
                   {result.contractGeo.distance != null && (
-                    <div className="row">
-                      <span className="row-label">Distância assinatura → residência</span>
-                      <span className="row-value" style={{ color: riskFromDistance(result.contractGeo.distance).color, fontWeight: 700 }}>
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 border-b border-surface-border/60 py-2.5">
+                      <span className="text-[13px] text-zinc-400">Distância assinatura → residência</span>
+                      <span className="text-[13px] font-bold tabular-nums" style={{ color: riskFromDistance(result.contractGeo.distance).color }}>
                         {result.contractGeo.distance.toFixed(2)} km · {riskFromDistance(result.contractGeo.distance).label}
                       </span>
                     </div>
@@ -171,25 +180,25 @@ function AnalysisDetailModal({ analysisId, onClose }) {
               {result?.ipAnalysis?.length > 0 ? (
                 <Section title={`Endereços IP · geolocalização (${result.ipAnalysis.length})`}>
                   {result.ipAnalysis.map((ip, i) => (
-                    <div key={i} style={{ marginBottom: 10 }}>
-                      <div className="row">
-                        <span className="row-label" style={{ fontFamily: "monospace" }}>
+                    <div key={i} className="mb-2.5">
+                      <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 border-b border-surface-border/60 py-2.5">
+                        <span className="font-mono text-[13px] text-zinc-400">
                           {ip.endereco}{ip.geo?.city ? ` · ${ip.geo.city}/${ip.geo.region || ""}` : ""}
                         </span>
                         {ip.distance != null ? (
-                          <span className="row-value" style={{ color: riskFromDistance(ip.distance).color, fontWeight: 700 }}>
+                          <span className="text-[13px] font-bold tabular-nums" style={{ color: riskFromDistance(ip.distance).color }}>
                             {ip.distance.toFixed(2)} km da residência
                           </span>
                         ) : (
-                          <span className="row-value" style={{ color: "var(--muted)" }}>sem distância</span>
+                          <span className="text-[13px] text-zinc-500">sem distância</span>
                         )}
                       </div>
                       {ip.distanceToSignature != null && (() => {
                         const c = ipSignatureCompat(ip.distanceToSignature);
                         return (
-                          <div className="row">
-                            <span className="row-label" style={{ fontSize: 12 }}>IP × assinatura declarada</span>
-                            <span className="row-value" style={{ color: c.color, fontWeight: 700, fontSize: 12 }}>
+                          <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 border-b border-surface-border/60 py-2.5">
+                            <span className="text-[12px] text-zinc-400">IP × assinatura declarada</span>
+                            <span className="text-[12px] font-bold tabular-nums" style={{ color: c.color }}>
                               {ip.distanceToSignature.toFixed(2)} km · {c.label}
                             </span>
                           </div>
@@ -214,9 +223,7 @@ function AnalysisDetailModal({ analysisId, onClose }) {
                   <Row label="Autor declarado" value={metadata.author} />
                   <Row label="Aplicativo criador" value={metadata.creator} />
                   {metadata.warnings?.length > 0 && (
-                    <div className="note" style={{ borderLeftColor: "var(--warn)", background: "rgba(242,176,61,0.07)" }}>
-                      {metadata.warnings.join(" ")}
-                    </div>
+                    <Note tone="warn">{metadata.warnings.join(" ")}</Note>
                   )}
                 </Section>
               )}
@@ -224,7 +231,7 @@ function AnalysisDetailModal({ analysisId, onClose }) {
               {extracted.evidencias_irregularidade?.length > 0 && (
                 <Section title="Evidências de irregularidade" danger>
                   {extracted.evidencias_irregularidade.map((ev, i) => (
-                    <div key={i} className="flag"><b>▸</b><span>{ev}</span></div>
+                    <Flag key={i} tone="danger">{ev}</Flag>
                   ))}
                 </Section>
               )}
@@ -242,21 +249,51 @@ export default function History() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [selectedId, setSelectedId] = useState(null);
+  // Espelha a lista para o intervalo consultar. Um closure sobre `analyses`
+  // capturaria o array do render em que o efeito rodou — sempre o vazio inicial.
+  const analysesRef = useRef([]);
+  analysesRef.current = analyses;
 
   useEffect(() => {
-    const load = async () => {
-      setLoading(true);
+    let ativo = true;
+
+    // `silencioso` evita piscar o spinner nas recargas automáticas.
+    const load = async (silencioso = false) => {
+      if (!silencioso) setLoading(true);
       try {
         const { data } = await api.get(`/analyses?page=${page}&limit=10`);
+        if (!ativo) return;
         setAnalyses(data.analyses);
         setTotalPages(data.pagination.totalPages || 1);
       } catch {
-        toast.error("Erro ao carregar histórico de análises.");
+        if (ativo && !silencioso) toast.error("Erro ao carregar histórico de análises.");
       } finally {
-        setLoading(false);
+        if (ativo && !silencioso) setLoading(false);
       }
     };
+
     load();
+
+    /*
+     * Recarrega enquanto houver análise em PROCESSING.
+     *
+     * A tela de análise faz polling do próprio job, mas o histórico não fazia
+     * nenhum: quem abrisse esta página com uma análise em andamento via
+     * "Processando" para sempre, sem forma de saber que havia terminado a não ser
+     * recarregar a página na mão.
+     *
+     * O intervalo é criado dentro do efeito da página atual, então trocar de
+     * página ou sair da tela o encerra.
+     */
+    const temPendente = () => analysesRef.current.some((a) => a.status === "PROCESSING");
+    const timer = setInterval(() => {
+      if (temPendente()) load(true);
+    }, 5000);
+
+    return () => {
+      ativo = false;
+      clearInterval(timer);
+    };
   }, [page]);
 
   return (
@@ -277,7 +314,7 @@ export default function History() {
         ) : (
           <div className="divide-y divide-surface-border/50">
             {analyses.map((item) => {
-              const status = STATUS_LABELS[item.status] || { label: item.status, color: "#8595a8" };
+              const status = STATUS_LABELS[item.status] || { label: item.status, color: TONES.neutral.hex };
               return (
                 <div key={item.id} className="flex items-center justify-between px-6 py-4">
                   <div>

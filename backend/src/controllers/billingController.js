@@ -2,7 +2,8 @@ import { z } from "zod";
 import { prisma } from "../utils/prisma.js";
 import * as asaasService from "../services/asaasService.js";
 import { countOccupiedSeats } from "./tenantController.js";
-import { acquireLock, releaseLock, avulsoLockKey } from "../utils/lock.js";
+import { acquireLock, releaseLock, avulsoLockKey, founderLockKey } from "../utils/lock.js";
+import { parsePagination } from "../utils/pagination.js";
 
 // Guard reutilizado nas rotas financeiras: o titular contrata e paga, os
 // membros convidados apenas consomem os créditos do escritório.
@@ -33,6 +34,10 @@ const AVULSO_PRICE_BRL = 79.0;
 // TTL do mutex de compra: cobre a ida e volta à Asaas com folga, e se o
 // processo morrer no meio o lock se solta sozinho.
 const AVULSO_LOCK_TTL = 30;
+
+// Mesmo racional para o resgate do convite de fundador, que também aguarda a
+// Asaas antes de gravar.
+const FOUNDER_LOCK_TTL = 30;
 
 /**
  * Resolve quanto este tenant paga por um laudo avulso agora.
@@ -184,15 +189,28 @@ async function ensureAsaasCustomer(tenant) {
 }
 
 export async function subscribe(req, res) {
+  let asaasSubscription = null;
+  let lockToken = null;
+  let lockKey = null;
+
   try {
     if (req.auth.role !== "OWNER") {
       return res.status(403).json({ error: "Apenas o proprietário pode assinar um plano." });
     }
 
-    const { planId, billingType, isAnnual, founderInviteCode } = subscribeSchema.parse(req.body);
+    const parsed = subscribeSchema.parse(req.body);
+    const { planId, billingType, isAnnual } = parsed;
+    // Mesma normalização de getFounderInvite: o código é exibido e digitado em
+    // maiúsculas, e usá-lo cru aqui reprovava um convite válido colado com
+    // espaço ou em minúscula — depois de o cliente Asaas já ter sido criado.
+    const founderInviteCode = parsed.founderInviteCode
+      ? String(parsed.founderInviteCode).trim().toUpperCase()
+      : null;
     const tenantId = req.tenantId;
 
     const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+    if (!tenant) return res.status(404).json({ error: "Escritório não encontrado." });
+
     const existing = await prisma.subscription.findUnique({ where: { tenantId } });
     if (existing) {
       return res.status(400).json({ error: "Tenant já possui assinatura ativa. Use o endpoint de upgrade." });
@@ -203,13 +221,27 @@ export async function subscribe(req, res) {
       return res.status(404).json({ error: "Plano não encontrado." });
     }
 
-    let founderInvite = null;
     if (plan.isFounder) {
       if (!founderInviteCode) {
         return res.status(400).json({ error: "Este plano exige um código de convite de fundador." });
       }
-      founderInvite = await prisma.founderInvite.findUnique({ where: { code: founderInviteCode } });
-      if (!founderInvite || founderInvite.usedAt) {
+
+      // Serializa os resgates do mesmo código: sem isso, duas requisições
+      // simultâneas passavam as duas pela validação (que era feita fora da
+      // transação) e `founderSlotsRemaining` caía duas vezes por um convite só.
+      lockKey = founderLockKey(founderInviteCode);
+      lockToken = await acquireLock(lockKey, FOUNDER_LOCK_TTL);
+      if (!lockToken) {
+        return res.status(409).json({
+          error: "Este convite está sendo processado. Aguarde alguns segundos e tente novamente.",
+          code: "FOUNDER_INVITE_IN_PROGRESS",
+        });
+      }
+
+      // Pré-checagem apenas para não criar cobrança na Asaas por um convite que
+      // já se sabe inválido. A validação que vale é a de dentro da transação.
+      const invite = await prisma.founderInvite.findUnique({ where: { code: founderInviteCode } });
+      if (!invite || invite.usedAt) {
         return res.status(400).json({ error: "Código de convite inválido ou já utilizado." });
       }
       if (!plan.founderSlotsRemaining || plan.founderSlotsRemaining <= 0) {
@@ -218,7 +250,7 @@ export async function subscribe(req, res) {
     }
 
     const asaasCustomerId = await ensureAsaasCustomer(tenant);
-    const asaasSubscription = await asaasService.createSubscription(asaasCustomerId, plan, billingType, isAnnual);
+    asaasSubscription = await asaasService.createSubscription(asaasCustomerId, plan, billingType, isAnnual);
 
     const now = new Date();
     const currentPeriodEnd = new Date(now);
@@ -228,15 +260,26 @@ export async function subscribe(req, res) {
     founderLockedUntil.setMonth(founderLockedUntil.getMonth() + 12);
 
     const subscription = await prisma.$transaction(async (tx) => {
-      if (founderInvite) {
-        await tx.founderInvite.update({
-          where: { id: founderInvite.id },
+      if (founderInviteCode) {
+        // Revalidado DENTRO da transação: entre a pré-checagem e este ponto
+        // houve uma ida à Asaas, tempo de sobra para o convite ser resgatado
+        // por outra requisição. O WHERE com `usedAt: null` é o que garante que
+        // apenas um resgate vence — se `count` vier 0, alguém chegou antes.
+        const claimed = await tx.founderInvite.updateMany({
+          where: { code: founderInviteCode, usedAt: null },
           data: { usedAt: now, tenantId },
         });
-        await tx.plan.update({
-          where: { id: plan.id },
+        if (claimed.count === 0) {
+          throw new Error("FOUNDER_INVITE_ALREADY_USED");
+        }
+
+        const slots = await tx.plan.updateMany({
+          where: { id: plan.id, founderSlotsRemaining: { gt: 0 } },
           data: { founderSlotsRemaining: { decrement: 1 } },
         });
+        if (slots.count === 0) {
+          throw new Error("FOUNDER_SLOTS_EXHAUSTED");
+        }
       }
 
       const created = await tx.subscription.create({
@@ -267,12 +310,43 @@ export async function subscribe(req, res) {
       return created;
     });
 
+    // A partir daqui a assinatura está registrada localmente: nada mais deve
+    // disparar a compensação da Asaas.
+    asaasSubscription = null;
+
     return res.status(201).json({ subscription });
   } catch (error) {
+    // Compensação: a assinatura foi criada na Asaas mas a gravação local
+    // falhou. Sem cancelar, o cliente seguiria sendo cobrado por uma assinatura
+    // que o sistema não conhece — e ninguém perceberia.
+    if (asaasSubscription) {
+      await asaasService.cancelSubscription(asaasSubscription.id).catch((cancelError) => {
+        console.error(
+          `[Billing] CRÍTICO: assinatura ${asaasSubscription.id} ficou ativa na Asaas sem registro local ` +
+            `e o cancelamento automático falhou — cancele manualmente:`,
+          cancelError.message
+        );
+      });
+    }
+
     if (error instanceof z.ZodError) return res.status(400).json({ error: error.issues[0].message });
+    if (error.message === "FOUNDER_INVITE_ALREADY_USED") {
+      return res.status(409).json({
+        error: "Este convite acabou de ser utilizado por outra pessoa.",
+        code: "FOUNDER_INVITE_USED",
+      });
+    }
+    if (error.message === "FOUNDER_SLOTS_EXHAUSTED") {
+      return res.status(409).json({
+        error: "As vagas de fundador se esgotaram.",
+        code: "FOUNDER_SLOTS_EXHAUSTED",
+      });
+    }
     if (error.name === "AsaasError") return res.status(502).json({ error: error.message });
     console.error("[Billing] Erro ao assinar plano:", error);
     return res.status(500).json({ error: "Erro interno no servidor." });
+  } finally {
+    if (lockKey) await releaseLock(lockKey, lockToken);
   }
 }
 
@@ -511,9 +585,7 @@ export async function getPayments(req, res) {
   try {
     if (!ensureOwner(req, res, "ver o histórico de pagamentos")) return;
     const tenantId = req.tenantId;
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
-    const skip = (page - 1) * limit;
+    const { page, limit, skip } = parsePagination(req.query);
 
     const [payments, total] = await Promise.all([
       prisma.payment.findMany({

@@ -10,6 +10,14 @@
  * O mapa é um reforço visual, nunca um requisito para o laudo existir.
  */
 
+// O módulo lê GEOAPIFY_KEY do ambiente. `server.js` e `worker.js` já carregam o
+// dotenv antes de importá-lo, mas depender disso deixava o mapa silenciosamente
+// ausente em qualquer entrada que não passe por eles (script, teste, CLI) — e a
+// ausência do mapa não gera erro, só um laudo sem a peça visual. Mesma proteção
+// que utils/jwt.js e utils/mailer.js já adotam.
+import "dotenv/config";
+import { cachedBuffer, TTL } from "../utils/externalCache.js";
+
 const FETCH_TIMEOUT_MS = 10_000;
 const BASE = "https://maps.geoapify.com/v1/staticmap";
 
@@ -53,7 +61,7 @@ export async function fetchStaticMap(points, opts = {}) {
   );
   if (valid.length === 0) return null;
 
-  const { width = 780, height = 460, line = true } = opts;
+  const { width = 780, height = 460, line = true, lineColor = null } = opts;
 
   // Marcadores: um por ponto, cor própria e rótulo curto.
   const markers = valid
@@ -65,14 +73,17 @@ export async function fetchStaticMap(points, opts = {}) {
     })
     .join("|");
 
-  // Linha entre os dois primeiros pontos (residência ↔ assinatura declarada).
+  // Linha da distância entre os dois pontos do confronto. A cor acompanha o
+  // segundo ponto (o que está sendo confrontado com a referência), para que a
+  // legenda do laudo e o traço no mapa concordem sem precisar de explicação.
   let geometry = "";
   if (line && valid.length >= 2) {
     const a = valid[0];
     const b = valid[1];
+    const cor = encodeURIComponent(lineColor || b.color || "#dc2626");
     geometry =
       `&geometry=polyline:${a.lon},${a.lat},${b.lon},${b.lat};` +
-      `linecolor:%23f06363;linewidth:3;lineopacity:0.9`;
+      `linecolor:${cor};linewidth:3;lineopacity:0.9`;
   }
 
   const url =
@@ -80,34 +91,91 @@ export async function fetchStaticMap(points, opts = {}) {
     `&area=${encodeURIComponent(boundingArea(valid))}` +
     `&marker=${markers}${geometry}&apiKey=${key}`;
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  try {
-    const res = await fetch(url, { signal: controller.signal });
-    if (!res.ok) {
-      console.error(`[StaticMap] Geoapify respondeu ${res.status}`);
+  /*
+   * A imagem era buscada a CADA geração de PDF. O mesmo laudo baixado três vezes
+   * gastava seis créditos da cota diária do Geoapify (3.000 por dia, 2 por
+   * laudo), e o download repetido é comum: o advogado gera, confere, e gera de
+   * novo para anexar ao processo.
+   *
+   * A chave de cache é a URL SEM a chave de API. Incluí-la faria a rotação da
+   * credencial invalidar todo o cache de uma vez, e ainda gravaria o segredo
+   * dentro do nome da chave no Redis.
+   */
+  const chaveCache = url.replace(`&apiKey=${key}`, "");
+
+  return cachedBuffer("staticmap", chaveCache, TTL.staticMap, async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    try {
+      const res = await fetch(url, { signal: controller.signal });
+      if (!res.ok) {
+        console.error(`[StaticMap] Geoapify respondeu ${res.status}`);
+        return null;
+      }
+      const arrayBuffer = await res.arrayBuffer();
+      return Buffer.from(arrayBuffer);
+    } catch (err) {
+      console.error("[StaticMap] Falha ao buscar mapa:", err.message);
       return null;
+    } finally {
+      clearTimeout(timer);
     }
-    const arrayBuffer = await res.arrayBuffer();
-    return Buffer.from(arrayBuffer);
-  } catch (err) {
-    console.error("[StaticMap] Falha ao buscar mapa:", err.message);
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
+  });
 }
 
-// Monta os pontos do §5 (residência + assinatura declarada) para o mapa.
-export function signatureMapPoints(result) {
-  const points = [];
+/*
+ * ─── Dois mapas, dois confrontos ─────────────────────────────────────────────
+ *
+ * Antes havia um único mapa com os três pontos (residência, GPS declarado e
+ * origem do IP) e uma linha ligando apenas os dois primeiros. Isso confundia
+ * duas perguntas periciais distintas num só quadro:
+ *
+ *   1. A CONEXÃO partiu de onde o cliente mora?  (residência × IP)
+ *   2. O DOCUMENTO afirma que o ato ocorreu onde o cliente mora?
+ *      (residência × GPS declarado)
+ *
+ * As duas têm naturezas diferentes e não se somam. A primeira compara contra um
+ * dado de precisão de operadora — dezenas de quilômetros de margem. A segunda
+ * compara duas coordenadas de precisão métrica, onde uma divergência de poucos
+ * quilômetros já é significativa. Sobrepostas no mesmo enquadramento, a escala
+ * do confronto de IP (centenas de km) achatava o outro até a irrelevância
+ * visual: os pontos R e A viravam um só pixel.
+ *
+ * Cada função abaixo devolve o PAR de um confronto, e `fetchStaticMap` liga os
+ * dois primeiros pontos com a linha da distância.
+ */
+
+/** Primeiro IP geolocalizado — dossiês repetem o mesmo endereço em vários eventos. */
+function primeiroIpGeolocalizado(result) {
+  return (result?.ipAnalysis || []).find(
+    (ip) => Number.isFinite(ip.geo?.lat) && Number.isFinite(ip.geo?.lon)
+  );
+}
+
+function pontoResidencia(result) {
   const home = result?.home?.geo;
+  if (!home || !Number.isFinite(home.lat) || !Number.isFinite(home.lon)) return null;
+  return { lat: home.lat, lon: home.lon, color: "#2563eb", label: "R" };
+}
+
+/**
+ * Mapa 1 — origem da conexão (I) × residência informada (R).
+ * Responde: a conexão que gerou a assinatura partiu da região onde o cliente mora?
+ */
+export function mapPointsIpVsHome(result) {
+  const r = pontoResidencia(result);
+  const ip = primeiroIpGeolocalizado(result);
+  if (!r || !ip) return [];
+  return [r, { lat: ip.geo.lat, lon: ip.geo.lon, color: "#dc2626", label: "I" }];
+}
+
+/**
+ * Mapa 2 — residência informada (R) × geolocalização declarada no documento (A).
+ * Responde: o documento afirma que o ato ocorreu onde o cliente mora?
+ */
+export function mapPointsHomeVsDeclared(result) {
+  const r = pontoResidencia(result);
   const cg = result?.contractGeo;
-  if (home && Number.isFinite(home.lat) && Number.isFinite(home.lon)) {
-    points.push({ lat: home.lat, lon: home.lon, color: "#2563eb", label: "R" });
-  }
-  if (cg && Number.isFinite(cg.lat) && Number.isFinite(cg.lon)) {
-    points.push({ lat: cg.lat, lon: cg.lon, color: "#f59e0b", label: "A" });
-  }
-  return points;
+  if (!r || !cg || !Number.isFinite(cg.lat) || !Number.isFinite(cg.lon)) return [];
+  return [r, { lat: cg.lat, lon: cg.lon, color: "#f59e0b", label: "A" }];
 }

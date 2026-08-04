@@ -23,26 +23,34 @@ export default function AdminAuditLog() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
 
-  const load = useCallback(async () => {
+  // `signal` descarta resposta obsoleta: trocar o filtro rapidamente deixava
+  // duas requisições em voo e a mais antiga podia sobrescrever a mais nova.
+  const load = useCallback(async (signal) => {
     setLoading(true);
     try {
       const { data } = await api.get("/admin/audit-logs", {
         params: { page, action: action || undefined, limit: 25 },
+        signal,
       });
       setLogs(data.logs);
       setTotalPages(data.pagination.totalPages);
       setTotal(data.pagination.total);
-      // A lista de ações não muda com o filtro; preenche uma vez.
-      if (data.actions?.length && actions.length === 0) setActions(data.actions);
-    } catch {
+      // A lista de ações não muda com o filtro; `setActions` com função evita
+      // depender do valor capturado no closure.
+      if (data.actions?.length) setActions((atual) => (atual.length ? atual : data.actions));
+    } catch (error) {
+      if (error.code === "ERR_CANCELED" || error.name === "CanceledError") return;
       toast.error("Erro ao carregar a auditoria.");
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, action]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const controller = new AbortController();
+    load(controller.signal);
+    return () => controller.abort();
+  }, [load]);
 
   return (
     <div className="space-y-4">

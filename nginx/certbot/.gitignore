@@ -1,0 +1,3 @@
+# Diretório de trabalho do certbot (webroot). Conteúdo é efêmero.
+*
+!.gitignore

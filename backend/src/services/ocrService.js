@@ -14,7 +14,89 @@ const OCR_LANG_PATH = resolve(__dirname, "../../ocr/lang-data") + "/";
 const OCR_LANG = process.env.OCR_LANG || "por+eng";
 const OCR_DPI = String(process.env.OCR_DPI || 180);
 const OCR_MAX_PAGES = Number(process.env.OCR_MAX_PAGES || 20);
-const OCR_TIMEOUT_MS = Number(process.env.OCR_TIMEOUT_MS || 60_000);
+
+/**
+ * ─── O orçamento de tempo precisa caber no trabalho prometido ────────────────
+ *
+ * Medição sobre dossiê real, a 180 DPI: rasterização de 529 ms por página e OCR
+ * de aproximadamente 5 segundos por página. Com `OCR_MAX_PAGES=20`, o custo
+ * projetado é de cerca de 112 segundos.
+ *
+ * O timeout era fixo em 60 segundos. Os dois valores eram incompatíveis entre
+ * si: o sistema aceitava 20 páginas e desistia por volta da 11ª, e o cliente
+ * recebia "não foi possível processar seu documento" com o crédito estornado.
+ * Documentos escaneados são justamente os que os bancos entregam, então o caso
+ * que falhava era o caso comum.
+ *
+ * O default agora DERIVA do número de páginas, com folga para máquina mais lenta
+ * que a de medição e um piso para documentos curtos. Continua sobrescrevível por
+ * `OCR_TIMEOUT_MS` quando a infraestrutura exigir outro valor.
+ *
+ * ─── O primeiro valor não tinha margem, e o teste de carga provou ────────────
+ *
+ * A estimativa inicial era 6 s por página, tirada da MÉDIA de cinco páginas. Com
+ * 20 páginas isso dava 120 s de orçamento, e o teste de carga com documento
+ * escaneado real (scripts/testeDeCarga.mjs) mediu 105,3 s numa execução e
+ * ESTOUROU o prazo em outra, com a mesma carga na mesma máquina.
+ *
+ * O erro foi dimensionar pela média: um prazo colocado sobre a média falha
+ * metade das vezes por definição, e a falha aqui não é um retry, é o crédito
+ * estornado com "não foi possível processar seu documento".
+ *
+ * 9 s por página dá cerca de 70% de folga sobre a média medida. A margem também
+ * cobre a diferença de hardware: a medição saiu numa máquina de desenvolvimento
+ * com 10 núcleos, e o servidor de produção tende a ser mais lento, além de estar
+ * processando outras análises ao mesmo tempo.
+ */
+const CUSTO_ESTIMADO_POR_PAGINA_MS = Number(process.env.OCR_COST_PER_PAGE_MS) || 9_000;
+
+/*
+ * ─── O orçamento precisa contar a disputa por CPU ────────────────────────────
+ *
+ * Corrigir a estimativa por página não bastou. O prazo é tempo de RELÓGIO, mas a
+ * duração de uma análise depende de quantas outras rodam ao mesmo tempo, porque
+ * o OCR é limitado por CPU. A curva de saturação mostrou isso:
+ *
+ *   concorrência   mediana    sobre a de 1
+ *    1              99,0 s     1,00x
+ *    2             109,4 s     1,11x
+ *    4             175,6 s     1,77x
+ *    6             TODAS falharam por estouro de prazo
+ *
+ * Com prazo fixo de 180 s, a concorrência 4 (que é o DEFAULT do worker) já
+ * entregava mediana de 175,6 s: metade das análises falharia sob carga
+ * sustentada. E a concorrência 6 não entregava nenhuma.
+ *
+ * A raiz quadrada da concorrência acompanha bem a curva medida (2,00 contra
+ * 1,77x observado em 4) e ainda deixa margem. Não é lei física; é ajuste ao que
+ * foi medido, e por isso o valor continua sobrescrevível.
+ *
+ * O ponto conceitual: este prazo existe para capturar caso patológico (PDF
+ * corrompido, Tesseract travado), NÃO para impor tempo de resposta. Um prazo que
+ * dispara sob carga legítima está fazendo o trabalho errado, e o preço é o
+ * crédito do cliente sendo estornado por um laudo que ia sair.
+ */
+function fatorContencao() {
+  const conc = Math.max(1, Number(process.env.WORKER_CONCURRENCY_ANALYSIS) || 4);
+  return Math.sqrt(conc);
+}
+
+/**
+ * Orçamento de tempo do OCR, em milissegundos.
+ *
+ * Exportado porque o TTL do mutex de análise precisa do MESMO número: se o lock
+ * expirar antes do pior caso de processamento, um segundo job do mesmo tenant
+ * entra enquanto o primeiro ainda roda. Duplicar a regra nos dois lugares faria
+ * os dois valores divergirem no primeiro ajuste de `OCR_MAX_PAGES`.
+ */
+export function ocrBudgetMs() {
+  return (
+    Number(process.env.OCR_TIMEOUT_MS) ||
+    Math.max(60_000, Math.round(OCR_MAX_PAGES * CUSTO_ESTIMADO_POR_PAGINA_MS * fatorContencao()))
+  );
+}
+
+const OCR_TIMEOUT_MS = ocrBudgetMs();
 const PDFTOPPM_CANDIDATES = [
   process.env.PDFTOPPM_PATH,
   "pdftoppm",
@@ -48,15 +130,36 @@ export async function extractPdfTextWithOcr(pdfBuffer) {
     return { text: baseText, usedOcr: false, ocrPages: 0 };
   }
 
-  return Promise.race([
-    runOcr(baseText, pdfBuffer),
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error(`OCR timeout após ${OCR_TIMEOUT_MS}ms`)), OCR_TIMEOUT_MS)
-    ),
-  ]);
+  /*
+   * `Promise.race` sozinho não cancela nada: ele resolve a promessa externa e
+   * deixa o Tesseract rodando até terminar por conta própria. Sob carga isso
+   * significa CPU queimada com trabalho cujo resultado já foi descartado,
+   * atrasando os jobs seguintes da fila de análise.
+   *
+   * O objeto `controle` fecha esse buraco por dois caminhos: encerra o worker do
+   * Tesseract assim que o prazo estoura, e marca a flag que faz o laço de
+   * páginas parar em vez de seguir processando o documento inteiro.
+   */
+  const controle = { cancelado: false, worker: null };
+  let timer;
+
+  const prazo = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      controle.cancelado = true;
+      Promise.resolve(controle.worker?.terminate()).catch(() => {});
+      reject(new Error(`OCR timeout após ${OCR_TIMEOUT_MS}ms`));
+    }, OCR_TIMEOUT_MS);
+  });
+
+  try {
+    return await Promise.race([runOcr(baseText, pdfBuffer, controle), prazo]);
+  } finally {
+    clearTimeout(timer);
+    controle.cancelado = true;
+  }
 }
 
-async function runOcr(baseText, pdfBuffer) {
+async function runOcr(baseText, pdfBuffer, controle = { cancelado: false }) {
   const pdftoppm = await findPdftoppm();
   const tempDir = await mkdtemp(join(tmpdir(), "forensedoc-ocr-"));
   let worker = null;
@@ -75,8 +178,13 @@ async function runOcr(baseText, pdfBuffer) {
       .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 
     worker = await createWorker(OCR_LANG, 1, { langPath: OCR_LANG_PATH });
+    controle.worker = worker;
+
     let ocrText = "";
     for (const file of files) {
+      // O prazo pode ter estourado durante a página anterior. Continuar aqui
+      // seria processar um documento inteiro cujo resultado já foi rejeitado.
+      if (controle.cancelado) break;
       const { data } = await worker.recognize(join(tempDir, file));
       ocrText += `\n\n--- OCR ${file} ---\n${data.text || ""}`;
     }
@@ -87,7 +195,9 @@ async function runOcr(baseText, pdfBuffer) {
       ocrPages: files.length,
     };
   } finally {
-    if (worker) await worker.terminate();
+    // O timeout pode já ter encerrado este worker; encerrar de novo lança, e a
+    // exceção aqui mascararia o erro real que levou o fluxo até o `finally`.
+    if (worker) await Promise.resolve(worker.terminate()).catch(() => {});
     await rm(tempDir, { recursive: true, force: true });
   }
 }
