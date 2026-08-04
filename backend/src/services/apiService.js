@@ -1,5 +1,6 @@
 import { buildGeocodeQueries } from "../utils/geoUtils.js";
 import { cached, TTL } from "../utils/externalCache.js";
+import { buildSearchUrl, NOMINATIM_UA } from "./nominatimClient.js";
 
 const FETCH_TIMEOUT_MS = 8_000;
 
@@ -24,12 +25,12 @@ export async function geocodeAddress(q) {
 
 async function geocodeAddressSemCache(queryText) {
   for (const query of buildGeocodeQueries(queryText)) {
-    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1&accept-language=pt-BR`;
+    const url = buildSearchUrl(query, { limit: 1 });
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
     try {
       const r = await fetch(url, {
-        headers: { "User-Agent": "ForenseDoc/2.2 (Ronney Menezes Advocacia)" },
+        headers: { "User-Agent": NOMINATIM_UA },
         signal: controller.signal,
       });
       const d = await r.json();

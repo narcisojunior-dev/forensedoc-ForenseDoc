@@ -83,7 +83,19 @@ router.patch("/analyses/:id/geo", requireAuth, tenantLimiter, correctAnalysisGeo
 // A rota estática vem ANTES da paramétrica: registrada depois, "/analyses/:id"
 // capturaria "reviewable-fields" como se fosse um id.
 router.get("/analyses/reviewable-fields", requireAuth, tenantLimiter, listReviewableFields);
-router.patch("/analyses/:id/fields", requireAuth, tenantLimiter, reviewAnalysisFields);
+// `externalApiLimiter` porque corrigir o IP dispara consulta ao provedor de
+// geolocalização, o MESMO que `/ip/:ip` protege com 30/min por tenant (N11).
+// Sob apenas o teto do plano (200/min ou mais), um cliente autenticado queimaria
+// a cota diária do provedor em minutos e deixaria todos os outros com laudo sem
+// geolocalização. O cache de 30 dias reduz o volume, mas não fecha o caminho:
+// cada IP inédito é uma consulta nova.
+router.patch(
+  "/analyses/:id/fields",
+  requireAuth,
+  tenantLimiter,
+  externalApiLimiter,
+  reviewAnalysisFields
+);
 router.get("/analyses", requireAuth, tenantLimiter, listAnalyses);
 
 // Rotas Utilitárias

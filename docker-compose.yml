@@ -4,6 +4,18 @@
 # ATENÇÃO: Este arquivo é para a fase de PRODUÇÃO na VPS dedicada.
 # Durante o lançamento com fundadores, a infra roda no Railway.
 # Referência: implementation-plan.md → Seção "Migração Railway → VPS"
+#
+# ── DOIS arquivos de ambiente, e não um ──────────────────────────
+#
+# `backend/.env.production` alimenta a APLICAÇÃO, via `env_file`.
+# `.env` NESTE diretório alimenta o COMPOSE, nos `${...}` abaixo.
+#
+# O Compose resolve `${POSTGRES_PASSWORD}` e `${REDIS_PASSWORD}` lendo apenas o
+# shell e o `.env` daqui: `env_file` injeta variáveis dentro do container e não
+# participa dessa substituição. Sem o `.env` deste diretório, o Postgres não
+# inicia e o Redis sobe sem a senha que a aplicação usa.
+#
+# Ponto de partida: `cp .env.example .env`
 # ─────────────────────────────────────────────────────────────────
 
 version: "3.9"
@@ -51,7 +63,11 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
-    user: node
+    # Sem `user:` aqui: o Dockerfile já define USER nodeuser (uid 1001), que é o
+    # dono dos arquivos da aplicação e do diretório de uploads. Sobrescrever com
+    # `user: node` (uid 1000, herdado da imagem base) fazia o processo rodar como
+    # um usuário sem permissão de escrita no volume, e a gravação do dossiê caía
+    # em silêncio para o payload em base64.
     networks:
       - forensedoc_net
 
@@ -83,7 +99,7 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
-    user: node
+    # Ver a nota do serviço `backend`: quem define o usuário é o Dockerfile.
     networks:
       - forensedoc_net
 

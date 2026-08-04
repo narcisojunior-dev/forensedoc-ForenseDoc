@@ -7,8 +7,15 @@ dist
 .DS_Store
 
 graphify-out/
+
 # Prisma
-backend/prisma/migrations/*.sql
+#
+# As migrations SÃO versionadas: `prisma migrate deploy` aplica em produção o que
+# está no repositório, e uma migration ausente do git é uma coluna que existe em
+# dev e não existe no servidor. Havia aqui um `backend/prisma/migrations/*.sql`
+# que só não causou dano porque os arquivos ficam em subpastas
+# (`<timestamp>_nome/migration.sql`): a primeira migration gerada solta na raiz
+# do diretório sumiria do commit em silêncio.
 
 # Build
 frontend/dist
