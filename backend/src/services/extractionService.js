@@ -137,9 +137,33 @@ export function heuristicExtractionFromText(rawText) {
     /CPF[:\s]*([0-9.\-]{11,14})/i,
   ]);
   const cep = firstMatch(flat, [/\b(\d{5}-?\d{3})\b/]);
+  /*
+   * Número do contrato.
+   *
+   * O padrão anterior aceitava qualquer palavra depois do rótulo, porque a
+   * flag `/i` faz `[A-Z0-9]` casar minúsculas também. O resultado, nos três
+   * documentos do corpus:
+   *
+   *   "CONTRATO Documento"    (de "Cartório de Registro de Títulos e Documentos")
+   *   "operação contratada"
+   *   "contrato: 1531261695"  ← o único correto
+   *
+   * Dois de três laudos exibiam uma PALAVRA no campo "número do contrato", que
+   * é dado de identificação do instrumento examinado. Um laudo que erra a
+   * identificação do que examinou é atacável por inteiro, independentemente do
+   * acerto do resto.
+   *
+   * `NUMERO_DE_CONTRATO` exige pelo menos quatro dígitos no valor. Nenhum banco
+   * numera contrato com menos que isso, e a exigência derruba qualquer palavra
+   * do texto corrido sem depender de lista de exceções.
+   */
+  const NUMERO_DE_CONTRATO = /(?=[A-Z0-9.\-\/]*(?:\d[A-Z0-9.\-\/]*){4,})([A-Z0-9.\-\/]{5,})/i;
   const contratoNumero = firstMatch(flat, [
-    /(?:contrato|proposta|c[eé]dula|opera[cç][aã]o)\s*(?:n[ºo.]*)?\s*[:\-]?\s*([A-Z0-9.\-\/]{5,})/i,
-    /\b(?:CCB|ADE)\s*[:\-]?\s*([A-Z0-9.\-\/]{5,})/i,
+    new RegExp(
+      `(?:contrato|proposta|c[eé]dula|opera[cç][aã]o)\\s*(?:n[ºo.]*)?\\s*[:\\-]?\\s*${NUMERO_DE_CONTRATO.source}`,
+      "i"
+    ),
+    new RegExp(`\\b(?:CCB|ADE)\\s*[:\\-]?\\s*${NUMERO_DE_CONTRATO.source}`, "i"),
   ]);
   const banco = firstMatch(upper, [
     /\b(BANCO\s+BMG|BMG)\b/,

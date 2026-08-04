@@ -4,7 +4,8 @@ import { v4 as uuidv4 } from "uuid";
 import crypto from "crypto";
 import { z } from "zod";
 import { prisma } from "../utils/prisma.js";
-import { generateAccessToken } from "../utils/jwt.js";
+import { generateAccessToken, generateTotpChallenge } from "../utils/jwt.js";
+import { totpAtivo } from "../services/totpService.js";
 import { enqueueEmail } from "../services/notificationService.js";
 import { redis } from "../utils/redis.js";
 import { normalizeEmail } from "../utils/stringUtils.js";
@@ -272,6 +273,40 @@ export async function register(req, res) {
   }
 }
 
+/**
+ * Emite o par access + refresh e planta o cookie.
+ *
+ * Existia em duplicata entre `login` e `refresh`, e o segundo fator seria a
+ * terceira cópia. O que precisava deixar de ser copiado é o `mfaVerified`: ele
+ * nasce na verificação do TOTP, atravessa a rotação do refresh e alimenta a
+ * claim do access token. Espalhado em três lugares, bastaria um esquecer de
+ * propagá-lo para o admin ser derrubado do painel a cada 15 minutos, ou, pior,
+ * para a marca ser afirmada onde não houve verificação.
+ */
+export async function emitirSessao(res, user, { mfaVerified = false } = {}) {
+  const accessToken = generateAccessToken({
+    userId: user.id,
+    tenantId: user.tenantId,
+    role: user.role,
+    isPlatformAdmin: user.isPlatformAdmin,
+    status: user.tenant.status,
+    mfa: mfaVerified,
+  });
+
+  const refreshTokenString = uuidv4();
+  await prisma.refreshToken.create({
+    data: {
+      userId: user.id,
+      tokenHash: hashToken(refreshTokenString),
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 dias
+      mfaVerified,
+    },
+  });
+
+  res.cookie(REFRESH_COOKIE, refreshTokenString, REFRESH_COOKIE_OPTS);
+  return accessToken;
+}
+
 export async function login(req, res) {
   try {
     const { email, password } = loginSchema.parse(req.body);
@@ -305,25 +340,24 @@ export async function login(req, res) {
     if (!user.active) return res.status(403).json({ error: "Conta desativada.", code: "ACCOUNT_DEACTIVATED" });
     if (user.tenant.status === "SUSPENDED") return res.status(403).json({ error: "Conta suspensa.", code: "ACCOUNT_SUSPENDED" });
 
-    // Gerar Tokens
-    const accessToken = generateAccessToken({
-      userId: user.id,
-      tenantId: user.tenantId,
-      role: user.role,
-      isPlatformAdmin: user.isPlatformAdmin,
-      status: user.tenant.status,
-    });
+    /*
+     * Segundo fator: a senha sozinha não abre sessão nenhuma.
+     *
+     * Nada é emitido aqui além do desafio, que é assinado com um segredo
+     * derivado e não serve como token de acesso (ver utils/jwt.js). Emitir a
+     * sessão agora e "exigir o TOTP depois" seria fingir um segundo fator: o
+     * token já valeria para todo o resto da API.
+     */
+    if (totpAtivo(user)) {
+      const challenge = generateTotpChallenge({ userId: user.id, typ: "totp" });
+      return res.json({
+        totpRequired: true,
+        challenge,
+        recuperacaoDisponivel: (user.totpRecoveryCodes || []).length > 0,
+      });
+    }
 
-    const refreshTokenString = uuidv4();
-    const refreshExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 dias
-
-    await prisma.refreshToken.create({
-      data: {
-        userId: user.id,
-        tokenHash: hashToken(refreshTokenString),
-        expiresAt: refreshExpiresAt,
-      },
-    });
+    const accessToken = await emitirSessao(res, user);
 
     // Atualizar último login e logar auditoria
     await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
@@ -336,9 +370,6 @@ export async function login(req, res) {
         userAgent: req.headers["user-agent"],
       },
     });
-
-    // Enviar refreshToken via Cookie HttpOnly
-    res.cookie(REFRESH_COOKIE, refreshTokenString, REFRESH_COOKIE_OPTS);
 
     return res.json({ accessToken });
   } catch (error) {
@@ -402,26 +433,16 @@ export async function refresh(req, res) {
       data: { revoked: true },
     });
 
-    // Gerar novos tokens
+    // Gerar novos tokens.
+    //
+    // `mfaVerified` é carregado da sessão que está sendo rotacionada, e não
+    // reafirmado: a rotação não pede nada ao usuário, então ela não pode elevar
+    // o nível de verificação. Também não pode rebaixá-lo, senão o admin cairia
+    // do painel a cada 15 minutos.
     const { user } = storedToken;
-    const newAccessToken = generateAccessToken({
-      userId: user.id,
-      tenantId: user.tenantId,
-      role: user.role,
-      isPlatformAdmin: user.isPlatformAdmin,
-      status: user.tenant.status,
+    const newAccessToken = await emitirSessao(res, user, {
+      mfaVerified: storedToken.mfaVerified,
     });
-
-    const newRefreshTokenString = uuidv4();
-    await prisma.refreshToken.create({
-      data: {
-        userId: user.id,
-        tokenHash: hashToken(newRefreshTokenString),
-        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-      },
-    });
-
-    res.cookie(REFRESH_COOKIE, newRefreshTokenString, REFRESH_COOKIE_OPTS);
 
     return res.json({ accessToken: newAccessToken });
   } catch (error) {

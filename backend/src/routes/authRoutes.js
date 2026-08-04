@@ -1,5 +1,13 @@
 import { Router } from "express";
 import { register, login, refresh, verifyEmail, logout, me, forgotPassword, resetPassword, updateProfile, changePassword } from "../controllers/authController.js";
+import {
+  statusTotp,
+  iniciarCadastroTotp,
+  confirmarCadastroTotp,
+  desativarTotp,
+  regerarCodigosDeRecuperacao,
+  verificarLoginTotp,
+} from "../controllers/totpController.js";
 import { requireAuth } from "../middleware/auth.js";
 import { csrfGuard } from "../middleware/csrfGuard.js";
 import { createLimiter } from "../utils/rateLimitStore.js";
@@ -94,8 +102,24 @@ router.post("/verify-email", tokenLimiter, verifyEmail);
 router.post("/forgot-password", forgotPasswordLimiter, forgotPassword);
 router.post("/reset-password", tokenLimiter, resetPassword);
 
+/**
+ * Segundo passo do login.
+ *
+ * `loginLimiter` de novo, e não um limitador próprio mais generoso: o desafio é
+ * reemitível refazendo o login, então um teto frouxo aqui devolveria a força
+ * bruta sobre os seis dígitos que o bloqueio por conta fecha. O contador por
+ * conta é incrementado dentro do controller, onde o e-mail já é conhecido (o
+ * corpo desta rota traz o desafio, não o e-mail).
+ */
+router.post("/totp/verify", loginLimiter, verificarLoginTotp);
+
 // Rotas Protegidas
 router.post("/logout", requireAuth, logout);
+router.get("/totp", requireAuth, statusTotp);
+router.post("/totp/setup", requireAuth, tokenLimiter, iniciarCadastroTotp);
+router.post("/totp/enable", requireAuth, tokenLimiter, confirmarCadastroTotp);
+router.post("/totp/disable", requireAuth, tokenLimiter, desativarTotp);
+router.post("/totp/recovery-codes", requireAuth, tokenLimiter, regerarCodigosDeRecuperacao);
 router.get("/me", requireAuth, me);
 router.patch("/me", requireAuth, updateProfile);
 router.post("/change-password", requireAuth, changePassword);

@@ -16,7 +16,7 @@ import {
   listAllPayments,
   getQueueMetrics,
 } from "../controllers/adminMetricsController.js";
-import { requireAuth, requirePlatformAdmin } from "../middleware/auth.js";
+import { requireAuth, requirePlatformAdmin, requireMfaForAdmin } from "../middleware/auth.js";
 import { adminIpAllowlist } from "../middleware/adminIpAllowlist.js";
 import { createLimiter } from "../utils/rateLimitStore.js";
 
@@ -33,7 +33,12 @@ const adminLimiter = createLimiter({
 
 // A allowlist vem DEPOIS do requirePlatformAdmin: quem não é admin recebe o 403
 // genérico de sempre e não descobre que existe restrição de origem no painel.
-router.use(requireAuth, requirePlatformAdmin, adminIpAllowlist, adminLimiter);
+//
+// O segundo fator vem depois da allowlist, e pela mesma razão: quem não passa
+// da origem não precisa saber que existe TOTP aqui dentro. A ordem também
+// economiza a consulta ao banco do `requireMfaForAdmin` para quem já foi
+// recusado antes.
+router.use(requireAuth, requirePlatformAdmin, adminIpAllowlist, requireMfaForAdmin, adminLimiter);
 
 // Convites do plano fundador
 router.get("/founder-invites", listFounderInvites);

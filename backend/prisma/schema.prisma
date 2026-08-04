@@ -138,6 +138,26 @@ model User {
   termsVersion    String?
   termsAcceptedAt DateTime?
 
+  // ── Segundo fator (TOTP) ────────────────────────────────────────────────
+  //
+  // `totpSecret` é o segredo base32 do autenticador. Fica em texto claro, e
+  // isso é uma decisão consciente: cifrá-lo exigiria uma chave que, guardada no
+  // mesmo servidor, é comprometida junto com o banco, e guardada fora exigiria
+  // um KMS que este projeto não tem. Quem obtém o banco obtém o segundo fator,
+  // e é por isso que a allowlist de IP do painel CONTINUA valendo: são camadas
+  // com modos de falha diferentes.
+  //
+  // `totpLastStep` impede reuso: o mesmo código vale durante toda a janela de
+  // tempo, então sem isto um código observado uma vez pode ser reapresentado.
+  //
+  // `totpRecoveryCodes` guarda HASHES bcrypt dos códigos de uso único. Eles
+  // valem tanto quanto a senha (dispensam o app), então são tratados como
+  // senha: nunca em texto claro, exibidos uma única vez na geração.
+  totpSecret        String?
+  totpEnabledAt     DateTime?
+  totpLastStep      BigInt?
+  totpRecoveryCodes String[]  @default([])
+
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -166,6 +186,16 @@ model RefreshToken {
   expiresAt DateTime
   revoked   Boolean  @default(false)
   createdAt DateTime @default(now())
+
+  // A sessão foi aberta com o segundo fator?
+  //
+  // Mora aqui, e não só no access token, porque o refresh emite token novo a
+  // cada 15 minutos sem pedir nada ao usuário. Se a marca vivesse apenas no
+  // access token, ou ela se perderia no primeiro refresh (derrubando o admin do
+  // painel a cada 15 min), ou seria reafirmada sem base. Presa à sessão, ela
+  // significa o que precisa significar: ESTA sessão nasceu de uma verificação
+  // TOTP, e a rotação apenas carrega esse fato adiante.
+  mfaVerified Boolean @default(false)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 

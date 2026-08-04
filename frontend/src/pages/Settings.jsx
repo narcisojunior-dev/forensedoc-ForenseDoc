@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { User, Lock, Users, Loader2, Trash2, UserPlus, Clock, Send, X } from "lucide-react";
+import { User, Lock, Users, Loader2, Trash2, UserPlus, Clock, Send, X, ShieldCheck } from "lucide-react";
 import toast from "react-hot-toast";
 import { api } from "../lib/axios";
 import { useAuthStore } from "../store/authStore";
 import { MIN_LENGTH } from "../utils/passwordRules";
 import ConfirmDialog from "../components/ConfirmDialog";
+import SegundoFator from "../components/SegundoFator";
 
 function SectionCard({ icon: Icon, title, children }) {
   return (
@@ -223,6 +224,10 @@ export default function Settings() {
           </button>
           <p className="text-xs text-zinc-500">Ao trocar a senha, você precisará fazer login novamente em todos os dispositivos.</p>
         </form>
+      </SectionCard>
+
+      <SectionCard icon={ShieldCheck} title="Verificação em duas etapas">
+        <SegundoFator />
       </SectionCard>
 
       <SectionCard icon={Users} title="Equipe">
