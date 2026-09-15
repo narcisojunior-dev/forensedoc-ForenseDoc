@@ -60,6 +60,6 @@ EXPOSE 8787
 ENV NODE_ENV=production
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-  CMD node -e "fetch('http://localhost:8787/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"
+  CMD node -e "const p = process.env.PORT || 8787; fetch(\`http://localhost:\${p}/health\`).then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"
 
 CMD ["sh", "-c", "node scripts/db-deploy.js && exec node server.js"]
