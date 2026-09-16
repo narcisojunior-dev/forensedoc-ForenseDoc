@@ -11,6 +11,8 @@ import {
   avisoLegal,
 } from "../reports/laudoTexts.js";
 import { buildCustodyChain } from "../reports/custodyChain.js";
+import { calculateForensicScore } from "../utils/forensicScore.js";
+import { generateJudicialQuesitos } from "../reports/quesitosTemplate.js";
 
 // Paleta sóbria para peça processual (impressão em preto e branco continua legível).
 const INK = "#1a1a1a";
@@ -71,6 +73,7 @@ export async function buildReportPdf(analysis, result) {
   sectionGeo(ctx, result, { mapaIpResidencia, mapaResidenciaDeclarado });
   sectionIrregularities(ctx, extracted);
   sectionRemarks(ctx, extracted);
+  sectionQuesitos(ctx, extracted, result);
   sectionLegal(ctx);
   legalNotice(ctx, timestamp);
 
@@ -202,6 +205,57 @@ function cover(ctx, analysis, result, timestamp) {
   field(ctx, "Tamanho do arquivo", result.file?.sizeBytes ? `${(result.file.sizeBytes / 1024).toFixed(2)} KB` : null);
   field(ctx, "Data de geração", timestamp);
   if (result.usedOcr) field(ctx, "OCR", `Aplicado em ${result.ocrPages} página(s)`);
+
+  // ─── Visual Law: Resumo Executivo para o Magistrado / Perito ────────────────
+  const distKmIp = result.ipAnalysis?.[0]?.distance;
+  const distKmGps = result.contractGeo?.distance;
+  const distKmIpVsGps = result.ipAnalysis?.[0]?.distanceToSignature;
+  const scoreObj = calculateForensicScore({ distKmIp, distKmGps, distKmIpVsGps });
+
+  doc.moveDown(0.6);
+  const boxX = MARGIN;
+  const boxY = doc.y;
+  const boxWidth = contentWidth;
+  const boxHeight = 105;
+
+  doc
+    .roundedRect(boxX, boxY, boxWidth, boxHeight, 4)
+    .fillColor(scoreObj.score >= 80 ? "#fef2f2" : "#f8fafc")
+    .strokeColor(scoreObj.score >= 80 ? "#fca5a5" : "#cbd5e1")
+    .lineWidth(1)
+    .fillAndStroke();
+
+  doc
+    .fontSize(10)
+    .font("Helvetica-Bold")
+    .fillColor(scoreObj.score >= 80 ? DANGER : ACCENT)
+    .text("RESUMO EXECUTIVO · ÍNDICE DE ANOMALIA FORENSE", boxX + 12, boxY + 10, { width: boxWidth - 24 });
+
+  doc
+    .fontSize(15)
+    .font("Helvetica-Bold")
+    .fillColor(scoreObj.score >= 80 ? DANGER : INK)
+    .text(`${scoreObj.score}/100 — ${scoreObj.rotulo}`, boxX + 12, boxY + 26);
+
+  const ipLoc = result.ipAnalysis?.[0]?.geo?.city
+    ? `${result.ipAnalysis[0].geo.city}/${result.ipAnalysis[0].geo.region || ""}`
+    : "Não localizada";
+  const homeLoc = result.home?.geo?.display || result.home?.query || "Domicílio declarado";
+
+  doc
+    .fontSize(8.5)
+    .font("Helvetica")
+    .fillColor(INK)
+    .text(
+      `• Domicílio do titular: ${homeLoc}\n` +
+      `• Origem técnica da conexão: ${ipLoc} (${distKmIp ? `${distKmIp.toFixed(1)} km de distância` : "N/D"})\n` +
+      `• GPS registrado no ato: ${distKmGps ? `${distKmGps.toFixed(1)} km do domicílio declarado` : "Não registrado"}`,
+      boxX + 12,
+      boxY + 48,
+      { width: boxWidth - 24, lineGap: 1.5 }
+    );
+
+  doc.y = boxY + boxHeight + 10;
 }
 
 /**
@@ -675,7 +729,21 @@ function sectionIpTrace(ctx, result) {
       );
 
     if (ip.data_hora) field(ctx, "   Data / hora do registro", ip.data_hora);
-    if (ip.user_agent) field(ctx, "   Dispositivo declarado", ip.user_agent);
+    if (ip.porta) {
+      field(ctx, "   Porta lógica de origem", `${ip.porta} (porta efêmera / cliente-servidor ativa)`);
+    }
+
+    if (ip.rdap) {
+      if (ip.rdap.asn) field(ctx, "   ASN Oficial (Registro.br / LACNIC)", `${ip.rdap.asn} — ${ip.rdap.owner || ""}`);
+      if (ip.rdap.cidr) field(ctx, "   Bloco / Faixa CIDR alocada", ip.rdap.cidr);
+    }
+
+    if (ip.parsedUserAgent) {
+      const ua = ip.parsedUserAgent;
+      field(ctx, "   Ambiente do dispositivo", `${ua.os} ${ua.osVersion || ""} · ${ua.browser} ${ua.browserVersion || ""} (${ua.deviceType})`);
+    } else if (ip.user_agent) {
+      field(ctx, "   Dispositivo declarado", ip.user_agent);
+    }
 
     // Endereço de CGNAT não é ausência de dado nem falha de consulta: é um
     // endereço que, por natureza, não localiza ninguém. Tratá-lo com a mesma
@@ -778,8 +846,43 @@ function sectionRemarks(ctx, extracted) {
   );
 }
 
+function sectionQuesitos(ctx, extracted, result) {
+  const { doc, contentWidth } = ctx;
+  heading(ctx, "§ 8 · Sugestão de Quesitos Judiciais ao Juízo e Perito");
+  paragraph(
+    ctx,
+    "Com base nas anomalias técnicas identificadas no presente laudo, sugerem-se os seguintes quesitos periciais para formulação em juízo e fixação dos pontos controvertidos (CPC, art. 465, § 1º, III):",
+    { size: 9, color: MUTED }
+  );
+
+  const ipItem = result.ipAnalysis?.[0];
+  const quesitos = generateJudicialQuesitos({
+    clienteNome: extracted.cliente?.nome,
+    clienteCpf: extracted.cliente?.cpf,
+    contratoNumero: extracted.contrato?.numero || extracted.contratoNumero,
+    banco: extracted.contrato?.banco || extracted.banco,
+    ip: ipItem?.endereco,
+    porta: ipItem?.porta,
+    gpsCoords: result.contractGeo ? `${result.contractGeo.lat}, ${result.contractGeo.lon}` : null,
+    cidadeIp: ipItem?.geo?.city ? `${ipItem.geo.city}/${ipItem.geo.region || ""}` : null,
+    cidadeDomicilio: result.home?.geo?.display || result.home?.query,
+    distanciaKm: result.contractGeo?.distance != null ? result.contractGeo.distance.toFixed(1) : null,
+    dataHora: ipItem?.data_hora || extracted.assinatura?.data_hora_assinatura,
+  });
+
+  for (const q of quesitos) {
+    if (doc.y > doc.page.height - 110) doc.addPage();
+    doc.moveDown(0.2);
+    doc.fontSize(9.5).font("Helvetica-Bold").fillColor(ACCENT).text(`Quesito ${q.numero} · ${q.titulo}:`, { width: contentWidth });
+    doc.moveDown(0.1);
+    doc.fontSize(9).font("Helvetica").fillColor(INK).text(q.quesito, { width: contentWidth, align: "justify", lineGap: 1.2 });
+    doc.fontSize(8).font("Helvetica-Oblique").fillColor(MUTED).text(`Finalidade processual: ${q.finalidade}`, { width: contentWidth });
+    doc.moveDown(0.3);
+  }
+}
+
 function sectionLegal(ctx) {
-  heading(ctx, "§ 8 · Fundamentação normativa aplicável");
+  heading(ctx, "§ 9 · Fundamentação normativa aplicável");
   for (const { grupo, itens } of FUNDAMENTACAO) {
     const { doc, contentWidth } = ctx;
     if (doc.y > doc.page.height - 130) doc.addPage();

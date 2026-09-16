@@ -3,6 +3,8 @@ import { geocodeAddress } from "./geocodingService.js";
 import { haversineKm } from "../utils/geoUtils.js";
 import { isIP } from "node:net";
 import { describeIpDivergence, classifyDeclaredDivergence } from "../utils/geoDivergence.js";
+import { lookupRdapIp } from "./rdapService.js";
+import { parseUserAgentForensic } from "../utils/userAgentParser.js";
 
 /**
  * Confronto geográfico do §5 do laudo (Módulo 4, Fase A).
@@ -50,10 +52,17 @@ export async function enrichGeography(extracted, homeAddress, homeCoord = null) 
       });
       continue;
     }
-    const geo = await getIpInfo(ipInfo.endereco);
+    const [geo, rdap] = await Promise.all([
+      getIpInfo(ipInfo.endereco),
+      lookupRdapIp(ipInfo.endereco).catch(() => null),
+    ]);
+    const parsedUa = ipInfo.user_agent ? parseUserAgentForensic(ipInfo.user_agent) : null;
+
     ipResults.push({
       ...ipInfo,
       geo,
+      rdap,
+      parsedUserAgent: parsedUa,
       // Distingue "o documento não trazia" de "a consulta falhou" — num laudo,
       // as duas ausências têm significados diferentes.
       geoFailure: geo ? null : "nenhum provedor de geolocalização respondeu",
