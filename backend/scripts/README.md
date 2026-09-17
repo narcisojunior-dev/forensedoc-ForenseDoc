@@ -30,3 +30,31 @@ node scripts/gerarPdfEscaneado.mjs entrada.pdf /tmp/escaneado.pdf 20
 Existe porque testar carga com PDF digital mede o caso fácil: menos de um segundo
 por análise, contra dezenas de segundos quando há OCR. Os documentos que os
 bancos entregam são digitalizações, então o caminho caro é o caminho comum.
+
+## `homologarDossie.mjs`
+
+Roda o pipeline de análise sobre o PDF real do dossiê C6 da homologação e confere
+cada valor de referência do relatório (data do contrato, aferição matemática,
+procedência, trilha, biometria, seguro, testes negativos e coerência entre seções).
+
+```bash
+node scripts/homologarDossie.mjs ../../documentação/doc_teste/dossiê.pdf
+```
+
+Sai com código 1 se algum item não conferir. O PDF tem dados pessoais reais e não
+fica no repositório.
+
+## `varrerLaudosAfetados.js`
+
+Lista análises concluídas cujos laudos podem conter os defeitos corrigidos na
+homologação (data do tribunal como data do contrato, CET travado em 20%,
+composição sem seguro, referência residencial de outra UF, protocolo tratado como
+hash, benefício do INSS em consignado CLT, reimpressão imputada ao banco).
+
+```bash
+node scripts/varrerLaudosAfetados.js --desde=2026-09-01 --saida=afetados.json
+```
+
+Somente leitura: não altera, não reprocessa e não notifica. A saída traz só
+identificadores internos e critérios atingidos. Confira para qual banco a
+`DATABASE_URL` aponta antes de rodar.

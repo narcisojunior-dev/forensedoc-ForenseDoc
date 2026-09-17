@@ -430,6 +430,31 @@ Validação manual: pipeline completo sobre um dossiê C6 real de 27 páginas (1
 
 ---
 
+## 10. Correções da homologação do dossiê C6 (fases 0 a 6)
+
+Plano e errata em `plano-implementacao-motor-novo.md`, na raiz de Forense_DOC. Homologação ponta a ponta: `node scripts/homologarDossie.mjs <dossiê.pdf>` (39 itens).
+
+| Área | Mudança | Módulo |
+|---|---|---|
+| Entrada | Carimbo PROJUDI/PJe fora do texto contratual, com metadados da juntada | `engine/carimboProcessual.js` |
+| Entrada | Data do contrato por rótulo, candidatas registradas, alertas DAT1 e DAT2 | `engine/dataContrato.js` |
+| Entrada | Endereço manual em conflito com o instrumento recusado; liberação com justificativa impressa | `utils/referenciaResidencial.js` |
+| Aferição | TIR com raiz verificada; anualização em 365 dias e 12 meses; composição com todos os componentes | `engine/matematicaFinanceira.js`, `engine/planilhaCalculo.js` |
+| Classificação | Produto (CLT, INSS, servidor) antes do marco normativo; empregador não identificado (EMP1) | `engine/produto.js` |
+| Classificação | Hash e código de autenticação separados; procedência de exportação processual | `engine/extraction.js`, `engine/analisarDocumento.js` |
+| Cadastro | Campos não localizados, vazios ou suspeitos (CAD4) | `engine/camposSuspeitos.js` |
+| Estrutura | Documentos lógicos e blocos de assinatura por documento (ASS1 só com segmentação confiável) | `engine/documentosLogicos.js` |
+| Extratores | Comprovante de crédito (LIB1, LIB2), seguro prestamista (SEG1 a SEG7), trilha e fuso (TRL1 a TRL5, TZ1), artefato biométrico (BIO2) | `engine/comprovanteCredito.js`, `engine/seguroPrestamista.js`, `engine/trilhaEventos.js`, `engine/biometria.js` |
+| Apresentação | Achados por gravidade e eixo da tese; inventário de imagens em anexo técnico | `engine/eixosAchado.js` |
+| Coerência | Validador de contradições entre seções, visível ao operador; bloqueio opcional | `engine/coerenciaLaudo.js` |
+| Retroativo | Varredura somente leitura de laudos possivelmente afetados | `scripts/varrerLaudosAfetados.js` |
+
+Variáveis novas: `GEO_LIMIAR_CONFLITO_KM` (padrão 100) e `COERENCIA_BLOQUEANTE` (padrão `false`).
+
+Rotas alteradas: `POST /api/analyze` aceita `homeAddressContested` e `homeAddressJustification`; `PATCH /api/analyses/:id/geo` aceita `contestado` e `justificativa` e responde 409 `CONFLITO_REFERENCIA` quando a coordenada conflita com o instrumento; `GET` do PDF responde 409 `COERENCIA` com o bloqueio ligado.
+
+A miniatura da selfie é embutida no resultado e no laudo por decisão do escritório (dado biométrico, LGPD art. 11).
+
 ## Laudo idêntico ao do motor de geração
 
 Comparação feita com `documentação/doc_teste/dossiê.pdf` gerado nos dois sistemas (motor local e SaaS), com o mesmo endereço de referência. Os dados já coincidiam, porque o backend do motor tinha sido portado; a diferença estava no documento, que o motor monta no navegador.
