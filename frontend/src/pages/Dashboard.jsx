@@ -93,7 +93,7 @@ export default function Dashboard() {
           icon={Zap}
           iconClass="bg-accent/10 border border-accent/20 text-accent"
           label="Créditos Disponíveis"
-          value={balance?.total ?? null}
+          value={balance?.unlimited ? "Ilimitado" : balance?.total ?? null}
         />
 
         <StatCard

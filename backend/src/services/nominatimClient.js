@@ -82,6 +82,24 @@ export function buildSearchUrl(query, params = {}) {
  * bloqueio: sem ele, a única evidência de que o servidor usa o serviço público
  * seria a geocodificação parar de responder para todo mundo de uma vez.
  */
+/**
+ * URL de geocodificação reversa (coordenada → município/UF), com a mesma base
+ * e credencial da busca. Usada pelo motor pericial para saber em qual município
+ * cai o GPS declarado no dossiê de contratação.
+ */
+export function buildReverseUrl(lat, lon, params = {}) {
+  const url = new URL(`${BASE_URL}/reverse`);
+  url.searchParams.set("lat", String(lat));
+  url.searchParams.set("lon", String(lon));
+  url.searchParams.set("format", "json");
+  url.searchParams.set("accept-language", "pt-BR");
+  for (const [chave, valor] of Object.entries(params)) {
+    if (valor !== undefined && valor !== null) url.searchParams.set(chave, String(valor));
+  }
+  if (API_KEY) url.searchParams.set(KEY_PARAM, API_KEY);
+  return url.toString();
+}
+
 export function avisarSeServicoPublico() {
   if (process.env.NODE_ENV === "production" && usandoServicoPublico()) {
     console.warn(

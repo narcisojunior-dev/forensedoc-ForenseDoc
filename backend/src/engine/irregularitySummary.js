@@ -1,0 +1,706 @@
+import { ordenarAchados } from "./eixosAchado.js";
+import { distanciaKm, distanciaSuspeita, formatarDistancia, montarConfrontoGeografico, STATUS_CONFRONTO } from "../utils/distancia.js";
+import { descreverIndisponibilidade } from "../utils/confrontoEnderecos.js";
+// Sumário executivo de irregularidades (placar de gravidade, confronto GPS x IP,
+// triagem de IPs e diligências). Portado do motor de geração, onde era calculado
+// no navegador; no SaaS é calculado no servidor e persistido com o laudo.
+const EMPTY_VALUES = new Set([
+  "",
+  "ausente",
+  "indeterminado",
+  "nao identificado",
+  "nao informada",
+  "nao informado",
+  "nao se aplica",
+  "n/a",
+  "null",
+  "undefined",
+]);
+
+const BANK_STOP_WORDS = new Set([
+  "banco", "instituicao", "financeira", "credito", "s.a", "sa", "do", "da", "de",
+]);
+
+function normalizeText(value) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function hasValue(value) {
+  if (value === null || value === undefined) return false;
+  if (Array.isArray(value)) return value.some(hasValue);
+  return !EMPTY_VALUES.has(normalizeText(value));
+}
+
+function compact(value, limit = 220) {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+  return text.length > limit ? `${text.slice(0, limit - 1).trim()}…` : text;
+}
+
+function digits(value) {
+  return String(value ?? "").replace(/\D/g, "");
+}
+
+function formatCpf(value) {
+  const onlyDigits = digits(value);
+  if (onlyDigits.length !== 11) return value;
+  return `${onlyDigits.slice(0, 3)}.${onlyDigits.slice(3, 6)}.${onlyDigits.slice(6, 9)}-${onlyDigits.slice(9)}`;
+}
+
+function hashKind(value) {
+  const hash = String(value ?? "").replace(/\s/g, "");
+  if (/^[a-f0-9]{64}$/i.test(hash)) return "SHA-256";
+  if (/^[a-f0-9]{40}$/i.test(hash)) return "SHA-1";
+  if (/^[a-f0-9]{32}$/i.test(hash)) return "MD5";
+  return hash ? "INVALIDO" : null;
+}
+
+function shortHash(value) {
+  const hash = String(value ?? "").replace(/\s/g, "").toUpperCase();
+  if (!hash) return "não informado";
+  return hash.length > 20 ? `${hash.slice(0, 10)}…${hash.slice(-8)}` : hash;
+}
+
+function dateIdentity(value) {
+  const match = String(value ?? "").match(/\b(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})\b/);
+  if (!match) return null;
+  const a = Number(match[1]);
+  const b = Number(match[2]);
+  const year = match[3];
+  if (a > 12 && b <= 12) return `${year}-${String(b).padStart(2, "0")}-${String(a).padStart(2, "0")}`;
+  if (b > 12 && a <= 12) return `${year}-${String(a).padStart(2, "0")}-${String(b).padStart(2, "0")}`;
+  return `${year}-${String(b).padStart(2, "0")}-${String(a).padStart(2, "0")}`;
+}
+
+// Nulo é ausência: devolve null, e quem chama suprime o trecho (ver utils/distancia.js).
+const formatKm = formatarDistancia;
+
+function locationLabel(geo) {
+  const city = hasValue(geo?.city) ? geo.city : null;
+  const region = hasValue(geo?.region) ? geo.region : null;
+  const country = hasValue(geo?.country) ? geo.country : null;
+  return [city, region].filter(Boolean).join("/") || country || "localização indisponível";
+}
+
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const values = [lat1, lon1, lat2, lon2].map(Number);
+  if (!values.every(Number.isFinite)) return null;
+  const [aLat, aLon, bLat, bLon] = values;
+  const radius = 6371;
+  const toRad = (degrees) => degrees * Math.PI / 180;
+  const dLat = toRad(bLat - aLat);
+  const dLon = toRad(bLon - aLon);
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLon / 2) ** 2;
+  return radius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function bankTokens(bank) {
+  return normalizeText(bank)
+    .replace(/[^a-z0-9 ]/g, " ")
+    .split(/\s+/)
+    .filter((token) => token.length >= 4 && !BANK_STOP_WORDS.has(token));
+}
+
+export function classifyIpRole(ip, report = {}) {
+  const address = String(ip?.endereco ?? "").trim();
+  const context = normalizeText(ip?.contexto);
+  const isp = normalizeText(ip?.geo?.isp);
+  const auditIps = report?.extracted?.trilha_acesso?.uniqueIps || [];
+  if (auditIps.map(String).includes(address)) return "access";
+  if (/(historico|trilha|assinatura|signatario|acesso|sessao)/.test(context)) return "access";
+  if (/(akamai|cloudflare|fastly|cdn|content delivery)/.test(`${isp} ${context}`)) return "cdn";
+  const tokens = bankTokens(report?.extracted?.contrato?.banco);
+  if (tokens.some((token) => `${isp} ${context}`.includes(token))) return "bank";
+  if (/(servidor|infraestrutura|datacenter|data center|hosting|host)/.test(context)) return "infrastructure";
+  return "unknown";
+}
+
+function buildIpCard(ip, role, bank) {
+  const provider = hasValue(ip?.geo?.isp) ? ip.geo.isp : "provedor não identificado";
+  const place = locationLabel(ip?.geo);
+  const distance = formatKm(ip?.distancia_residencia ?? null);
+  const common = `${provider}, ${place}${distance ? `, ${distance} da referência residencial` : ""}.`;
+  if (role === "access") {
+    return {
+      ...ip,
+      role,
+      badge: "ACESSO PROVÁVEL",
+      text: `${common} Associado à trilha de acesso; CGNAT, VPN ou roteamento regional podem reduzir a precisão. Não prova, isoladamente, a presença física do signatário.`,
+    };
+  }
+  if (role === "bank") {
+    return {
+      ...ip,
+      role,
+      badge: "SERVIDOR DO BANCO",
+      text: `${common} Indício de infraestrutura de ${bank || "instituição financeira"}; não deve ser usado para localizar o consumidor.`,
+    };
+  }
+  if (role === "cdn") {
+    return {
+      ...ip,
+      role,
+      badge: "CDN",
+      text: `${common} Nó de distribuição de conteúdo ou borda de rede; não representa a conexão física do usuário.`,
+    };
+  }
+  if (role === "infrastructure") {
+    return {
+      ...ip,
+      role,
+      badge: "INFRAESTRUTURA",
+      text: `${common} O contexto indica infraestrutura técnica; não localiza o consumidor.`,
+    };
+  }
+  return {
+    ...ip,
+    role,
+    badge: "A CLASSIFICAR",
+    text: `${common} O laudo não contém contexto suficiente para afirmar se é acesso do usuário ou infraestrutura.`,
+  };
+}
+
+function chainScore(report) {
+  const extracted = report?.extracted || {};
+  const signature = extracted.assinatura || {};
+  const chain = extracted.cadeia_custodia || {};
+  if (chain.placar) {
+    return {
+      present: Number(chain.placar.auxiliares_presentes || 0),
+      total: Number(chain.placar.auxiliares_total || 7),
+      eliminatoriosPresent: Number(chain.placar.eliminatorios_presentes || 0),
+      eliminatoriosTotal: Number(chain.placar.eliminatorios_total || 4),
+    };
+  }
+  const items = [
+    chain.identificacao_signatario || signature.titular_certificado || signature.cpf_titular || extracted.cliente?.nome,
+    chain.registro_ip || (report.ipAnalysis || []).length > 0,
+    chain.carimbo_tempo || signature.data_hora_assinatura,
+    chain.geolocalizacao || report.geoDeclaredPresent || report.contractGeo,
+    chain.metodo_autenticacao || signature.metodos_autenticacao?.length,
+    chain.hash_integridade || signature.hash_documento_assinado,
+    chain.trilha_auditoria,
+    chain.evidencia_aceite,
+  ];
+  return { present: items.filter(Boolean).length, total: items.length };
+}
+
+function evidenceSeverity(text) {
+  if (/\bCR[IÍ]TICO\b/i.test(text)) return "ALTA";
+  if (/\bALTA\b/i.test(text)) return "ALTA";
+  if (/reimpress[aã]o|exporta[cç][aã]o posterior|posterior .*contrata[cç][aã]o/i.test(text)) return "MÉDIA";
+  if (/\bM[ÉE]DIO|M[ÉE]DIA\b/i.test(text)) return "MÉDIA";
+  if (/\bINFO\b/i.test(text)) return "INFO";
+  return "MÉDIA";
+}
+
+function normalizeIssue(issue, index = 0) {
+  if (issue && typeof issue === "object") {
+    return {
+      codigo: issue.codigo || `AUTO${index}`,
+      gravidade: issue.gravidade || issue.severidade || "MÉDIA",
+      titulo: compact(String(issue.titulo || "Achado técnico").replace(/\.+$/, ""), 120),
+      texto: compact(issue.texto || issue.detalhe || "", 900),
+    };
+  }
+  const clean = String(issue || "")
+    .replace(/\b(?:CET1|FIN\d|IMG\d|INT\d|TRB\d|CAD\d|CUS\d|LOG\d)\s+(?:ALTA|MEDIA|MÉDIA|MÉDIO|INFO|CRITICO|CRÍTICO)\s*:\s*/g, "")
+    .replace(/\b(?:CET1|FIN\d|IMG\d|INT\d|TRB\d|CAD\d|CUS\d|LOG\d)\s*:\s*/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const [title, ...rest] = clean.split(/\. +/);
+  return { codigo: `LEGADO${index}`, gravidade: evidenceSeverity(clean), titulo: (title || "Achado técnico").replace(/\.+$/, ""), texto: rest.join(". ") };
+}
+
+export function buildIrregularitySummary(report = {}) {
+  const extracted = report.extracted || {};
+  const contract = extracted.contrato || {};
+  const client = extracted.cliente || {};
+  const signature = extracted.assinatura || {};
+  const audit = extracted.trilha_acesso || {};
+  const metadata = report.metadata || null;
+  const bank = hasValue(contract.banco) ? contract.banco : "Instituição financeira não identificada";
+  const contractNumber = hasValue(contract.numero) ? contract.numero : "não identificado";
+  const cpf = hasValue(client.cpf) ? formatCpf(client.cpf) : (hasValue(signature.cpf_titular) ? formatCpf(signature.cpf_titular) : "não identificado");
+  const checks = [];
+  const findings = [];
+  const favorable = [];
+  const diligences = [];
+  const issueKeys = new Set();
+  const diligenceKeys = new Set();
+
+  const addCheck = (domain, key, status, detail = "") => checks.push({ domain, key, status, detail });
+  const addFinding = (severity, key, title, text) => {
+    if (issueKeys.has(key)) return;
+    issueKeys.add(key);
+    const entry = { severity, key, title, text: compact(text, 560) };
+    if (severity === "FAVORÁVEL") favorable.push(entry); else findings.push(entry);
+  };
+  const addDiligence = (key, title, text) => {
+    if (diligenceKeys.has(key)) return;
+    diligenceKeys.add(key);
+    diligences.push({ key, title, text: compact(text, 220) });
+  };
+
+  const declaredHash = String(signature.hash_documento_assinado || "").replace(/\s/g, "");
+  const calculatedHash = String(report.hashes?.sha256 || "").replace(/\s/g, "");
+  const declaredKind = hashKind(declaredHash);
+  const hashMismatch = declaredKind === "SHA-256" && calculatedHash
+    && declaredHash.toUpperCase() !== calculatedHash.toUpperCase();
+  const hashMalformed = declaredKind === "INVALIDO";
+  // Hash e código de autenticação têm estados próprios desde a separação dos
+  // dois campos; análises antigas guardavam o estado do código no do hash.
+  const codigoNaoConferivel = !declaredHash && (
+    signature.codigo_autenticacao_estado === "DECLARADO_NAO_CONFERIVEL"
+    || signature.hash_declarado_estado === "DECLARADO_NAO_CONFERIVEL"
+    || (!signature.codigo_autenticacao_estado && !signature.hash_declarado_estado && hasValue(signature.codigo_autenticacao_declarado))
+  );
+  const declaredHashState = codigoNaoConferivel ? "DECLARADO_NAO_CONFERIVEL" : signature.hash_declarado_estado || null;
+  const hashMissing = !declaredHash && !codigoNaoConferivel;
+  const achadoInt1DaExtracao = (extracted.achados_irregularidade || []).find((issue) => issue?.codigo === "INT1");
+  const embeddedMissing = metadata?.hasEmbeddedSignatures === false;
+  const producerModified = /(modified using|modificado por|itext)/i.test(metadata?.producer || "");
+
+  if (signature.integridade_pos_assinatura === false) {
+    addFinding("ALTA", "integrity-rejected", "Integridade pós-assinatura rejeitada.", "O próprio laudo registra falha de integridade após a assinatura. O arquivo original e o payload assinado devem ser preservados e periciados.");
+    addCheck("A", "integridade-pos-assinatura", "ALERTA", "Integridade marcada como não preservada.");
+  } else if (hashMalformed) {
+    addFinding("ALTA", "hash-malformed", "Hash informado não é criptográfico.", `O valor declarado (${shortHash(declaredHash)}) não corresponde a um formato criptográfico reconhecido e não permite conferir objetivamente a integridade.`);
+    addCheck("A", "hash", "ALERTA", "Valor informado não corresponde a hash reconhecido.");
+  } else if (hashMismatch) {
+    addFinding("MÉDIA", "hash-mismatch", "Integridade em aberto.", `O hash declarado (${shortHash(declaredHash)}) diverge do SHA-256 recalculado (${shortHash(calculatedHash)}).${embeddedMissing ? " Não foi detectada assinatura PAdES incorporada." : ""}${producerModified ? ` O produtor (${metadata.producer}) indica pós-processamento do PDF.` : ""} A divergência exige o payload original e a metodologia de cálculo; não comprova adulteração isoladamente.`);
+    addCheck("A", "hash", "ALERTA", "Hash declarado diverge do recalculado.");
+  } else if (declaredHashState === "DECLARADO_NAO_CONFERIVEL" && achadoInt1DaExtracao) {
+    // A extração já redigiu o achado com o fundamento certo (autoverificação,
+    // gravidade própria); aqui fica só o registro no quadro de verificação.
+    addCheck("A", "hash", "ALERTA", "Sem hash declarado; apenas código de autenticação conferível no próprio emissor.");
+  } else if (declaredHashState === "DECLARADO_NAO_CONFERIVEL") {
+    addFinding("MÉDIA", "INT1", "Código de autenticação declarado e inverificável.", "Há código de autenticação declarado no documento, porém sem algoritmo, payload de referência e procedimento público de conferência. Caracteres fora dos alfabetos usuais podem decorrer de fonte embutida sem mapa ToUnicode; por isso, o bloco deve ser confrontado com a renderização visual antes de conclusão sobre seu alfabeto.");
+    addCheck("A", "hash", "ALERTA", "Código declarado, mas inverificável.");
+  } else if (hashMissing) {
+    addFinding("MÉDIA", "hash-missing", "Integridade não confrontável pelo documento.", "O contrato não apresenta hash declarado para comparação com a impressão digital calculada pelo ForenseDoc.");
+    addCheck("A", "hash", "ALERTA", "Hash declarado ausente.");
+  } else {
+    addCheck("A", "hash", "CONFERIDO", "Hash declarado compatível com o arquivo analisado.");
+    addFinding("FAVORÁVEL", "hash-ok", "Hash informado confere com o arquivo.", `O SHA-256 declarado coincide com o valor recalculado (${shortHash(calculatedHash)}).`);
+  }
+
+  if (metadata) {
+    const descriptiveMissing = [metadata.title, metadata.author, metadata.subject, metadata.creator].filter((value) => !hasValue(value)).length;
+    if (descriptiveMissing >= 3) {
+      addFinding("INFO", "metadata-missing", "Metadados descritivos insuficientes.", `${descriptiveMissing} dos 4 campos principais (título, autor, assunto e aplicativo criador) não foram identificados. Em exportações por motor HTML/PDF, isso é nota de rastreabilidade, não defeito autônomo de média gravidade.`);
+      addCheck("B", "metadados-descritivos", "ALERTA", `${descriptiveMissing} campos ausentes.`);
+    } else {
+      addCheck("B", "metadados-descritivos", "CONFERIDO");
+    }
+    const authorMismatch = (metadata.warnings || []).find((warning) => /autor declarado.*difere/i.test(warning));
+    if (authorMismatch) addFinding("MÉDIA", "metadata-author", "Autoria declarada nos metadados diverge do contratante.", authorMismatch);
+    addCheck("B", "estrutura-pdf", embeddedMissing ? "ALERTA" : "CONFERIDO", embeddedMissing ? "Assinatura PAdES não detectada." : "Assinatura incorporada detectada.");
+  } else {
+    addCheck("B", "metadados", "INDETERMINADO", "Metadados internos indisponíveis.");
+  }
+
+  for (const alert of (metadata?.digitalSignature?.alerts || []).slice(0, 6)) {
+    addFinding(alert.severidade === "CRÍTICO" ? "ALTA" : "MÉDIA", `sig-${alert.codigo}-${normalizeText(alert.titulo).slice(0, 20)}`, `Assinatura digital: ${alert.titulo}.`, alert.detalhe);
+  }
+
+  // Cartão consignado (RMC/RCC) não tem valor contratado, parcela fixa nem
+  // número de parcelas — esses conceitos são de empréstimo. Usar os campos
+  // equivalentes do cartão evita acusar "instrumento sem números essenciais"
+  // quando os dados do cartão estão presentes em contract.cartao.
+  const isCartaoConsignado = contract.modalidade === "RMC" || contract.modalidade === "RCC";
+  const economicFields = isCartaoConsignado
+    ? [
+        ["limite do cartão", contract.cartao?.limiteCartao],
+        ["valor máximo de saque", contract.cartao?.valorMaximoSaque],
+        ["valor consignado mensal", contract.cartao?.valorConsignadoMensal],
+        ["taxa mensal", contract.taxa_juros_mensal],
+        ["taxa anual", contract.taxa_juros_anual],
+        ["CET mensal", contract.cet_mensal],
+        ["CET anual", contract.cet_anual],
+      ]
+    : [
+        ["valor contratado", contract.valor_contratado],
+        ["valor da parcela", contract.valor_parcela],
+        ["número de parcelas", contract.numero_parcelas || contract.prazo_meses],
+        ["taxa mensal", contract.taxa_juros_mensal],
+        ["taxa anual", contract.taxa_juros_anual],
+        ["CET mensal", contract.cet_mensal],
+        ["CET anual", contract.cet_anual],
+      ];
+  const missingEconomics = economicFields.filter(([, value]) => !hasValue(value)).map(([label]) => label);
+  if (missingEconomics.length >= 4) {
+    addFinding("ALTA", "economics-missing", "Instrumento sem os números essenciais do negócio.", `Não foram identificados ${missingEconomics.join(", ")}. A ausência deve ser confrontada com o instrumento completo e o demonstrativo do CET (CDC, arts. 6º, III, e 52; Res. CMN 4.881/2020).`);
+    addCheck("C", "dados-economicos", "ALERTA", `${missingEconomics.length} campos essenciais ausentes.`);
+  } else if (missingEconomics.length) {
+    addCheck("C", "dados-economicos", "ALERTA", `${missingEconomics.length} campos ausentes.`);
+  } else {
+    addCheck("C", "dados-economicos", "CONFERIDO");
+  }
+
+  const dateValues = [contract.data_contrato, contract.data_primeiro_vencimento, contract.data_ultimo_vencimento].filter(hasValue);
+  const dateKeys = dateValues.map(dateIdentity).filter(Boolean);
+  if (dateKeys.length >= 2 && new Set(dateKeys).size === 1) {
+    addFinding("ALTA", "dates-collapsed", "Datas contratuais sem cronograma coerente.", `Contrato, primeiro vencimento e/ou último vencimento recaem na mesma data (${contract.data_contrato || dateValues[0]}), sem demonstrar uma sequência regular de amortização.`);
+    addCheck("C", "datas", "ALERTA", "Datas contratuais colapsadas.");
+  } else {
+    addCheck("C", "datas", dateKeys.length ? "CONFERIDO" : "INDETERMINADO");
+  }
+
+  const qualificationProblems = [];
+  if (!hasValue(client.nome)) qualificationProblems.push("nome completo ausente");
+  if (/^[a-f0-9]{24,}$/i.test(String(client.cidade || "").replace(/\s/g, ""))) qualificationProblems.push("campo Cidade preenchido com sequência hexadecimal/hash");
+  if (digits(client.cep) && digits(contractNumber) && digits(client.cep) === digits(contractNumber)) qualificationProblems.push("CEP igual ao número do contrato");
+  const email = normalizeText(client.email);
+  const emailDomain = email.split("@")[1] || "";
+  if (emailDomain && bankTokens(bank).some((token) => emailDomain.includes(token))) qualificationProblems.push("e-mail do contratante vinculado ao domínio da própria instituição");
+  const secondaryClientFields = [client.rg, client.data_nascimento, client.endereco, client.bairro, client.estado, client.telefone, client.numero_beneficio];
+  const missingClientFields = secondaryClientFields.filter((value) => !hasValue(value)).length;
+  if (missingClientFields >= 5) qualificationProblems.push("demais campos cadastrais majoritariamente ausentes");
+  if (qualificationProblems.length >= 2) {
+    addFinding("ALTA", "client-qualification", "Contratante mal qualificado.", `${qualificationProblems.join("; ")}. Esses defeitos devem ser confrontados com os dados cadastrais e os fatores de autenticação efetivamente utilizados.`);
+    addCheck("D", "qualificacao", "ALERTA", qualificationProblems.join("; "));
+  } else if (qualificationProblems.length) {
+    addFinding("MÉDIA", "client-qualification", "Qualificação cadastral incompleta.", `${qualificationProblems.join("; ")}.`);
+    addCheck("D", "qualificacao", "ALERTA", qualificationProblems.join("; "));
+  } else {
+    addCheck("D", "qualificacao", "CONFERIDO");
+  }
+
+  const chain = chainScore(report);
+  if (signature.presente === false) {
+    addFinding("ALTA", "signature-absent", "Assinatura eletrônica não localizada.", "O arquivo analisado não apresentou assinatura eletrônica identificável. A instituição deve fornecer o instrumento assinado e sua trilha técnica completa.");
+    addCheck("E", "assinatura", "ALERTA", "Assinatura não localizada.");
+  } else {
+    addCheck("E", "assinatura", hasValue(signature.data_hora_assinatura) ? "CONFERIDO" : "ALERTA");
+  }
+  if (signature.presente && embeddedMissing && (!hasValue(signature.tipo) || /simples|indeterminado/i.test(signature.tipo || ""))) {
+    addFinding("MÉDIA", "simple-signature", "Assinatura eletrônica depende da cadeia de custódia.", "Não foi detectada certificação PAdES incorporada e o nível da assinatura é simples ou indeterminado. Isso não a invalida por si; impugnada a autoria, cabe ao banco comprovar autenticidade (STJ, Tema 1.061, CPC arts. 6º, 369 e 429, II)." );
+  }
+  if (chain.eliminatoriosPresent === chain.eliminatoriosTotal && chain.eliminatoriosTotal) {
+    addFinding("FAVORÁVEL", "chain-complete", "Cadeia de custódia com boa completude.", `O laudo registra ${chain.present}/${chain.total} elementos técnicos. O número mede presença de campos, não a coerência entre eles, e deve ser enfrentado na análise.`);
+  } else {
+    addFinding("MÉDIA", "CUS1", "Cadeia de custódia incompleta.", `Itens eliminatórios satisfeitos: ${chain.eliminatoriosPresent ?? 0} de ${chain.eliminatoriosTotal ?? 4}. Elementos auxiliares localizados: ${chain.present} de ${chain.total}. A instituição deve suprir os registros ausentes com os logs brutos da plataforma.`);
+  }
+  addCheck("E", "cadeia-custodia", chain.eliminatoriosPresent === chain.eliminatoriosTotal ? "PRÓ-BANCO" : "ALERTA", `${chain.eliminatoriosPresent ?? 0}/${chain.eliminatoriosTotal ?? 4} eliminatórios; ${chain.present}/${chain.total} auxiliares.`);
+
+  if (audit.chronologyInconsistent) {
+    addFinding("ALTA", "chronology", "Carimbos de tempo não conciliados.", `A trilha registra eventos entre ${audit.firstTime || "horário não identificado"} e ${audit.lastTime || "horário não identificado"}, enquanto o campo da assinatura usa outro horário ou fuso. Os logs brutos devem esclarecer o fuso efetivamente aplicado.`);
+    addCheck("E", "cronologia", "ALERTA", "Inconsistência temporal automática.");
+  }
+  if (audit.eventCount > 0 && audit.deviceIdentifiable === false) {
+    addFinding("MÉDIA", "device-gap", "Dispositivo sem vínculo inequívoco com o hardware.", `A trilha informa ${audit.device || "sistema e navegador"}, mas não apresenta fabricante, modelo ou identificador físico legível.`);
+    addCheck("E", "dispositivo", "ALERTA", "Hardware não individualizado.");
+  }
+
+  // Todas as distâncias à residência saem do confronto canônico. Com o confronto
+  // recusado ou indisponível, nenhuma delas existe: sem achado, sem selo, sem
+  // ponto no gráfico. Ver CRIT-01 da rodada 2.
+  const confronto = report.confronto_geografico || montarConfrontoGeografico(report);
+  const residenciaCalculada = confronto.status === STATUS_CONFRONTO.CALCULADO;
+  const gpsDistance = residenciaCalculada ? distanciaKm(confronto.distancias.gps_residencia) : null;
+  if (gpsDistance !== null && distanciaSuspeita(gpsDistance)) {
+    addCheck("F", "gps-residencia", "ALERTA", "Distância exatamente igual a zero entre fontes independentes: dado suspeito, sem valor de coerência espacial.");
+  } else if (gpsDistance !== null) {
+    if (gpsDistance < 50) {
+      addFinding("FAVORÁVEL", "gps-near-home", "GPS da assinatura próximo à referência residencial.", `A coordenada da assinatura fica a ${formatKm(gpsDistance)} do endereço de referência. Isoladamente, o dado favorece coerência espacial, mas não comprova autoria.`);
+      addCheck("F", "gps-residencia", "PRÓ-BANCO", formatKm(gpsDistance));
+    } else if (gpsDistance < 300) {
+      addFinding("MÉDIA", "gps-home-distance", "GPS da assinatura exige contextualização.", `A assinatura aparece a ${formatKm(gpsDistance)} da residência. O deslocamento deve ser confrontado com data, horário e rotina do cliente.`);
+      addCheck("F", "gps-residencia", "ALERTA", formatKm(gpsDistance));
+    } else {
+      addFinding("ALTA", "gps-home-distance", "GPS da assinatura distante da residência.", `A coordenada declarada fica a ${formatKm(gpsDistance)} da referência residencial. A distância não prova fraude sozinha, mas exige explicação e logs de localização.`);
+      addCheck("F", "gps-residencia", "ALERTA", formatKm(gpsDistance));
+    }
+  } else if (confronto.status === STATUS_CONFRONTO.RECUSADO_CONFLITO) {
+    addCheck("F", "gps-residencia", "INDETERMINADO", "Confronto recusado: endereço informado conflita com o do instrumento.");
+  } else if (confronto.status === STATUS_CONFRONTO.INDISPONIVEL_NAO_INFORMADO) {
+    addCheck("F", "gps-residencia", "INDETERMINADO", "Confronto indisponível: instrumento registra o endereço como não informado.");
+  } else {
+    addCheck("F", "gps-residencia", "INDETERMINADO", "Distância residencial indisponível.");
+  }
+
+  // Um GPS a poucas dezenas de km ainda pode cair num MUNICÍPIO diferente
+  // do domicílio — o que importa mais para a diligência (correspondente
+  // bancário, deslocamento) do que a distância bruta em km. Ver item 5 do
+  // relatório técnico de 09/09/2026 (GPS a 41 km, "favorável" pela régua de
+  // distância, mas em outro município).
+  //
+  // SaaS: o domicílio é a residência de referência (informada e geocodificada
+  // pelo operador) quando o município dela é conhecido; a cidade do cadastro no
+  // contrato fica como reserva. É a mesma referência das distâncias do § 5, e
+  // o cadastro do contrato pode ser justamente o dado contestado.
+  // Referência recusada por conflito com o instrumento não é domicílio: nesse
+  // caso vale o município do cadastro. Foi assim que o sumário do dossiê C6
+  // afirmou domicílio em Pedro II/PI três seções depois de o § 3 registrar
+  // Manaquiri/AM.
+  const referenciaUtilizavel = !["RECUSADO_CONFLITO", "INDISPONIVEL_NAO_INFORMADO"].includes(report.home?.estado_confronto);
+  const referenciaMunicipio = referenciaUtilizavel ? report.home?.geo?.matchedCity || null : null;
+  const domicilioCidade = referenciaMunicipio || client.cidade;
+  const domicilioUf = referenciaMunicipio ? report.home?.geo?.matchedUf : client.estado;
+  const gpsMunicipio = normalizeText(report.contractGeo?.municipio);
+  const residenciaMunicipio = normalizeText(domicilioCidade);
+  const ufsDiferentes = Boolean(report.contractGeo?.uf && domicilioUf && normalizeText(report.contractGeo.uf) !== normalizeText(domicilioUf));
+  if (gpsMunicipio && residenciaMunicipio && (gpsMunicipio !== residenciaMunicipio || ufsDiferentes)) {
+    addFinding("MÉDIA", "gps-outro-municipio", "Ato praticado em município diverso do domicílio.", `A coordenada declarada no dossiê de contratação cai em ${report.contractGeo.municipio}${report.contractGeo.uf ? `/${report.contractGeo.uf}` : ""}, município diferente do domicílio do cliente (${domicilioCidade}${domicilioUf ? `/${domicilioUf}` : ""}${referenciaMunicipio ? ", residência de referência" : ""})${gpsDistance !== null && !distanciaSuspeita(gpsDistance) ? `, a ${formatKm(gpsDistance)}` : ""}. Verifique se a contratação ocorreu em loja de correspondente bancário ou por dispositivo de terceiro.`);
+    addCheck("F", "gps-municipio", "ALERTA", `${report.contractGeo.municipio} ≠ ${domicilioCidade}`);
+    // Município do GPS diverso do domicílio + correspondente identificado
+    // no instrumento: a diligência natural é perguntar ao banco quem
+    // operou aquele correspondente. Item 9.6 do relatório técnico de
+    // 09/09/2026.
+    if (contract.correspondente?.nome) {
+      addDiligence("correspondente-operador", "Identificação do operador do correspondente", `Exigir do banco a identificação do operador do correspondente ${contract.correspondente.nome}${contract.correspondente.codigo ? ` (código ${contract.correspondente.codigo})` : ""} que conduziu a contratação em ${report.contractGeo.municipio}, o local físico do atendimento e o dispositivo utilizado.`);
+    }
+  } else if (gpsMunicipio && residenciaMunicipio) {
+    addCheck("F", "gps-municipio", "PRÓ-BANCO", "Mesmo município do domicílio.");
+  }
+
+  const ipCards = (report.ipAnalysis || []).map((ip, indice) => {
+    const role = classifyIpRole(ip, report);
+    const km = residenciaCalculada ? distanciaKm(confronto.distancias.ips_residencia[indice]?.km) : null;
+    const valida = km !== null && !distanciaSuspeita(km) ? km : null;
+    // `distance` do card também é sobrescrito: quem renderiza o card não pode
+    // encontrar a distância bruta do enriquecimento.
+    return buildIpCard({ ...ip, distance: valida, distancia_residencia: valida }, role, bank);
+  });
+  const accessIp = ipCards.find((ip) => ip.role === "access");
+  const infrastructureIps = ipCards.filter((ip) => ["bank", "cdn", "infrastructure"].includes(ip.role));
+  if (!ipCards.length) {
+    addCheck("G", "triagem-ip", "ALERTA", "Nenhum IP classificado.");
+  } else {
+    addCheck("G", "triagem-ip", accessIp ? "CONFERIDO" : "INDETERMINADO", `${ipCards.length} IP(s); ${infrastructureIps.length} de infraestrutura.`);
+  }
+
+  let gpsIpDistance = null;
+  if (accessIp?.geo && report.contractGeo) {
+    gpsIpDistance = haversineKm(report.contractGeo.lat, report.contractGeo.lon, accessIp.geo.lat, accessIp.geo.lon);
+    if (gpsIpDistance !== null && gpsIpDistance >= 300) {
+      addFinding("ALTA", "gps-ip-conflict", "Contradição geográfica entre GPS e IP de acesso.", `O GPS da assinatura e a localização aproximada do IP ${accessIp.endereco} estão separados por ${formatKm(gpsIpDistance)}. CGNAT, VPN e roteamento podem interferir, mas a divergência deve ser explicada pelos logs da operadora e da plataforma.`);
+      addCheck("G", "gps-contra-ip", "ALERTA", formatKm(gpsIpDistance));
+    } else if (gpsIpDistance !== null && gpsIpDistance >= 50) {
+      addFinding("MÉDIA", "gps-ip-conflict", "GPS e IP de acesso não são convergentes.", `A distância aproximada entre os dois pontos é ${formatKm(gpsIpDistance)}. A geolocalização de IP tem margem de erro e exige confirmação técnica.`);
+      addCheck("G", "gps-contra-ip", "ALERTA", formatKm(gpsIpDistance));
+    } else if (gpsIpDistance !== null) {
+      addFinding("FAVORÁVEL", "gps-ip-compatible", "GPS e IP de acesso são geograficamente convergentes.", `A distância aproximada entre os pontos é ${formatKm(gpsIpDistance)}. A convergência favorece coerência espacial, sem comprovar autoria isoladamente.`);
+      addCheck("G", "gps-contra-ip", "PRÓ-BANCO", formatKm(gpsIpDistance));
+    }
+  }
+
+  const structuredIssues = Array.isArray(extracted.achados_irregularidade) ? extracted.achados_irregularidade : [];
+  const sourceIssues = structuredIssues.length ? structuredIssues : (extracted.evidencias_irregularidade || []);
+  for (const [index, rawIssue] of sourceIssues.entries()) {
+    const issue = normalizeIssue(rawIssue, index);
+    const mergedText = `${issue.titulo}. ${issue.texto}`;
+    if (/metadados descritivos insuficientes/i.test(mergedText)) continue;
+    if (/^(Ausência de endereço IP|Ausência de geolocalização GPS|Trilha de auditoria não identificada)/i.test(mergedText)) continue;
+    addFinding(issue.gravidade === "MÉDIO" ? "MÉDIA" : issue.gravidade, issue.codigo, `${issue.titulo}.`, issue.texto);
+  }
+  addCheck("H", "fundamentacao", "CONFERIDO", "Achados vinculados ao dever de informação, autenticidade, integridade e proteção de dados.");
+
+  if (accessIp) {
+    addDiligence("ip-holder", "Identificação do titular da conexão", `Requisitar à operadora os dados da conexão vinculada ao IP ${accessIp.endereco}${accessIp.data_hora ? ` em ${accessIp.data_hora}` : signature.data_hora_assinatura ? ` na data/hora ${signature.data_hora_assinatura}` : " no intervalo registrado"}, mediante autorização judicial.`);
+  }
+  const issueCodes = new Set(sourceIssues.map((issue, index) => normalizeIssue(issue, index).codigo));
+  if (signature.presente || audit.eventCount || issueCodes.has("LOG1")) {
+    addDiligence("raw-logs", "Logs brutos da plataforma", "Exigir eventos completos, fuso, identificador de sessão, IP de cada etapa, fator de autenticação e política de retenção.");
+  }
+  if (missingEconomics.length || issueCodes.has("FIN1") || issueCodes.has("FIN2")) {
+    addDiligence("full-contract", "Instrumento contratual completo", "Solicitar taxa anual quando o campo estiver em branco, campo de valor liberado ao cliente, demonstrativo do CET, qualificação completa e número/espécie do benefício quando aplicável.");
+  }
+  if (issueCodes.has("INT1")) {
+    addDiligence("auth-code", "Explicitação do código de autenticação", "Exigir o algoritmo, o payload de origem e o procedimento de verificação do bloco impresso no rodapé da última página, a fim de permitir conferência independente do elemento declarado.");
+  }
+  if (issueCodes.has("CET1")) {
+    addDiligence("cet-demo", "Demonstrativo de cálculo do CET", "Exigir valor em reais, percentual e base de cálculo de cada componente do fluxo, conforme dever de informação do CDC e da regulamentação do CMN sobre CET.");
+  }
+  if (issueCodes.has("TRB1")) {
+    addDiligence("iof-proof", "Comprovante de recolhimento do IOF", "Exigir base de cálculo, prazo considerado e alíquotas aplicadas, para aferição do teto de 3,373% vigente para pessoa física na data da contratação.");
+  }
+  if (hashMismatch || hashMalformed || hashMissing || issueCodes.has("INT1") || signature.integridade_pos_assinatura === false) {
+    addDiligence("payload", "Payload original assinado", "Solicitar o arquivo original, a metodologia de hash e os registros de preservação para resolver a questão de integridade.");
+  }
+  if (qualificationProblems.some((problem) => /e-mail/.test(problem))) {
+    addDiligence("auth-email", "Confirmação do e-mail de autenticação", `Verificar se ${client.email} foi efetivamente usado no aceite ou se representa preenchimento institucional/padrão.`);
+  }
+  if (audit.deviceIdentifiable === false && audit.eventCount > 0) {
+    addDiligence("device", "Identificação técnica do dispositivo", "Solicitar fabricante, modelo, identificador disponível e método de vinculação da biometria/selfie ao aparelho utilizado.");
+  }
+  if (findings.length || issueCodes.has("CUS1")) {
+    addDiligence("expert", "Perícia na cadeia de custódia", "Confrontar o instrumento, os logs, os hashes e os carimbos de tempo antes do uso como prova técnica definitiva.");
+  }
+  if (!diligences.length) {
+    addDiligence("review", "Revisão humana do conjunto documental", "Conferir o contrato original e os anexos antes de concluir pela ausência de irregularidades materiais.");
+  }
+
+  // Gravidade e, dentro dela, eixo da tese (ver eixosAchado.js). No laudo do
+  // dossiê C6, "metadados descritivos ausentes" saía antes da falta de prova do
+  // crédito e da fragilidade biométrica.
+  const orderedFindings = ordenarAchados(findings, { codigo: (f) => f.key, gravidade: (f) => f.severity });
+  const displayFindings = orderedFindings.slice(0, 15);
+  if (favorable.length) displayFindings.push(favorable[0]);
+  if (!displayFindings.length) {
+    displayFindings.push({ severity: "FAVORÁVEL", key: "no-auto-alert", title: "Sem irregularidade crítica automática conclusiva.", text: "Os dados disponíveis não produziram alerta grave, sem prejuízo da revisão humana do contrato e dos logs originais." });
+  }
+
+  const geoItems = [];
+  if (!(report.confronto_enderecos?.pares || []).length && gpsDistance !== null && !distanciaSuspeita(gpsDistance)) {
+    geoItems.push({ label: "GPS · assinatura", distance: gpsDistance, role: "gps", location: report.contractGeo?.endereco || "coordenada do log" });
+  }
+  const selectedIps = [
+    accessIp,
+    ipCards.find((ip) => ip.role === "bank"),
+    ipCards.find((ip) => ip.role === "cdn"),
+    ipCards.find((ip) => ip.role === "infrastructure"),
+    ipCards.find((ip) => ip.role === "unknown"),
+  ].filter((ip, index, list) => ip && list.indexOf(ip) === index).slice(0, 3);
+  // Verificação de endereços por pares: cada ponto do gráfico diz o que compara
+  // (IP, endereço do instrumento, endereço informado no laudo, GPS do ato), e
+  // nenhum deles afirma domicílio. Ver utils/confrontoEnderecos.js.
+  const pares = report.confronto_enderecos?.pares || [];
+  const paresMedidos = pares.filter((par) => distanciaKm(par.km) !== null);
+  for (const par of paresMedidos) {
+    geoItems.push({ label: ROTULO_CURTO[par.id] || par.rotulo, distance: distanciaKm(par.km), texto: par.texto, role: par.papel, referencia: "par", par: par.id, precisao: par.precisao });
+  }
+
+  // Sem residência aferida, o gráfico passa a medir cada IP até o GPS declarado
+  // da assinatura. Essa verificação não depende da residência e não pode sumir
+  // do laudo junto com ela.
+  const referenciaDoGrafico = residenciaCalculada ? "residencia" : "gps";
+  const rotuloIp = (ip) => (ip.role === "access" ? `${ip.geo?.isp || "IP"} · acesso` : ip.role === "bank" ? `${bank} · servidor` : ip.role === "cdn" ? `${ip.geo?.isp || "CDN"} · CDN` : `${ip.geo?.isp || "IP"} · rede`);
+  if (!paresMedidos.length && !residenciaCalculada && report.contractGeo) {
+    for (const ip of selectedIps) {
+      const original = (report.ipAnalysis || []).find((o) => o.endereco === ip.endereco);
+      const km = distanciaKm(original?.distanceToSignature);
+      if (km !== null && !distanciaSuspeita(km)) {
+        geoItems.push({ label: rotuloIp(ip), distance: km, role: ip.role, location: locationLabel(ip.geo), referencia: "gps" });
+      }
+    }
+  }
+  for (const ip of residenciaCalculada && !paresMedidos.length ? selectedIps : []) {
+    if (ip.distancia_residencia !== null && ip.distancia_residencia !== undefined) {
+      geoItems.push({
+        label: ip.role === "access" ? `${ip.geo?.isp || "IP"} · acesso` : ip.role === "bank" ? `${bank} · servidor` : ip.role === "cdn" ? `${ip.geo?.isp || "CDN"} · CDN` : `${ip.geo?.isp || "IP"} · rede`,
+        distance: ip.distancia_residencia,
+        role: ip.role,
+        location: locationLabel(ip.geo),
+      });
+    }
+  }
+
+  let synthesis = "O documento não contém elementos geográficos suficientes para confronto entre GPS e IP de acesso; a ausência integral de trilha de rede/localização é o achado geográfico principal.";
+  if (gpsIpDistance !== null && gpsIpDistance >= 50) {
+    synthesis = `A tese técnica se concentra na divergência de ${formatKm(gpsIpDistance)} entre o GPS da assinatura e o IP de acesso provável. IPs classificados como servidor, CDN ou infraestrutura não devem ser usados para localizar o consumidor.`;
+  } else if (gpsIpDistance !== null) {
+    synthesis = `GPS e IP de acesso estão a aproximadamente ${formatKm(gpsIpDistance)}. A convergência é favorável à coerência espacial, mas não substitui a prova de autoria. IPs de infraestrutura foram separados do acesso do usuário.`;
+  } else if (infrastructureIps.length) {
+    synthesis = `${infrastructureIps.length} IP(s) foram classificados como infraestrutura. Esses endereços não localizam o consumidor; a conclusão depende de identificar o IP efetivamente associado à sessão do signatário.`;
+  }
+
+  const methods = Array.isArray(signature.metodos_autenticacao) && signature.metodos_autenticacao.length
+    ? signature.metodos_autenticacao.join(" e ")
+    : signature.metodos_mencionados_clausulado?.length
+      ? `nenhum método operacional registrado; ${signature.metodos_mencionados_clausulado.join(", ").toLowerCase()}`
+      : "nenhum método operacional registrado";
+  const introSubject = `Leitura crítica do exame do arquivo "${compact(report.file?.name || "documento analisado", 100)}", do contrato nº ${contractNumber} de ${bank}.`.replace(/\.\s*\.$/, ".");
+  const intro = `${introSubject} O placar separa alertas, pontos favoráveis e diligências conforme os elementos efetivamente presentes no documento.`;
+
+  return {
+    reportId: report.reportId || "Laudo sem protocolo",
+    bank,
+    contractNumber,
+    cpf,
+    intro,
+    meta: {
+      contractDate: hasValue(contract.data_contrato) ? contract.data_contrato : "data não identificada",
+      signatureDate: hasValue(signature.data_hora_assinatura) ? signature.data_hora_assinatura : "sem data/hora registrada",
+      methods,
+      sha256: shortHash(report.hashes?.sha256),
+      size: report.file?.sizeKB ? `${report.file.sizeKB} KB` : "tamanho não identificado",
+      pages: metadata?.totalPages ? `${metadata.totalPages} página${metadata.totalPages === 1 ? "" : "s"}` : "páginas não identificadas",
+    },
+    checks,
+    counts: {
+      domains: 8,
+      irregularities: findings.length,
+      favorable: favorable.length,
+      diligences: Math.min(diligences.length, 7),
+    },
+    findings: displayFindings,
+    allFindings: orderedFindings,
+    favorable,
+    geo: {
+      items: geoItems.slice(0, 4),
+      status: confronto.status,
+      referencia: pares.length ? "pares" : referenciaDoGrafico,
+      pares,
+      modo: pares.length ? "pares" : "referencia",
+      description: pares.length
+        ? descreverPares(pares, paresMedidos, residenciaCalculada, confronto)
+        : residenciaCalculada
+        ? geoItems.length
+          ? "Distâncias aproximadas até a referência residencial. O GPS representa o ponto declarado no ato; os IPs foram separados entre acesso provável e infraestrutura."
+          : "Não houve coordenadas suficientes para construir o confronto geográfico."
+        : geoItems.length
+          ? `Distância aproximada de cada IP até o GPS declarado da assinatura${report.contractGeo?.municipio ? ` (${report.contractGeo.municipio}${report.contractGeo.uf ? `/${report.contractGeo.uf}` : ""})` : ""}. As distâncias à residência não foram calculadas porque a referência residencial foi recusada ou está indisponível (ver § 3).`
+          : "Distâncias à residência não calculadas: a referência residencial foi recusada ou está indisponível (ver § 3). Não há IP geolocalizado e GPS declarado para o confronto entre os dois.",
+    },
+    ipCards: ipCards.slice(0, 3),
+    synthesis,
+    diligences: diligences.slice(0, 7),
+    suspicionGrade: computeSuspicionGrade(findings),
+    disclaimer: `Sumário automático do laudo ForenseDoc ${report.reportId || "sem protocolo"}. As classificações técnicas decorrem apenas dos dados localizados no arquivo analisado e devem ser confirmadas com o artefato original, logs e revisão humana. Apoio à análise jurídica; não substitui prova pericial.`,
+  };
+}
+
+// Grau de suspeição técnica agregado — item 10.1 do relatório técnico de
+// 09/09/2026: o laudo não concluía nada além do placar por achado
+// individual. Regra simples e documentada, não uma fórmula estatística:
+// serve para orientar a leitura, nunca substitui a valoração jurídica.
+function computeSuspicionGrade(findingsList) {
+  const nAlta = findingsList.filter((item) => item.severity === "ALTA").length;
+  const nMedia = findingsList.filter((item) => item.severity === "MÉDIA").length;
+  if (nAlta >= 3) {
+    return { label: "CRÍTICA", color: "#f06363", rationale: `${nAlta} achados de gravidade ALTA identificados.` };
+  }
+  if (nAlta >= 1) {
+    return { label: "ALTA", color: "#f5853f", rationale: `${nAlta} achado${nAlta === 1 ? "" : "s"} de gravidade ALTA identificado${nAlta === 1 ? "" : "s"}.` };
+  }
+  if (nMedia >= 2) {
+    return { label: "MODERADA", color: "#f2b03d", rationale: `${nMedia} achados de gravidade MÉDIA, sem nenhum de gravidade ALTA.` };
+  }
+  return { label: "BAIXA", color: "#3ddc97", rationale: nMedia === 1 ? "1 achado de gravidade MÉDIA, sem nenhum de gravidade ALTA." : "Nenhum achado de gravidade ALTA ou MÉDIA além do eventual formal já listado." };
+}
+
+export { formatKm };
+
+const MOTIVO_CURTO = {
+  RECUSADO_CONFLITO: "ele conflita com o endereço do instrumento",
+  INDISPONIVEL_NAO_INFORMADO: "o instrumento registra o endereço do contratante como não informado",
+  SEM_REFERENCIA: "não há coordenada de referência residencial",
+  SEM_PONTOS: "não há coordenada de assinatura nem de IP para confrontar",
+};
+
+/** Rótulo curto de cada par, para caber no gráfico do sumário. */
+const ROTULO_CURTO = {
+  "ip-x-instrumento": "IP × instrumento",
+  "laudo-x-instrumento": "Laudo × instrumento",
+  "ip-x-laudo": "IP × laudo",
+  "gps-x-ip": "GPS × IP",
+};
+
+function descreverPares(pares, medidos, residenciaCalculada, confronto) {
+  const lista = medidos.map((par) => `${par.rotulo}: ${par.texto}`).join("; ");
+  const faltando = pares.filter((par) => par.indisponivel?.length).map((par) => `${par.rotulo} (${descreverIndisponibilidade(par)})`);
+  const precisaoMunicipio = medidos.some((par) => par.precisao === "municipio");
+  return [
+    lista ? `Confronto de endereços, dois a dois: ${lista}.` : "Não houve pontos suficientes para confrontar endereços.",
+    precisaoMunicipio ? "O endereço do instrumento foi resolvido em nível de município, porque a instituição não registrou o endereço do contratante." : null,
+    residenciaCalculada ? null : `O endereço informado na geração do laudo não é usado como domicílio: ${MOTIVO_CURTO[confronto.status] || "referência residencial recusada ou indisponível"} (ver § 3).`,
+    faltando.length ? `Não aferidos: ${faltando.join("; ")}.` : null,
+  ].filter(Boolean).join(" ");
+}

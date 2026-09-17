@@ -1,0 +1,593 @@
+{
+ "text": "{\"tipo_documento\":\"Contrato bancário / proposta de crédito\",\"qualidade_ocr\":\"Media\",\"contrato\":{\"numero\":\"1234567890\",\"banco\":null,\"produto\":\"Crédito consignado\",\"modalidade\":\"Emprestimo Consignado\",\"valor_liberado\":null,\"valor_novos_recursos\":\"R$ 5.000,00\",\"valor_total_emprestimo\":\"R$ 5.000,00\",\"valor_contratado\":\"R$ 5.000,00\",\"iof_financiado\":null,\"valor_entrada\":null,\"saldo_devedor_refinanciado\":null,\"valor_parcela\":null,\"numero_parcelas\":null,\"parcelas_mensais\":null,\"prazo_meses\":null,\"prazo_dias\":null,\"prazo_nao_se_aplica_nota\":null,\"taxa_juros_mensal\":null,\"taxa_juros_anual\":null,\"taxa_juros_anual_calculada\":null,\"cet_mensal\":\"2,10%\",\"cet_anual\":null,\"valor_total_parcelas\":null,\"credor_original\":null,\"data_contrato\":\"25/06/2025\",\"data_contrato_nota\":null,\"data_primeiro_vencimento\":null,\"data_ultimo_vencimento\":null,\"codigo_banco_bacen\":null,\"codigo_banco_bacen_nota\":null,\"modalidade_desconto_provavel\":null,\"cartao\":null,\"conta_beneficio\":null,\"correspondente\":null,\"prazo_operacao_meses_aprox\":null,\"carencia_dias\":null},\"cliente\":{\"nome\":\"Maria Aparecida Souza\",\"cpf\":\"111.444.777-35\",\"rg\":null,\"data_nascimento\":null,\"endereco\":\"IP: 177\",\"bairro\":null,\"cidade\":null,\"estado\":null,\"cep\":null,\"telefone\":null,\"email\":null,\"matricula_inss\":null,\"numero_beneficio\":null,\"especie_beneficio\":null,\"origens\":{\"cidade\":null,\"estado\":null,\"bairro\":\"AUSENTE\",\"cep\":\"AUSENTE\"}},\"correspondente\":{\"email\":null,\"cidade\":null,\"observacoes\":null},\"assinatura\":{\"presente\":true,\"plataforma\":null,\"plataforma_independente\":null,\"plataforma_nota\":null,\"tipo\":\"Indeterminado\",\"nivel_legal_mp2200\":\"Indeterminado\",\"base_legal\":null,\"certificadora_ac\":null,\"titular_certificado\":\"Maria Aparecida Souza\",\"cpf_titular\":\"111.444.777-35\",\"data_hora_assinatura\":\"25/06/2025 10:45:03\",\"validade_certificado_inicio\":null,\"validade_certificado_fim\":null,\"forma_aceite\":null,\"telefone_aceite\":null,\"dispositivo\":null,\"linha_do_tempo\":null,\"metodos_autenticacao\":[\"Carimbo de data/hora da assinatura: 25/06/2025 10:45:03\"],\"metodos_mencionados_clausulado\":[],\"mencao_textual\":\"Assinado eletronicamente por MARIA APARECIDA SOUZA Endereco IP\",\"assinatura_manual_textual\":null,\"assinatura_criptografica\":{\"estado\":\"AUSENTE\",\"motivo\":\"Nenhum campo de assinatura digital detectado no catálogo.\",\"quantidade\":0,\"procedencia\":{\"procedencia\":\"NATIVO_PROVAVEL\",\"indicios\":[],\"bloqueio\":false},\"catalogo\":{\"acroform\":\"AUSENTE\",\"acroformXref\":null,\"sigFlags\":null,\"signaturesExist\":false,\"appendOnly\":false,\"fields\":[],\"eofCount\":1,\"startxrefCount\":1,\"incrementalUpdates\":0},\"validacao\":{\"disponivel\":true,\"assinaturas\":[],\"stderr\":\"NSS_Init failed: security library: bad database.\"},\"alertas\":[]},\"hash_documento_assinado\":null,\"hash_declarado_estado\":\"AUSENTE\",\"hash_declarado_conferivel\":false,\"algoritmo_hash\":null,\"numero_serie_certificado\":null,\"integridade_pos_assinatura\":null,\"observacoes\":\"Extração local por texto do PDF. Revise manualmente os campos antes de uso em peça processual.\"},\"geolocalizacao_assinatura\":{\"presente\":true,\"latitude\":\"-5.228841\",\"longitude\":\"-43.11205\",\"endereco_declarado\":null,\"precisao_metros\":null,\"fonte\":\"Texto extraído do PDF\",\"ip_associado\":null,\"data_hora\":\"25/06/2025 10:45:03\"},\"cadeia_custodia\":{\"resultado\":\"CADEIA DE CUSTÓDIA NÃO DEMONSTRADA\",\"eliminatorios\":{\"hash_declarado_emissor\":false,\"provedor_assinatura_identificado\":false,\"carimbo_tempo_independente\":false,\"registro_coleta_preservacao\":false},\"identificacao_signatario\":true,\"registro_ip\":true,\"carimbo_tempo\":true,\"geolocalizacao\":true,\"metodo_autenticacao\":true,\"hash_integridade\":false,\"trilha_auditoria\":true,\"evidencia_aceite\":true,\"mencao_aceite\":false,\"placar\":{\"eliminatorios_presentes\":0,\"eliminatorios_total\":4,\"auxiliares_presentes\":6,\"auxiliares_total\":7},\"observacoes\":\"Cadeia de custódia avaliada por itens eliminatórios. Ausência de hash declarado pelo emissor, provedor verificável, carimbo de tempo independente ou registro de preservação impede conclusão técnica favorável.\"},\"afericao_matematica\":{\"prazo_declarado_dias\":0,\"prazo_calculado_dias\":null,\"prazo_confere\":null,\"prazo_operacao_meses_aprox\":null,\"carencia_dias\":null,\"somatorio_calculado\":null,\"somatorio_confere\":null,\"composicao_financiado_calculada\":null,\"composicao_confere\":null,\"vp_taxa_declarada\":null,\"vp_taxa_declarada_numero\":null,\"vp_confere\":null,\"cet_implicito_mensal\":null,\"cet_implicito_anual_calculado\":null,\"cet_implicito_mensal_numero\":null,\"cet_implicito_veredito\":null,\"cet_delta_pp\":null,\"cet_implicito_nota\":null,\"cet_anual_calculado\":\"28,32%\",\"cet_anual_confere\":null,\"cet_maior_que_juros\":null,\"somatorio_sobre_liberado_percentual\":null,\"conclusao\":\"A aferição matemática encontrou pontos que exigem conferência manual antes de conclusão sobre consistência financeira.\"},\"ips\":[{\"endereco\":\"177.104.55.201\",\"versao\":4,\"compartilhado\":false,\"porta\":null,\"rotulo\":\"Endereco IP\",\"contexto\":\"Registrado no documento sob o rótulo \\\"Endereco IP\\\"\",\"data_hora\":\"25/06/2025 10:45:03\",\"user_agent\":null,\"ordem\":1,\"classe\":\"PUBLICO\"}],\"trilha_acesso\":{\"events\":[{\"action\":\"Link aberto\",\"date\":\"25/06/2025\",\"time\":\"10:41\",\"ip\":\"177.104.55.201\",\"port\":\"55242\",\"lat\":-5.228841,\"lon\":-43.11205,\"device\":\"Android 10 · Chrome 130\"},{\"action\":\"Selfie Capturada\",\"date\":\"25/06/2025\",\"time\":\"10:44\",\"ip\":\"177.104.55.201\",\"port\":\"49243\",\"lat\":-5.228851,\"lon\":-43.11209,\"device\":\"Android 10 · Chrome 130\"}],\"eventCount\":2,\"uniqueIps\":[\"177.104.55.201\"],\"ports\":[\"55242\",\"49243\"],\"signatureTimestampUtc\":\"25/06/2025 13:45:03\",\"eventDate\":\"25/06/2025\",\"firstTime\":\"10:41\",\"lastTime\":\"10:44\",\"eventTimezone\":\"-03:00\",\"device\":\"Android 10 · Chrome 130\",\"deviceIdentifiable\":false,\"chronologyInconsistent\":false,\"signatureLocalTime\":\"10:45\",\"coordinateCount\":2,\"northSouthMeters\":1.1,\"eastWestMeters\":4.4},\"achados_irregularidade\":[{\"codigo\":\"INT1\",\"gravidade\":\"MÉDIA\",\"titulo\":\"Hash conferível ausente\",\"texto\":\"Não há hash de integridade declarado pelo emissor no documento.\"},{\"codigo\":\"CET1\",\"gravidade\":\"ALTA\",\"titulo\":\"Demonstrativo de cálculo do CET ausente do instrumento\",\"texto\":\"O contrato declara o CET, porém não apresenta demonstrativo com valores em reais e percentuais válidos de cada componente do fluxo, conforme dever de informação do CDC e da regulamentação do CMN sobre CET.\"},{\"codigo\":\"CAD2\",\"gravidade\":\"MÉDIA\",\"titulo\":\"Benefício previdenciário não identificado\",\"texto\":\"O instrumento aparenta tratar de crédito consignado, mas não foi localizado número de benefício, matrícula ou espécie previdenciária. O dado deve ser confrontado com HISCON/INSS, autorização de averbação e cadastro da operação.\"},{\"codigo\":\"CUS1\",\"gravidade\":\"MÉDIA\",\"titulo\":\"Itens eliminatórios da cadeia de custódia não satisfeitos\",\"texto\":\"A extração não localizou hash conferível declarado pelo emissor, provedor verificável, carimbo de tempo independente nem registro de preservação do arquivo original. Em PDF reimpresso, a ausência de selfie e logs no próprio arquivo é esperada; a diligência recai sobre a exibição dos artefatos originais da plataforma.\"}],\"evidencias_irregularidade\":[\"Hash conferível ausente. Não há hash de integridade declarado pelo emissor no documento.\",\"Demonstrativo de cálculo do CET ausente do instrumento. O contrato declara o CET, porém não apresenta demonstrativo com valores em reais e percentuais válidos de cada componente do fluxo, conforme dever de informação do CDC e da regulamentação do CMN sobre CET.\",\"Benefício previdenciário não identificado. O instrumento aparenta tratar de crédito consignado, mas não foi localizado número de benefício, matrícula ou espécie previdenciária. O dado deve ser confrontado com HISCON/INSS, autorização de averbação e cadastro da operação.\",\"Itens eliminatórios da cadeia de custódia não satisfeitos. A extração não localizou hash conferível declarado pelo emissor, provedor verificável, carimbo de tempo independente nem registro de preservação do arquivo original. Em PDF reimpresso, a ausência de selfie e logs no próprio arquivo é esperada; a diligência recai sobre a exibição dos artefatos originais da plataforma.\"],\"observacoes_periciais\":\"Laudo gerado por extração textual local do PDF. A estrutura do relatório foi preservada, mas recomenda-se validação humana dos campos extraídos.\",\"rodape_pje\":[],\"imagens_pdf\":{\"disponivel\":true,\"total\":0,\"extraidas\":0,\"imagens\":[],\"grupos_repetidos\":[],\"achados\":[{\"codigo\":\"IMG1\",\"severidade\":\"ATENÇÃO\",\"titulo\":\"Nenhuma imagem embutida listada\",\"detalhe\":\"O PDF não apresentou imagens extraíveis por pdfimages. Se houver selfie visível, ela pode estar achatada em página renderizada ou exigir exame visual complementar.\"}],\"observacao\":\"Imagens listadas por pdfimages. Hashes individuais calculados sobre os arquivos extraídos por Poppler.\"}}",
+ "metadata": {
+  "version": "1.4",
+  "title": null,
+  "author": null,
+  "subject": null,
+  "keywords": null,
+  "creator": null,
+  "producer": null,
+  "creationDate": null,
+  "modificationDate": null,
+  "language": null,
+  "totalPages": 7,
+  "pageFormats": [
+   "215.9 x 279.4 mm"
+  ],
+  "encrypted": false,
+  "encryptionFilter": null,
+  "linearized": false,
+  "hasXfa": false,
+  "trailerFingerprint": "36ae7b005b45e04244402e76af0a48ec",
+  "hasAcroForm": false,
+  "hasEmbeddedSignatures": false,
+  "cryptographicSignatureStatus": "AUSENTE",
+  "cryptographicSignatureReason": "Nenhum campo de assinatura digital detectado no catálogo.",
+  "digitalSignature": {
+   "procedencia": {
+    "procedencia": "NATIVO_PROVAVEL",
+    "indicios": [],
+    "bloqueio": false
+   },
+   "catalog": {
+    "acroform": "AUSENTE",
+    "acroformXref": null,
+    "sigFlags": null,
+    "signaturesExist": false,
+    "appendOnly": false,
+    "fields": [],
+    "eofCount": 1,
+    "startxrefCount": 1,
+    "incrementalUpdates": 0
+   },
+   "estado": "AUSENTE",
+   "motivo": "Nenhum campo de assinatura digital detectado no catálogo.",
+   "pdfsig": {
+    "disponivel": true,
+    "assinaturas": [],
+    "stderr": "NSS_Init failed: security library: bad database."
+   },
+   "alerts": []
+  },
+  "warnings": [
+   "Título interno do PDF não informado.",
+   "Autor interno do PDF não informado.",
+   "Data de criação interna não informada.",
+   "A estrutura interna do PDF não contém assinatura digital incorporada detectável no catálogo."
+  ],
+  "metadataAnalysisStatus": "ASSESSABLE",
+  "sourceProvenance": {
+   "kind": "user-supplied",
+   "derived": false
+  }
+ },
+ "reportId": "FD-20260916-AAAAAAAAAA",
+ "hashes": {
+  "sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "sha1": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+ },
+ "file": {
+  "name": "contrato-sintetico.pdf",
+  "sizeBytes": 2489
+ },
+ "generatedAt": "2026-09-16T12:00:00.000Z",
+ "warning": "",
+ "home": {
+  "query": "Rua Exemplo, 100, Teresina - PI, CEP 64000-000",
+  "source": "Informado manualmente",
+  "geo": {
+   "lat": -5.0892,
+   "lon": -42.8019,
+   "precision": "street",
+   "display": "Teresina"
+  }
+ },
+ "contractGeo": {
+  "lat": -5.228841,
+  "lon": -43.11205,
+  "fonte": "Texto extraído do PDF",
+  "dataHora": "25/06/2025 10:45:03",
+  "geocoded": false,
+  "precision": "gps",
+  "distance": 37.6,
+  "municipio": "Altos",
+  "uf": "PI"
+ },
+ "geoDeclaredPresent": true,
+ "ipAnalysis": [
+  {
+   "endereco": "177.104.55.201",
+   "versao": 4,
+   "compartilhado": false,
+   "porta": null,
+   "rotulo": "Endereco IP",
+   "contexto": "Registrado no documento sob o rótulo \"Endereco IP\"",
+   "data_hora": "25/06/2025 10:45:03",
+   "user_agent": null,
+   "ordem": 1,
+   "classe": "PUBLICO",
+   "geo": {
+    "city": "Teresina",
+    "region": "Piauí",
+    "country": "Brasil",
+    "lat": -5.09,
+    "lon": -42.8,
+    "isp": "TIM S.A.",
+    "timezone": "America/Fortaleza",
+    "source": "ipwho.is"
+   },
+   "distance": 0.3,
+   "historico": null,
+   "rdap": {
+    "owner": "TIM S.A.",
+    "asn": 26615
+   }
+  }
+ ],
+ "camposRevisados": {
+  "cliente.nome": {
+   "rotulo": "Nome do contratante",
+   "anterior": "Maria Aparecida",
+   "valor": "Maria Aparecida Souza",
+   "userId": "u1",
+   "em": "2026-09-16T12:05:00.000Z"
+  }
+ },
+ "processComparison": {
+  "status": "COMPLETED",
+  "resultado": "DIVERGÊNCIAS A CONFERIR",
+  "confirmations": [
+   {
+    "label": "Número do contrato",
+    "contrato": "1234567890",
+    "processo": "LOCALIZADO",
+    "status": "CONFIRMADO"
+   }
+  ],
+  "divergences": [
+   {
+    "label": "Valor do comprovante de transferência x valor liberado na CCB",
+    "contrato": "R$ 4.800,00",
+    "processo": "R$ 4.500,00",
+    "severidade": "ATENÇÃO",
+    "detalhe": "Valores diferentes.",
+    "trecho": "Valor: R$ 4.500,00"
+   }
+  ],
+  "observations": [],
+  "status_note": "Escopo do confronto.",
+  "file": {
+   "name": "processo 0800000-11.2026.8.10.0001.pdf",
+   "sha256": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"
+  }
+ },
+ "cadeiaCustodia": {
+  "definicao": "O CPP, art. 158-A (Lei 13.964/2019), define cadeia de custódia como “o conjunto de todos os procedimentos utilizados para manter e documentar a história cronológica do vestígio”, com o objetivo de rastrear sua posse e manuseio desde o reconhecimento até o descarte. A norma é de processo penal e não incide diretamente nesta matéria cível; é referida como parâmetro doutrinário do grau de rastreabilidade exigível de uma prova digital. No plano técnico, a ISO/IEC 27037:2012 estabelece as diretrizes de identificação, coleta, aquisição e preservação de evidência digital, e é a referência internacional para a mesma finalidade.",
+  "efeitoProcessual": "Impugnada a assinatura pelo consumidor, o ônus de comprovar autenticidade e integridade do documento recai sobre a instituição financeira (STJ, Tema 1.061; CPC, art. 373, e art. 429, II). A assinatura eletrônica sem certificação ICP-Brasil é válida (MP 2.200-2/2001, art. 10, § 2º; Lei 14.063/2020), mas essa validade é CONDICIONADA à demonstração de autoria e integridade, que é precisamente o que a cadeia de custódia documenta. Cada elemento ausente subtrai um meio de prova de que a instituição dispõe para se desincumbir desse ônus.",
+  "elementos": [
+   {
+    "chave": "identificacao_signatario",
+    "nome": "Identificação do signatário",
+    "comprova": "Vincula o ato a uma pessoa determinada, por dado que só o titular deveria possuir (CPF, documento, biometria ou certificado).",
+    "norma": "Lei 14.063/2020, art. 4º; MP 2.200-2/2001, art. 10, § 2º",
+    "ausencia": "Sem identificação, o documento não permite atribuir autoria a ninguém, e a assinatura não se sustenta como manifestação de vontade do contratante.",
+    "presente": true
+   },
+   {
+    "chave": "carimbo_tempo",
+    "nome": "Carimbo de data e hora",
+    "comprova": "Fixa o instante do ato, permitindo confrontá-lo com a disponibilidade do contratante e com a sequência dos demais registros.",
+    "norma": "Lei 14.063/2020, art. 5º; ITI, DOC-ICP-15 (para carimbo qualificado)",
+    "ausencia": "Sem marco temporal confiável, não é possível verificar se o ato ocorreu quando a instituição afirma, nem detectar registros inseridos depois.",
+    "presente": true
+   },
+   {
+    "chave": "registro_ip",
+    "nome": "Registro de endereço IP",
+    "comprova": "Indica de qual conexão partiu o ato. Combinado com data e hora, é o dado que permite requisitar da operadora a identificação do assinante da conexão.",
+    "norma": "Marco Civil da Internet (Lei 12.965/2014), arts. 13 e 15 (guarda de registros de conexão por 1 ano e de acesso a aplicações por 6 meses); art. 10, § 1º e art. 22 (fornecimento mediante ordem judicial)",
+    "ausencia": "Sem o IP, extingue-se a única via de rastrear a origem material da conexão. A prazo, a perda é irreversível: passados os prazos de guarda do Marco Civil, o dado deixa de existir na operadora.",
+    "presente": true
+   },
+   {
+    "chave": "geolocalizacao",
+    "nome": "Geolocalização do ato",
+    "comprova": "Situa o ato no espaço, permitindo o confronto com a residência do contratante e com a localização do correspondente bancário.",
+    "norma": "LGPD (Lei 13.709/2018), arts. 5º, I e 7º: a coordenada é dado pessoal e seu tratamento exige base legal",
+    "ausencia": "Sem geolocalização, o laudo não pode aferir incompatibilidade espacial, restando apenas o IP, cuja precisão é de nível de operadora.",
+    "presente": true
+   },
+   {
+    "chave": "metodo_autenticacao",
+    "nome": "Método de autenticação",
+    "comprova": "Descreve COMO a identidade foi verificada (token por SMS, biometria facial, senha, certificado) e determina o nível da assinatura.",
+    "norma": "Lei 14.063/2020, art. 4º, I a III: assinatura simples, avançada e qualificada",
+    "ausencia": "Sem o método declarado, não é possível classificar o nível da assinatura nem avaliar se ele era adequado ao ato praticado.",
+    "presente": true
+   },
+   {
+    "chave": "hash_integridade",
+    "nome": "Hash de integridade",
+    "comprova": "Permite verificar que o conteúdo assinado é idêntico ao apresentado, detectando qualquer alteração posterior de um único bit.",
+    "norma": "MP 2.200-2/2001, art. 10, § 1º; NIST FIPS 180-4 (SHA-2)",
+    "ausencia": "Sem hash, não há como demonstrar que o documento exibido é o mesmo que foi assinado, e a integridade fica indemonstrável por meio técnico.",
+    "presente": false
+   },
+   {
+    "chave": "trilha_auditoria",
+    "nome": "Trilha de auditoria",
+    "comprova": "Registra a sequência de eventos do fluxo (envio, abertura, leitura, aceite), permitindo reconstituir o que ocorreu e em que ordem.",
+    "norma": "CPP, art. 158-A, por analogia, quanto à história cronológica do vestígio; ISO/IEC 27037:2012",
+    "ausencia": "Sem trilha, cada registro isolado passa a depender da palavra da instituição, sem meio de conferir consistência entre eles.",
+    "presente": true
+   },
+   {
+    "chave": "evidencia_aceite",
+    "nome": "Evidência de aceite e manifestação de vontade",
+    "comprova": "Demonstra que o contratante teve acesso ao conteúdo e manifestou concordância, não apenas que um clique foi registrado.",
+    "norma": "CDC, arts. 46 e 52; CC (Lei 10.406/2002), art. 107",
+    "ausencia": "Sem evidência de aceite informado, o contrato não obriga o consumidor que não teve conhecimento prévio de seu conteúdo (CDC, art. 46).",
+    "presente": true
+   }
+  ],
+  "presentes": 7,
+  "total": 8,
+  "faltantes": [
+   {
+    "chave": "hash_integridade",
+    "nome": "Hash de integridade",
+    "comprova": "Permite verificar que o conteúdo assinado é idêntico ao apresentado, detectando qualquer alteração posterior de um único bit.",
+    "norma": "MP 2.200-2/2001, art. 10, § 1º; NIST FIPS 180-4 (SHA-2)",
+    "ausencia": "Sem hash, não há como demonstrar que o documento exibido é o mesmo que foi assinado, e a integridade fica indemonstrável por meio técnico.",
+    "presente": false
+   }
+  ],
+  "avaliacao": {
+   "nivel": "substancialmente_completa",
+   "rotulo": "SUBSTANCIALMENTE COMPLETA",
+   "tom": "ok",
+   "pct": 88,
+   "leitura": "A cadeia reúne os elementos necessários para que a instituição comprove autoria e integridade. A ausência de certificação ICP-Brasil, se for o caso, não compromete a validade do ato."
+  }
+ },
+ "sumarioIrregularidades": {
+  "reportId": "FD-20260916-AAAAAAAAAA",
+  "bank": "Instituição financeira não identificada",
+  "contractNumber": "1234567890",
+  "cpf": "111.444.777-35",
+  "intro": "Leitura crítica do exame do arquivo \"contrato-sintetico.pdf\", do contrato nº 1234567890 de Instituição financeira não identificada. O placar separa alertas, pontos favoráveis e diligências conforme os elementos efetivamente presentes no documento.",
+  "meta": {
+   "contractDate": "25/06/2025",
+   "signatureDate": "25/06/2025 10:45:03",
+   "methods": "Carimbo de data/hora da assinatura: 25/06/2025 10:45:03",
+   "sha256": "AAAAAAAAAA…AAAAAAAA",
+   "size": "2.43 KB",
+   "pages": "7 páginas"
+  },
+  "checks": [
+   {
+    "domain": "A",
+    "key": "hash",
+    "status": "ALERTA",
+    "detail": "Hash declarado ausente."
+   },
+   {
+    "domain": "B",
+    "key": "metadados-descritivos",
+    "status": "ALERTA",
+    "detail": "4 campos ausentes."
+   },
+   {
+    "domain": "B",
+    "key": "estrutura-pdf",
+    "status": "ALERTA",
+    "detail": "Assinatura PAdES não detectada."
+   },
+   {
+    "domain": "C",
+    "key": "dados-economicos",
+    "status": "ALERTA",
+    "detail": "5 campos essenciais ausentes."
+   },
+   {
+    "domain": "C",
+    "key": "datas",
+    "status": "CONFERIDO",
+    "detail": ""
+   },
+   {
+    "domain": "D",
+    "key": "qualificacao",
+    "status": "ALERTA",
+    "detail": "demais campos cadastrais majoritariamente ausentes"
+   },
+   {
+    "domain": "E",
+    "key": "assinatura",
+    "status": "CONFERIDO",
+    "detail": ""
+   },
+   {
+    "domain": "E",
+    "key": "cadeia-custodia",
+    "status": "ALERTA",
+    "detail": "0/4 eliminatórios; 6/7 auxiliares."
+   },
+   {
+    "domain": "E",
+    "key": "dispositivo",
+    "status": "ALERTA",
+    "detail": "Hardware não individualizado."
+   },
+   {
+    "domain": "F",
+    "key": "gps-residencia",
+    "status": "PRÓ-BANCO",
+    "detail": "37,6 km"
+   },
+   {
+    "domain": "G",
+    "key": "triagem-ip",
+    "status": "CONFERIDO",
+    "detail": "1 IP(s); 0 de infraestrutura."
+   },
+   {
+    "domain": "G",
+    "key": "gps-contra-ip",
+    "status": "PRÓ-BANCO",
+    "detail": "37,8 km"
+   },
+   {
+    "domain": "H",
+    "key": "fundamentacao",
+    "status": "CONFERIDO",
+    "detail": "Achados vinculados ao dever de informação, autenticidade, integridade e proteção de dados."
+   }
+  ],
+  "counts": {
+   "domains": 8,
+   "irregularities": 10,
+   "favorable": 2,
+   "diligences": 7
+  },
+  "findings": [
+   {
+    "severity": "ALTA",
+    "key": "economics-missing",
+    "title": "Instrumento sem os números essenciais do negócio.",
+    "text": "Não foram identificados valor da parcela, número de parcelas, taxa mensal, taxa anual, CET anual. A ausência deve ser confrontada com o instrumento completo e o demonstrativo do CET (CDC, arts. 6º, III, e 52; Res. CMN 4.881/2020)."
+   },
+   {
+    "severity": "ALTA",
+    "key": "CET1",
+    "title": "Demonstrativo de cálculo do CET ausente do instrumento.",
+    "text": "O contrato declara o CET, porém não apresenta demonstrativo com valores em reais e percentuais válidos de cada componente do fluxo, conforme dever de informação do CDC e da regulamentação do CMN sobre CET."
+   },
+   {
+    "severity": "MÉDIA",
+    "key": "hash-missing",
+    "title": "Integridade não confrontável pelo documento.",
+    "text": "O contrato não apresenta hash declarado para comparação com a impressão digital calculada pelo ForenseDoc."
+   },
+   {
+    "severity": "MÉDIA",
+    "key": "client-qualification",
+    "title": "Qualificação cadastral incompleta.",
+    "text": "demais campos cadastrais majoritariamente ausentes."
+   },
+   {
+    "severity": "MÉDIA",
+    "key": "simple-signature",
+    "title": "Assinatura eletrônica depende da cadeia de custódia.",
+    "text": "Não foi detectada certificação PAdES incorporada e o nível da assinatura é simples ou indeterminado. Isso não a invalida por si; impugnada a autoria, cabe ao banco comprovar autenticidade (STJ, Tema 1.061, CPC arts. 6º, 369 e 429, II)."
+   },
+   {
+    "severity": "MÉDIA",
+    "key": "CUS1",
+    "title": "Cadeia de custódia incompleta.",
+    "text": "Itens eliminatórios satisfeitos: 0 de 4. Elementos auxiliares localizados: 6 de 7. A instituição deve suprir os registros ausentes com os logs brutos da plataforma."
+   },
+   {
+    "severity": "MÉDIA",
+    "key": "device-gap",
+    "title": "Dispositivo sem vínculo inequívoco com o hardware.",
+    "text": "A trilha informa Android 10 · Chrome 130, mas não apresenta fabricante, modelo ou identificador físico legível."
+   },
+   {
+    "severity": "MÉDIA",
+    "key": "INT1",
+    "title": "Hash conferível ausente.",
+    "text": "Não há hash de integridade declarado pelo emissor no documento."
+   },
+   {
+    "severity": "MÉDIA",
+    "key": "CAD2",
+    "title": "Benefício previdenciário não identificado.",
+    "text": "O instrumento aparenta tratar de crédito consignado, mas não foi localizado número de benefício, matrícula ou espécie previdenciária. O dado deve ser confrontado com HISCON/INSS, autorização de averbação e cadastro da operação."
+   },
+   {
+    "severity": "INFO",
+    "key": "metadata-missing",
+    "title": "Metadados descritivos insuficientes.",
+    "text": "4 dos 4 campos principais (título, autor, assunto e aplicativo criador) não foram identificados. Em exportações por motor HTML/PDF, isso é nota de rastreabilidade, não defeito autônomo de média gravidade."
+   },
+   {
+    "severity": "FAVORÁVEL",
+    "key": "gps-near-home",
+    "title": "GPS da assinatura próximo à referência residencial.",
+    "text": "A coordenada da assinatura fica a 37,6 km do endereço de referência. Isoladamente, o dado favorece coerência espacial, mas não comprova autoria."
+   }
+  ],
+  "allFindings": [
+   {
+    "severity": "ALTA",
+    "key": "economics-missing",
+    "title": "Instrumento sem os números essenciais do negócio.",
+    "text": "Não foram identificados valor da parcela, número de parcelas, taxa mensal, taxa anual, CET anual. A ausência deve ser confrontada com o instrumento completo e o demonstrativo do CET (CDC, arts. 6º, III, e 52; Res. CMN 4.881/2020)."
+   },
+   {
+    "severity": "ALTA",
+    "key": "CET1",
+    "title": "Demonstrativo de cálculo do CET ausente do instrumento.",
+    "text": "O contrato declara o CET, porém não apresenta demonstrativo com valores em reais e percentuais válidos de cada componente do fluxo, conforme dever de informação do CDC e da regulamentação do CMN sobre CET."
+   },
+   {
+    "severity": "MÉDIA",
+    "key": "hash-missing",
+    "title": "Integridade não confrontável pelo documento.",
+    "text": "O contrato não apresenta hash declarado para comparação com a impressão digital calculada pelo ForenseDoc."
+   },
+   {
+    "severity": "MÉDIA",
+    "key": "client-qualification",
+    "title": "Qualificação cadastral incompleta.",
+    "text": "demais campos cadastrais majoritariamente ausentes."
+   },
+   {
+    "severity": "MÉDIA",
+    "key": "simple-signature",
+    "title": "Assinatura eletrônica depende da cadeia de custódia.",
+    "text": "Não foi detectada certificação PAdES incorporada e o nível da assinatura é simples ou indeterminado. Isso não a invalida por si; impugnada a autoria, cabe ao banco comprovar autenticidade (STJ, Tema 1.061, CPC arts. 6º, 369 e 429, II)."
+   },
+   {
+    "severity": "MÉDIA",
+    "key": "CUS1",
+    "title": "Cadeia de custódia incompleta.",
+    "text": "Itens eliminatórios satisfeitos: 0 de 4. Elementos auxiliares localizados: 6 de 7. A instituição deve suprir os registros ausentes com os logs brutos da plataforma."
+   },
+   {
+    "severity": "MÉDIA",
+    "key": "device-gap",
+    "title": "Dispositivo sem vínculo inequívoco com o hardware.",
+    "text": "A trilha informa Android 10 · Chrome 130, mas não apresenta fabricante, modelo ou identificador físico legível."
+   },
+   {
+    "severity": "MÉDIA",
+    "key": "INT1",
+    "title": "Hash conferível ausente.",
+    "text": "Não há hash de integridade declarado pelo emissor no documento."
+   },
+   {
+    "severity": "MÉDIA",
+    "key": "CAD2",
+    "title": "Benefício previdenciário não identificado.",
+    "text": "O instrumento aparenta tratar de crédito consignado, mas não foi localizado número de benefício, matrícula ou espécie previdenciária. O dado deve ser confrontado com HISCON/INSS, autorização de averbação e cadastro da operação."
+   },
+   {
+    "severity": "INFO",
+    "key": "metadata-missing",
+    "title": "Metadados descritivos insuficientes.",
+    "text": "4 dos 4 campos principais (título, autor, assunto e aplicativo criador) não foram identificados. Em exportações por motor HTML/PDF, isso é nota de rastreabilidade, não defeito autônomo de média gravidade."
+   }
+  ],
+  "favorable": [
+   {
+    "severity": "FAVORÁVEL",
+    "key": "gps-near-home",
+    "title": "GPS da assinatura próximo à referência residencial.",
+    "text": "A coordenada da assinatura fica a 37,6 km do endereço de referência. Isoladamente, o dado favorece coerência espacial, mas não comprova autoria."
+   },
+   {
+    "severity": "FAVORÁVEL",
+    "key": "gps-ip-compatible",
+    "title": "GPS e IP de acesso são geograficamente convergentes.",
+    "text": "A distância aproximada entre os pontos é 37,8 km. A convergência favorece coerência espacial, sem comprovar autoria isoladamente."
+   }
+  ],
+  "geo": {
+   "items": [
+    {
+     "label": "GPS · assinatura",
+     "distance": 37.6,
+     "role": "gps",
+     "location": "coordenada do log"
+    },
+    {
+     "label": "TIM S.A. · acesso",
+     "distance": 0.3,
+     "role": "access",
+     "location": "Teresina/Piauí"
+    }
+   ],
+   "description": "Distâncias aproximadas até a referência residencial. O GPS representa o ponto declarado no ato; os IPs foram separados entre acesso provável e infraestrutura."
+  },
+  "ipCards": [
+   {
+    "endereco": "177.104.55.201",
+    "versao": 4,
+    "compartilhado": false,
+    "porta": null,
+    "rotulo": "Endereco IP",
+    "contexto": "Registrado no documento sob o rótulo \"Endereco IP\"",
+    "data_hora": "25/06/2025 10:45:03",
+    "user_agent": null,
+    "ordem": 1,
+    "classe": "PUBLICO",
+    "geo": {
+     "city": "Teresina",
+     "region": "Piauí",
+     "country": "Brasil",
+     "lat": -5.09,
+     "lon": -42.8,
+     "isp": "TIM S.A.",
+     "timezone": "America/Fortaleza",
+     "source": "ipwho.is"
+    },
+    "distance": 0.3,
+    "historico": null,
+    "rdap": {
+     "owner": "TIM S.A.",
+     "asn": 26615
+    },
+    "role": "access",
+    "badge": "ACESSO PROVÁVEL",
+    "text": "TIM S.A., Teresina/Piauí, 0,30 km da referência residencial. Associado à trilha de acesso; CGNAT, VPN ou roteamento regional podem reduzir a precisão. Não prova, isoladamente, a presença física do signatário."
+   }
+  ],
+  "synthesis": "GPS e IP de acesso estão a aproximadamente 37,8 km. A convergência é favorável à coerência espacial, mas não substitui a prova de autoria. IPs de infraestrutura foram separados do acesso do usuário.",
+  "diligences": [
+   {
+    "key": "ip-holder",
+    "title": "Identificação do titular da conexão",
+    "text": "Requisitar à operadora os dados da conexão vinculada ao IP 177.104.55.201 em 25/06/2025 10:45:03, mediante autorização judicial."
+   },
+   {
+    "key": "raw-logs",
+    "title": "Logs brutos da plataforma",
+    "text": "Exigir eventos completos, fuso, identificador de sessão, IP de cada etapa, fator de autenticação e política de retenção."
+   },
+   {
+    "key": "full-contract",
+    "title": "Instrumento contratual completo",
+    "text": "Solicitar taxa anual quando o campo estiver em branco, campo de valor liberado ao cliente, demonstrativo do CET, qualificação completa e número/espécie do benefício quando aplicável."
+   },
+   {
+    "key": "auth-code",
+    "title": "Explicitação do código de autenticação",
+    "text": "Exigir o algoritmo, o payload de origem e o procedimento de verificação do bloco impresso no rodapé da última página, a fim de permitir conferência independente do elemento declarado."
+   },
+   {
+    "key": "cet-demo",
+    "title": "Demonstrativo de cálculo do CET",
+    "text": "Exigir valor em reais, percentual e base de cálculo de cada componente do fluxo, conforme dever de informação do CDC e da regulamentação do CMN sobre CET."
+   },
+   {
+    "key": "payload",
+    "title": "Payload original assinado",
+    "text": "Solicitar o arquivo original, a metodologia de hash e os registros de preservação para resolver a questão de integridade."
+   },
+   {
+    "key": "device",
+    "title": "Identificação técnica do dispositivo",
+    "text": "Solicitar fabricante, modelo, identificador disponível e método de vinculação da biometria/selfie ao aparelho utilizado."
+   }
+  ],
+  "suspicionGrade": {
+   "label": "ALTA",
+   "color": "#f5853f",
+   "rationale": "2 achados de gravidade ALTA identificados."
+  },
+  "disclaimer": "Sumário automático do laudo ForenseDoc FD-20260916-AAAAAAAAAA. As classificações técnicas decorrem apenas dos dados localizados no arquivo analisado e devem ser confirmadas com o artefato original, logs e revisão humana. Apoio à análise jurídica; não substitui prova pericial."
+ }
+}

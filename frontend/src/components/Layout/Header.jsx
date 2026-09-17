@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { Scale, Menu, X } from "lucide-react";
+import { Menu, X } from "lucide-react";
 import { cn } from "../../utils/cn";
+import logoImg from "../../assets/logo.png";
 
 export default function Header() {
   const [scrolled, setScrolled] = useState(false);
@@ -26,13 +27,12 @@ export default function Header() {
     >
       <div className="container mx-auto px-4 md:px-6 flex items-center justify-between">
         {/* Logo */}
-        <Link to="/" className="flex items-center gap-2 group">
-          <div className="bg-primary/10 p-2 rounded-lg border border-primary/20 group-hover:border-primary/50 transition-colors">
-            <Scale className="w-5 h-5 text-primary" />
-          </div>
-          <span className="font-bold text-xl tracking-tight text-foreground">
-            Forense<span className="text-primary">Doc</span>
-          </span>
+        <Link to="/" className="flex items-center group py-1">
+          <img
+            src={logoImg}
+            alt="ForenseDoc"
+            className="h-9 w-auto object-contain transition-opacity group-hover:opacity-90"
+          />
         </Link>
 
         {/* Desktop Nav */}

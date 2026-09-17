@@ -179,3 +179,15 @@ export function mapPointsHomeVsDeclared(result) {
   if (!r || !cg || !Number.isFinite(cg.lat) || !Number.isFinite(cg.lon)) return [];
   return [r, { lat: cg.lat, lon: cg.lon, color: "#f59e0b", label: "A" }];
 }
+
+/**
+ * Mapa 3: geolocalização declarada no documento (A) × origem da conexão (I).
+ * Não depende da residência: continua valendo quando a referência residencial
+ * é recusada ou indisponível.
+ */
+export function mapPointsDeclaredVsIp(result) {
+  const cg = result?.contractGeo;
+  const ip = primeiroIpGeolocalizado(result);
+  if (!ip || !cg || !Number.isFinite(cg.lat) || !Number.isFinite(cg.lon)) return [];
+  return [{ lat: cg.lat, lon: cg.lon, color: "#f59e0b", label: "A" }, { lat: ip.geo.lat, lon: ip.geo.lon, color: "#dc2626", label: "I" }];
+}

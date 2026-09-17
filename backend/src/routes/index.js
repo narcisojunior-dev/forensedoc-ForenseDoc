@@ -8,6 +8,9 @@ import billingRoutes from "./billingRoutes.js";
 import webhookRoutes from "./webhookRoutes.js";
 import notificationRoutes from "./notificationRoutes.js";
 import adminRoutes from "./adminRoutes.js";
+import replicaRoutes from "./replicaRoutes.js";
+import { startProcessComparison } from "../controllers/processComparisonController.js";
+import { getMapTile } from "../controllers/mapTileController.js";
 import { requireAuth } from "../middleware/auth.js";
 import { requireCredit } from "../middleware/creditGuard.js";
 import { tenantLimiter, analyzeLimiter, externalApiLimiter } from "../middleware/rateLimiters.js";
@@ -53,6 +56,8 @@ router.use("/credits", creditRoutes);
 router.use("/billing", billingRoutes);
 router.use("/notifications", notificationRoutes);
 router.use("/admin", adminRoutes);
+// Réplica processual (Motor de Réplicas). Autenticação e limites por rota.
+router.use("/replicas", replicaRoutes);
 
 // Rotas de Análise (Módulo 4 — assíncrono via BullMQ, ver worker.js)
 router.post(
@@ -74,6 +79,16 @@ router.get("/analyses/:id/status", requireAuth, tenantLimiter, getAnalysisStatus
 router.get("/analyses/:id/result", requireAuth, tenantLimiter, getAnalysisResult);
 router.get("/analyses/:id/pdf", requireAuth, tenantLimiter, getAnalysisPdf);
 router.patch("/analyses/:id/geo", requireAuth, tenantLimiter, correctAnalysisGeo);
+// Confronto do contrato com o PDF do processo judicial (motor pericial v2).
+// Mesmo parser da análise: recebe um PDF em base64 do mesmo tamanho máximo.
+router.post(
+  "/analyses/:id/process-comparison",
+  requireAuth,
+  analyzeBodyParser,
+  analyzeLimiter,
+  requestTimeout(ANALYZE_TIMEOUT_MS),
+  startProcessComparison
+);
 
 // Revisão dos campos extraídos antes de emitir o laudo. Fora da fila de
 // propósito: é escrita no banco mais recálculo local, perfil oposto ao da
@@ -97,6 +112,10 @@ router.patch(
   reviewAnalysisFields
 );
 router.get("/analyses", requireAuth, tenantLimiter, listAnalyses);
+
+// Blocos cartográficos do mapa do laudo. Pública de propósito: `<img>` não
+// envia token, e o conteúdo é cartografia genérica. Ver mapTileController.js.
+router.get("/map-tile/:z/:x/:y.png", getMapTile);
 
 // Rotas Utilitárias
 router.get("/geocode", requireAuth, tenantLimiter, externalApiLimiter, geocode);

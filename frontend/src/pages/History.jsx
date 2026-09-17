@@ -1,10 +1,12 @@
 import { useEffect, useState, useRef } from "react";
-import { FileSearch, Loader2, X, ChevronLeft, ChevronRight, Eye, Download } from "lucide-react";
+import { FileSearch, Loader2, X, ChevronLeft, ChevronRight, Eye, FileText } from "lucide-react";
 import toast from "react-hot-toast";
 import { api } from "../lib/axios";
-import { Row, Badge, Section, Note, Flag, TONES } from "../components/UiComponents.jsx";
+import { Row, Badge, Section, Note, TONES } from "../components/UiComponents.jsx";
 import { riskFromDistance, ipSignatureCompat } from "../utils/geo.js";
-import { downloadReportPdf } from "../utils/reportDownload.js";
+import { Link } from "react-router-dom";
+import AchadosIrregularidade from "../components/report/AchadosIrregularidade.jsx";
+import SumarioExecutivo from "../components/report/SumarioExecutivo.jsx";
 
 function parseExtraction(raw) {
   if (!raw) return null;
@@ -32,7 +34,6 @@ function AnalysisDetailModal({ analysisId, onClose }) {
   const [extracted, setExtracted] = useState(null);
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
-  const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -62,16 +63,6 @@ function AnalysisDetailModal({ analysisId, onClose }) {
   // Laudos gerados antes da Fase A não têm os artefatos forenses persistidos.
   const hasForensics = !!(result?.hashes || result?.contractGeo || result?.ipAnalysis?.length);
 
-  const handleDownload = async () => {
-    setDownloading(true);
-    try {
-      await downloadReportPdf(analysisId);
-    } catch {
-      toast.error("Não foi possível gerar o PDF do laudo.");
-    } finally {
-      setDownloading(false);
-    }
-  };
 
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={onClose}>
@@ -82,15 +73,16 @@ function AnalysisDetailModal({ analysisId, onClose }) {
         <div className="sticky top-0 bg-background border-b border-surface-border px-6 py-4 flex items-center justify-between z-10">
           <h2 className="text-lg font-bold text-foreground">Detalhes da análise</h2>
           <div className="flex items-center gap-2">
+            {/* O laudo completo e o PDF ficam na página do laudo: a mesma
+                implementação da análise recém-concluída. */}
             {!loading && !error && (
-              <button
-                onClick={handleDownload}
-                disabled={downloading}
-                className="flex items-center gap-1.5 text-xs font-medium bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 disabled:opacity-50 px-3 py-1.5 rounded-lg transition-colors"
+              <Link
+                to={`/dashboard/laudo/${analysisId}`}
+                className="flex items-center gap-1.5 text-xs font-medium bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 px-3 py-1.5 rounded-lg transition-colors"
               >
-                {downloading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                Baixar PDF
-              </button>
+                <FileText className="w-3.5 h-3.5" />
+                Abrir laudo e PDF
+              </Link>
             )}
             <button onClick={onClose} className="text-zinc-400 hover:text-foreground p-1">
               <X className="w-5 h-5" />
@@ -228,11 +220,16 @@ function AnalysisDetailModal({ analysisId, onClose }) {
                 </Section>
               )}
 
-              {extracted.evidencias_irregularidade?.length > 0 && (
+              {(extracted.achados_irregularidade?.length > 0 || extracted.evidencias_irregularidade?.length > 0) && (
                 <Section title="Evidências de irregularidade" danger>
-                  {extracted.evidencias_irregularidade.map((ev, i) => (
-                    <Flag key={i} tone="danger">{ev}</Flag>
-                  ))}
+                  <AchadosIrregularidade extracted={extracted} />
+                </Section>
+              )}
+
+              {/* Motor pericial v2: síntese persistida com o laudo. */}
+              {result?.sumarioIrregularidades && (
+                <Section title={`Sumário executivo${result.reportId ? ` · ${result.reportId}` : ""}`}>
+                  <SumarioExecutivo sumario={result.sumarioIrregularidades} />
                 </Section>
               )}
             </div>

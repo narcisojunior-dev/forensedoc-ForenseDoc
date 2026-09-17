@@ -1,0 +1,235 @@
+import { heuristicExtractionFromText } from "./extraction.js";
+import { inspectPdfImages } from "./pdfForensics.js";
+import { applySourceProvenance, inspectDocumentEligibility } from "./documentEligibility.js";
+import { separarCarimboProcessual } from "./carimboProcessual.js";
+import { analisarBiometria } from "./biometria.js";
+import {
+  humanYearsMonthsFromDays, parseFormattedPdfDate, parsePtDate, parsePtDateTime, plural, stripDiacritics,
+} from "./format.js";
+
+/**
+ * Laudo estruturado de um contrato, a partir do texto e dos metadados já lidos.
+ *
+ * É a rota `POST /api/analyze` do motor de geração, sem o transporte HTTP: o
+ * SaaS lê o PDF no worker da fila e chama esta função, para que a regra pericial
+ * tenha um único lugar e o worker continue responsável só por crédito, slot,
+ * persistência e notificação.
+ *
+ * @param {object} args
+ * @param {Buffer} args.pdfBuffer arquivo original, usado no inventário de imagens
+ * @param {{text: string}} args.extraction texto (com OCR, se aplicado)
+ * @param {object} args.rawMetadata saída de `extractPdfMetadata`
+ * @param {object} [args.sourceContext] proveniência declarada (ex.: fatiamento PJe)
+ * @param {boolean} [args.enforceNativeDocument] recusa peça judicial como contrato
+ * @returns {Promise<{extracted, metadata, eligibility, recusado: boolean}>}
+ */
+export async function analisarDocumento({
+  pdfBuffer,
+  extraction,
+  rawMetadata,
+  sourceContext = {},
+  enforceNativeDocument = false,
+}) {
+  const cleanedExtraction = separarCarimboProcessual(extraction.text);
+  const eligibility = inspectDocumentEligibility(cleanedExtraction.text, {
+    sourceContext,
+    requireNativeSignals: Boolean(enforceNativeDocument),
+  });
+  if (enforceNativeDocument && !eligibility.allowed) {
+    return { extracted: null, metadata: rawMetadata, eligibility, recusado: true };
+  }
+
+  const metadata = applySourceProvenance(rawMetadata, sourceContext);
+  metadata.warnings = metadata.warnings || [];
+  const derivedSource = metadata.metadataAnalysisStatus === "NOT_ASSESSABLE_DERIVED";
+  const imageAnalysis = await inspectPdfImages(pdfBuffer, cleanedExtraction.text);
+  // A extração recebe o texto bruto e separa o carimbo processual ela mesma: as
+  // datas do carimbo precisam chegar à escolha da data do contrato.
+  const fallback = heuristicExtractionFromText(extraction.text);
+  fallback.rodape_pje = cleanedExtraction.removed;
+  fallback.metadados_processuais = cleanedExtraction.metadados;
+  fallback.imagens_pdf = imageAnalysis;
+  fallback.achados_irregularidade = fallback.achados_irregularidade || [];
+
+  // Com fotografia ou biometria provável no próprio arquivo, nenhuma seção pode
+  // dizer que a biometria foi "apenas mencionada no clausulado". O laudo do
+  // dossiê C6 dizia isso no § 4 e inventariava a selfie no § 4.2.
+  const imagensBiometricas = (imageAnalysis.imagens || []).filter((imagem) => imagem.biometricaProvavel);
+  if (imagensBiometricas.length && fallback.assinatura) {
+    fallback.assinatura.metodos_mencionados_clausulado = (fallback.assinatura.metodos_mencionados_clausulado || [])
+      .filter((metodo) => !/biometr/i.test(metodo));
+    const metodo = `Artefato biométrico no arquivo: ${imagensBiometricas.length === 1 ? "1 imagem classificada" : `${imagensBiometricas.length} imagens classificadas`} como fotografia ou biometria provável`;
+    fallback.assinatura.metodos_autenticacao = [...(fallback.assinatura.metodos_autenticacao || []), metodo];
+  }
+
+  // FEAT-05: a fotografia biométrica sai do inventário e vira bloco próprio.
+  // A busca por dados do processo biométrico (vivacidade, score, fornecedor)
+  // olha só o dossiê e o instrumento: termos de uso falam de "score" de crédito.
+  const segmentacao = fallback.documentos_logicos;
+  const paginas = String(extraction.text || "").split("\f");
+  const textoDoProcesso = segmentacao
+    ? segmentacao.documentos
+        .filter((d) => ["DOSSIE", "INSTRUMENTO_PRINCIPAL", "OUTRO"].includes(d.tipo))
+        .map((d) => paginas.slice(d.paginaInicial - 1, d.paginaFinal).join(" "))
+        .join(" ")
+    : cleanedExtraction.text;
+  const biometria = analisarBiometria({
+    imagens: imageAnalysis,
+    flat: textoDoProcesso.replace(/\s+/g, " "),
+    alegaBiometria: Boolean(fallback.assinatura?.biometria_registrada_como_evento) || /biometria\s+facial/i.test(textoDoProcesso),
+  });
+  fallback.imagem_biometrica = biometria;
+  if (biometria?.achado && !fallback.achados_irregularidade.some((issue) => issue.codigo === biometria.achado.codigo)) {
+    fallback.achados_irregularidade.push(biometria.achado);
+  }
+
+  // Achados de imagem com peso probatório entram no placar de irregularidades.
+  for (const finding of imageAnalysis.achados || []) {
+    if (finding.severidade === "CRÍTICO" || finding.severidade === "ALTO" || finding.severidade === "MÉDIO") {
+      if (!fallback.achados_irregularidade.some((issue) => issue.codigo === finding.codigo)) {
+        fallback.achados_irregularidade.push({
+          codigo: finding.codigo,
+          gravidade: finding.severidade === "MÉDIO" ? "MÉDIA" : finding.severidade,
+          titulo: finding.titulo,
+          texto: finding.detalhe,
+        });
+      }
+    }
+  }
+
+  fallback.assinatura = fallback.assinatura || {};
+  const signatureAlerts = metadata.digitalSignature?.alerts || [];
+
+  // S5: assinatura do emissor anterior ao aceite do contratante.
+  const acceptanceDate = parsePtDateTime(fallback.assinatura.data_hora_assinatura);
+  if (acceptanceDate && metadata.digitalSignature?.pdfsig?.assinaturas?.length) {
+    const earlier = metadata.digitalSignature.pdfsig.assinaturas.filter((sig) => {
+      const sigDate = parsePtDateTime(sig.data_assinatura);
+      return sigDate && sigDate < acceptanceDate;
+    });
+    if (earlier.length) {
+      signatureAlerts.push({
+        codigo: "S5",
+        severidade: "CRÍTICO",
+        titulo: "Assinatura anterior ao aceite",
+        detalhe: `${earlier.length} assinatura(s) do emissor antecedem o aceite do contratante em ${fallback.assinatura.data_hora_assinatura}: ${earlier.map((s) => `${s.campo} ${s.data_assinatura}`).join(", ")}.`,
+      });
+    }
+  }
+  if (metadata.digitalSignature) metadata.digitalSignature.alerts = signatureAlerts;
+  for (const alert of signatureAlerts) {
+    const text = `${alert.codigo} ${alert.severidade}: ${alert.titulo}. ${alert.detalhe}`;
+    if (!metadata.warnings.includes(text)) metadata.warnings.push(text);
+  }
+
+  fallback.assinatura.assinatura_criptografica = {
+    estado: metadata.cryptographicSignatureStatus || (metadata.hasEmbeddedSignatures ? "PRESENTE" : "AUSENTE"),
+    motivo: metadata.cryptographicSignatureReason || (metadata.hasEmbeddedSignatures ? "Assinatura digital incorporada detectada no catálogo do PDF." : "Assinatura digital incorporada não detectada."),
+    quantidade: metadata.digitalSignature?.pdfsig?.assinaturas?.length || metadata.digitalSignature?.catalog?.fields?.filter((field) => field.assinado).length || 0,
+    procedencia: metadata.digitalSignature?.procedencia,
+    catalogo: metadata.digitalSignature?.catalog,
+    validacao: metadata.digitalSignature?.pdfsig,
+    alertas: signatureAlerts,
+  };
+
+  // Campos de certificado só valem quando há assinatura criptográfica aferível.
+  if (derivedSource || (!metadata.hasEmbeddedSignatures && metadata.cryptographicSignatureStatus !== "NÃO AFERÍVEL")) {
+    fallback.assinatura.algoritmo_hash = null;
+    fallback.assinatura.numero_serie_certificado = null;
+    fallback.assinatura.certificadora_ac = null;
+  } else if (metadata.digitalSignature?.pdfsig?.assinaturas?.[0]) {
+    const sig = metadata.digitalSignature.pdfsig.assinaturas[0];
+    fallback.assinatura.algoritmo_hash = sig.algoritmo_resumo || fallback.assinatura.algoritmo_hash;
+    fallback.assinatura.certificadora_ac = sig.signatario_dn?.match(/OU=([^,]*Autoridade Certificadora[^,]*)/)?.[1] || fallback.assinatura.certificadora_ac;
+  }
+
+  const metadataAuthor = stripDiacritics(metadata.author || "").toLowerCase();
+  const clientName = stripDiacritics(fallback.cliente?.nome || "").toLowerCase();
+  if (!derivedSource && metadataAuthor && clientName && !clientName.includes(metadataAuthor) && !metadataAuthor.includes(clientName)) {
+    metadata.warnings.push(`O autor declarado nos metadados (${metadata.author}) difere do nome do contratante extraído (${fallback.cliente.nome}). A divergência não comprova fraude, mas deve ser contextualizada.`);
+  }
+
+  // Exportação de sistema processual (PROJUDI, PJe): o arquivo é o que o
+  // tribunal carimbou e devolveu, não uma reimpressão do banco. No dossiê C6 o
+  // produtor iText é a biblioteca de carimbo do próprio PROJUDI, e a data
+  // interna é a do download dos autos. Imputar isso ao banco como lacuna de
+  // proveniência é contraproducente, ainda mais quando quem juntou o arquivo foi
+  // o autor, com a inicial.
+  const creationDate = parseFormattedPdfDate(metadata.creationDate);
+  const contractDate = parsePtDate(fallback.contrato?.data_contrato);
+  const processual = fallback.metadados_processuais;
+  if (processual?.sistema && !derivedSource) {
+    const juntada = parsePtDate(processual.data_juntada);
+    const diasAposJuntada = creationDate && juntada ? Math.floor((creationDate - juntada) / 86400000) : null;
+    const diasAposContrato = creationDate && contractDate ? Math.floor((creationDate - contractDate) / 86400000) : null;
+    const sistemaTribunal = [processual.sistema, processual.tribunal].filter(Boolean).join("/");
+    const partes = [
+      `O arquivo é exportação do sistema processual ${sistemaTribunal}: todas as páginas trazem o carimbo do tribunal`,
+      processual.identificador_validacao ? `com identificador de validação ${processual.identificador_validacao}` : null,
+    ].filter(Boolean).join(", ");
+    const juntadaTexto = processual.data_juntada
+      ? ` O documento foi juntado em ${processual.data_juntada}${processual.movimento ? ` (movimento ${processual.movimento}${processual.descricao_movimento ? `, ${processual.descricao_movimento.toLowerCase()}` : ""})` : ""}${processual.juntado_por ? `, com assinatura digital de ${processual.juntado_por}` : ""}.`
+      : "";
+    const intervaloTexto = diasAposJuntada !== null && diasAposJuntada >= 0
+      ? ` A data interna de criação do PDF (${metadata.creationDate}) é ${plural(diasAposJuntada, "dia", "dias")} posterior à juntada e corresponde à extração dos autos, não a uma re-renderização pela instituição financeira.`
+      : "";
+    const contratoTexto = diasAposContrato !== null && diasAposContrato >= 0
+      ? ` Para referência, a mesma data é ${plural(diasAposContrato, "dia", "dias")} posterior à data do contrato (${fallback.contrato.data_contrato}).`
+      : "";
+    const mensagem = `${partes}.${juntadaTexto}${intervaloTexto}${contratoTexto} Exportações processuais não preservam assinatura digital, campos de formulário nem metadados do arquivo original; a ausência desses elementos aqui não permite conclusão sobre o arquivo nativo da contratação.`;
+    if (metadata.digitalSignature) {
+      metadata.digitalSignature.procedencia = {
+        ...(metadata.digitalSignature.procedencia || {}),
+        procedencia: "EXPORTACAO_SISTEMA_PROCESSUAL",
+        indicios: [
+          `carimbo ${sistemaTribunal} em todas as páginas`,
+          ...(metadata.digitalSignature.procedencia?.indicios || []).filter((indicio) => !/data interna posterior/i.test(indicio)),
+        ],
+        bloqueio: true,
+        mensagem,
+        sistema: processual.sistema,
+        tribunal: processual.tribunal,
+        processo: processual.processo,
+        movimento: processual.movimento,
+        descricao_movimento: processual.descricao_movimento,
+        data_juntada: processual.data_juntada,
+        juntado_por: processual.juntado_por,
+        identificador_validacao: processual.identificador_validacao,
+        dias_criacao_apos_juntada: diasAposJuntada,
+        dias_criacao_apos_contrato: diasAposContrato,
+      };
+      fallback.assinatura.assinatura_criptografica.procedencia = metadata.digitalSignature.procedencia;
+    }
+    metadata.warnings.push(mensagem);
+  }
+
+  // INT2: arquivo apresentado é reimpressão muito posterior à contratação.
+  if (!derivedSource && !processual?.sistema && creationDate && contractDate) {
+    const delayDays = Math.floor((creationDate - contractDate) / 86400000);
+    if (delayDays > 30) {
+      const message = `Data interna de criação do PDF (${metadata.creationDate}) é ${plural(delayDays, "dia", "dias")} posterior à data do contrato (${fallback.contrato.data_contrato}), o equivalente a aproximadamente ${humanYearsMonthsFromDays(delayDays)}. O dado indica que o arquivo apresentado é reimpressão/exportação posterior; isso é lacuna de proveniência e não prova, isoladamente, adulteração do negócio.`;
+      metadata.warnings.push(message);
+      if (!fallback.achados_irregularidade.some((issue) => issue.codigo === "INT2")) {
+        fallback.achados_irregularidade.push({
+          codigo: "INT2",
+          gravidade: "MÉDIA",
+          titulo: "Arquivo apresentado é reimpressão posterior",
+          texto: message,
+        });
+      }
+      if (metadata.digitalSignature?.procedencia?.procedencia === "NATIVO_PROVAVEL") {
+        metadata.digitalSignature.procedencia = {
+          ...metadata.digitalSignature.procedencia,
+          procedencia: "REIMPRESSAO_POSTERIOR_PROVAVEL",
+          indicios: [...(metadata.digitalSignature.procedencia.indicios || []), "data interna posterior à contratação"],
+          mensagem: "A data de criação interna do PDF é muito posterior à data do contrato; a ausência de assinatura digital deve ser lida como ausência no arquivo apresentado, não necessariamente no artefato original de contratação.",
+        };
+        fallback.assinatura.assinatura_criptografica.procedencia = metadata.digitalSignature.procedencia;
+      }
+    }
+  }
+
+  fallback.evidencias_irregularidade = fallback.achados_irregularidade.map((issue) => `${issue.titulo}. ${issue.texto}`);
+
+  return { extracted: fallback, metadata, eligibility, recusado: false };
+}

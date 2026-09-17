@@ -1,10 +1,13 @@
 import { getIpInfo } from "./apiService.js";
-import { geocodeAddress } from "./geocodingService.js";
+import { geocodeAddress, reverseGeocode } from "./geocodingService.js";
+import { lookupIpHistory } from "./ipHistoryService.js";
 import { haversineKm } from "../utils/geoUtils.js";
 import { isIP } from "node:net";
-import { describeIpDivergence, classifyDeclaredDivergence } from "../utils/geoDivergence.js";
+import { describeIpDivergence, classifyDeclaredDivergence, aplicarHistoricoDoIp } from "../utils/geoDivergence.js";
 import { lookupRdapIp } from "./rdapService.js";
 import { parseUserAgentForensic } from "../utils/userAgentParser.js";
+import { ESTADO_CONFRONTO, avaliarConflitoReferencia, descreverEstadoConfronto } from "../utils/referenciaResidencial.js";
+import { montarConfrontoEnderecos } from "../utils/confrontoEnderecos.js";
 
 /**
  * Confronto geográfico do §5 do laudo (Módulo 4, Fase A).
@@ -24,8 +27,12 @@ import { parseUserAgentForensic } from "../utils/userAgentParser.js";
  *   operador — quando presente, é usada direto (precisão máxima), sem
  *   geocodificar. É o padrão-ouro forense: ponto confirmado por humano.
  */
-export async function enrichGeography(extracted, homeAddress, homeCoord = null) {
+export async function enrichGeography(extracted, homeAddress, homeCoord = null, contestacao = null) {
   const cliente = extracted.cliente || {};
+  // Data do ato para o histórico do IP: a do próprio registro, senão a da
+  // assinatura, senão a do contrato.
+  const dataDoAtoPadrao =
+    extracted.assinatura?.data_hora_assinatura || extracted.contrato?.data_contrato || null;
 
   // 1. Geolocalizar cada IP extraído do PDF.
   //
@@ -52,15 +59,29 @@ export async function enrichGeography(extracted, homeAddress, homeCoord = null) 
       });
       continue;
     }
+    // Faixa privada, loopback ou link-local (classificação do motor pericial):
+    // nenhum provedor localiza isso, e "nenhum provedor respondeu" seria falso.
+    if (ipInfo.classe && !["PUBLICO", "CGNAT"].includes(ipInfo.classe)) {
+      ipResults.push({
+        ...ipInfo,
+        geo: null,
+        geoFailure: `endereço de faixa ${ipInfo.classe.toLowerCase()}: não é roteável na internet pública e não corresponde a uma localização geográfica`,
+      });
+      continue;
+    }
     const [geo, rdap] = await Promise.all([
       getIpInfo(ipInfo.endereco),
       lookupRdapIp(ipInfo.endereco).catch(() => null),
     ]);
     const parsedUa = ipInfo.user_agent ? parseUserAgentForensic(ipInfo.user_agent) : null;
+    const historico = geo
+      ? await lookupIpHistory(ipInfo.endereco, ipInfo.data_hora || dataDoAtoPadrao, geo.isp).catch(() => null)
+      : null;
 
     ipResults.push({
       ...ipInfo,
-      geo,
+      geo: historico?.suppressDistanceRisk && geo ? { ...geo, registro_na_data_nota: historico.note } : geo,
+      historico,
       rdap,
       parsedUserAgent: parsedUa,
       // Distingue "o documento não trazia" de "a consulta falhou" — num laudo,
@@ -69,22 +90,31 @@ export async function enrichGeography(extracted, homeAddress, homeCoord = null) 
     });
   }
 
-  // 2. Ponto de referência: endereço residencial. Manual (da tela) tem
-  // prioridade sobre o extraído do contrato.
+  // 2. Ponto de referência: endereço residencial. O manual (da tela) só vale
+  // depois de conferido contra a cidade, a UF e o CEP do instrumento.
   const manual = (homeAddress || "").trim();
-  const extractedAddr = [cliente.endereco, cliente.bairro, cliente.cidade, cliente.estado, cliente.cep]
-    .filter(Boolean)
-    .join(", ");
-  const homeQuery = manual || extractedAddr || null;
-  const homeSource = manual
+  const temCoordManual = Boolean(homeCoord && Number.isFinite(homeCoord.lat) && Number.isFinite(homeCoord.lon));
+  const referenciaManual = Boolean(manual || temCoordManual);
+  const enderecoNaoInformado = cliente.estados_campos?.endereco?.estado === "LOCALIZADO_VAZIO";
+  const instrumento = { cidade: cliente.cidade || null, uf: cliente.estado || null, cep: cliente.cep || null };
+
+  // Com o endereço registrado como "não informado", bairro, cidade e CEP que
+  // sobram são de outros quadros e levariam a distância ao centro do município.
+  const extractedAddr = enderecoNaoInformado
+    ? ""
+    : [cliente.endereco, cliente.bairro, cliente.cidade, cliente.estado, cliente.cep].filter(Boolean).join(", ");
+  let homeQuery = manual || extractedAddr || null;
+  let homeSource = manual
     ? "Informado manualmente"
-    : extractedAddr
-      ? "Extraído do contrato"
-      : null;
+    : temCoordManual
+      ? "Coordenada confirmada pelo operador"
+      : extractedAddr
+        ? "Extraído do contrato"
+        : null;
 
   // Coordenada confirmada pelo operador vence a geocodificação automática.
   let homeGeo;
-  if (homeCoord && Number.isFinite(homeCoord.lat) && Number.isFinite(homeCoord.lon)) {
+  if (temCoordManual) {
     homeGeo = {
       lat: homeCoord.lat,
       lon: homeCoord.lon,
@@ -95,6 +125,51 @@ export async function enrichGeography(extracted, homeAddress, homeCoord = null) 
     };
   } else {
     homeGeo = homeQuery ? await geocodeAddress(homeQuery) : null;
+  }
+
+  // Ponto do endereço que o próprio instrumento registra. Com o endereço do
+  // contratante em branco, vale a sede do município declarado, com a precisão
+  // anotada: é o que o dossiê afirma sobre onde o contratante está.
+  const consultaInstrumento = extractedAddr || [instrumento.cidade, instrumento.uf, instrumento.cep].filter(Boolean).join(", ");
+  const geoInstrumento = consultaInstrumento ? await geocodeAddress(consultaInstrumento).catch(() => null) : null;
+  const pontoInstrumento = geoInstrumento && Number.isFinite(geoInstrumento.lat)
+    ? {
+        lat: geoInstrumento.lat,
+        lon: geoInstrumento.lon,
+        rotulo: consultaInstrumento,
+        precisao: extractedAddr ? geoInstrumento.precision || "endereco" : "municipio",
+      }
+    : null;
+  // A referência informada na geração do laudo continua registrada mesmo quando
+  // é recusada como referência: a distância até o instrumento mede o conflito.
+  const pontoLaudo = referenciaManual && homeGeo && Number.isFinite(homeGeo.lat)
+    ? { lat: homeGeo.lat, lon: homeGeo.lon, rotulo: homeQuery, precisao: homeGeo.precision || null }
+    : null;
+
+  let estadoConfronto = ESTADO_CONFRONTO.DISPONIVEL;
+  let conflito = null;
+  if (referenciaManual) {
+    conflito = await avaliarConflitoReferencia({
+      cliente,
+      enderecoManual: manual,
+      pontoManual: homeGeo && Number.isFinite(homeGeo.lat) ? { lat: homeGeo.lat, lon: homeGeo.lon } : null,
+      geoManual: temCoordManual ? null : homeGeo,
+      servicos: { geocodeAddress, reverseGeocode },
+    });
+    if (conflito) {
+      const justificativa = String(contestacao?.justificativa || "").trim();
+      if (contestacao?.contestado && justificativa) {
+        estadoConfronto = ESTADO_CONFRONTO.LIBERADO_PELO_OPERADOR;
+      } else {
+        estadoConfronto = ESTADO_CONFRONTO.RECUSADO_CONFLITO;
+        homeGeo = null;
+      }
+    }
+  } else if (enderecoNaoInformado) {
+    estadoConfronto = ESTADO_CONFRONTO.INDISPONIVEL_NAO_INFORMADO;
+    homeGeo = null;
+    homeQuery = null;
+    homeSource = null;
   }
 
   // 3. Geolocalização declarada da assinatura: coordenada GPS do log, senão
@@ -159,26 +234,66 @@ export async function enrichGeography(extracted, homeAddress, homeCoord = null) 
       ...ip,
       distance,
       distanceToSignature,
-      divergenciaResidencia: describeIpDivergence({
-        km: distance,
-        referenciaConfirmada,
-        referenciaRotulo: homeSource,
-      }),
-      divergenciaAssinatura: describeIpDivergence({
-        km: distanceToSignature,
-        referenciaConfirmada: contractGeo?.precision === "gps",
-        referenciaRotulo: "geolocalização declarada no contrato",
-      }),
+      divergenciaResidencia: aplicarHistoricoDoIp(
+        describeIpDivergence({ km: distance, referenciaConfirmada, referenciaRotulo: homeSource }),
+        ip.historico
+      ),
+      divergenciaAssinatura: aplicarHistoricoDoIp(
+        describeIpDivergence({
+          km: distanceToSignature,
+          referenciaConfirmada: contractGeo?.precision === "gps",
+          referenciaRotulo: "geolocalização declarada no contrato",
+        }),
+        ip.historico
+      ),
     };
   });
+
+  // Município em que o GPS declarado realmente cai. Um ponto a 40 km pode estar
+  // em outro município, o que pesa mais na diligência do que a distância bruta.
+  if (contractGeo) {
+    const municipio = await reverseGeocode(contractGeo.lat, contractGeo.lon).catch(() => null);
+    if (municipio?.municipio) {
+      contractGeo = {
+        ...contractGeo,
+        municipio: municipio.municipio,
+        uf: municipio.uf,
+        municipioDisplay: municipio.display,
+      };
+    }
+  }
 
   let contractToHomeKm = null;
   if (contractGeo && homeGeo) {
     contractToHomeKm = haversineKm(homeGeo.lat, homeGeo.lon, contractGeo.lat, contractGeo.lon);
   }
 
+  const pontoIp = ipAnalysis.find((ip) => Number.isFinite(ip.geo?.lat) && Number.isFinite(ip.geo?.lon));
+  const confrontoEnderecos = montarConfrontoEnderecos({
+    instrumento: pontoInstrumento,
+    laudo: pontoLaudo,
+    ip: pontoIp ? { lat: pontoIp.geo.lat, lon: pontoIp.geo.lon, rotulo: [pontoIp.geo.city, pontoIp.geo.region].filter(Boolean).join("/") || pontoIp.endereco, precisao: "ip" } : null,
+    gps: contractGeo ? { lat: contractGeo.lat, lon: contractGeo.lon, rotulo: contractGeo.municipio || "coordenada do log", precisao: "gps" } : null,
+  });
+
+  const home = {
+    query: homeQuery,
+    source: homeSource,
+    geo: homeGeo,
+    estado_confronto: estadoConfronto,
+    conflito,
+    justificativa: estadoConfronto === ESTADO_CONFRONTO.LIBERADO_PELO_OPERADOR ? String(contestacao.justificativa).trim() : null,
+    instrumento,
+    endereco_literal: cliente.endereco_literal || cliente.estados_campos?.endereco?.valor || null,
+    endereco_nao_informado: enderecoNaoInformado,
+    instrumento_geo: pontoInstrumento,
+    referencia_informada_geo: pontoLaudo,
+  };
+  home.alerta = descreverEstadoConfronto(home);
+
   return {
-    home: { query: homeQuery, source: homeSource, geo: homeGeo },
+    home,
+    confronto_enderecos: confrontoEnderecos,
     // A classificação do Confronto 2 é persistida junto com a distância, pelo
     // mesmo motivo de `divergenciaResidencia`: PDF e tela leem a MESMA análise.
     // Enquanto cada lado calculava a sua, as duas versões do laudo divergiam —

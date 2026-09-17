@@ -1,12 +1,15 @@
 import { prisma } from "../utils/prisma.js";
 import { getBalancePublic } from "../services/creditService.js";
 import { parsePagination } from "../utils/pagination.js";
+import { temCreditoIlimitado } from "../utils/creditPolicy.js";
 
 export async function getBalance(req, res) {
   try {
     const tenantId = req.tenantId;
     const balance = await getBalancePublic(tenantId);
-    return res.json({ balance });
+    // O saldo real do escritório continua sendo informado; `unlimited` diz à
+    // tela que, para este usuário, ele não limita nada.
+    return res.json({ balance: { ...balance, unlimited: temCreditoIlimitado(req.auth) } });
   } catch (error) {
     console.error("[CreditController] Erro ao buscar saldo:", error);
     return res.status(500).json({ error: "Erro interno no servidor." });

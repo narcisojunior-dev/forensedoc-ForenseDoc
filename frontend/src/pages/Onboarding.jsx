@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Scale, Fingerprint, MapPin, Navigation2, ArrowRight, Sparkles } from "lucide-react";
+import { Fingerprint, MapPin, Navigation2, ArrowRight, Sparkles } from "lucide-react";
 import { useAuthStore } from "../store/authStore";
+import logoImg from "../assets/logo.png";
 
 const TOUR_CARDS = [
   {
@@ -36,13 +37,8 @@ export default function Onboarding() {
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[500px] bg-primary/10 blur-[120px] rounded-full pointer-events-none" />
 
       <div className="relative z-10 w-full max-w-2xl">
-        <div className="flex items-center justify-center gap-2 mb-8">
-          <div className="bg-primary/10 p-2 rounded-lg border border-primary/20">
-            <Scale className="w-6 h-6 text-primary" />
-          </div>
-          <span className="font-bold text-2xl tracking-tight text-foreground">
-            Forense<span className="text-primary">Doc</span>
-          </span>
+        <div className="flex items-center justify-center mb-8">
+          <img src={logoImg} alt="ForenseDoc" className="h-12 w-auto object-contain" />
         </div>
 
         <div className="glass p-8 sm:p-10 rounded-2xl border border-surface-border shadow-2xl">

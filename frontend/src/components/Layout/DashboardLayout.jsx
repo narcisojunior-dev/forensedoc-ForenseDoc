@@ -9,13 +9,14 @@ import {
   LogOut, 
   Menu, 
   X,
-  Scale,
+  Gavel,
   Shield
 } from "lucide-react";
 import { useAuthStore } from "../../store/authStore";
 import { cn } from "../../utils/cn";
 import CreditWidget from "../CreditWidget";
 import NotificationBell from "../NotificationBell";
+import logoImg from "../../assets/logo.png";
 
 export default function DashboardLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -35,6 +36,7 @@ export default function DashboardLayout() {
     { name: "Visão Geral", path: "/dashboard", icon: LayoutDashboard },
     { name: "Nova Análise", path: "/dashboard/analyze", icon: FileSearch },
     { name: "Histórico", path: "/dashboard/history", icon: History },
+    { name: "Réplica Processual", path: "/dashboard/replica", icon: Gavel },
     { name: "Planos & Créditos", path: "/dashboard/plans", icon: CreditCard },
     { name: "Configurações", path: "/dashboard/settings", icon: Settings },
     // Só o operador da plataforma vê o item; o acesso em si é barrado no backend.
@@ -61,9 +63,8 @@ export default function DashboardLayout() {
         )}
       >
         <div className="h-16 flex items-center justify-between px-6 border-b border-surface-border">
-          <Link to="/dashboard" className="flex items-center gap-2 group">
-            <Scale className="w-5 h-5 text-primary" />
-            <span className="font-bold text-lg text-foreground tracking-tight">Forense<span className="text-primary">Doc</span></span>
+          <Link to="/dashboard" className="flex items-center group py-1">
+            <img src={logoImg} alt="ForenseDoc" className="h-8 w-auto object-contain transition-opacity group-hover:opacity-90" />
           </Link>
           <button className="md:hidden text-zinc-400 hover:text-foreground" onClick={() => setSidebarOpen(false)}>
             <X className="w-5 h-5" />

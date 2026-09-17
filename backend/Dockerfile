@@ -4,10 +4,12 @@
 FROM node:20-alpine AS base
 
 # Instalar dependências do sistema para OCR (Tesseract) e PDF
+# python3: Motor de Réplicas (réplica processual), executado por ponte Python.
 RUN apk add --no-cache \
     tesseract-ocr \
     tesseract-ocr-data-por \
     poppler-utils \
+    python3 \
     && rm -rf /var/cache/apk/*
 
 WORKDIR /app

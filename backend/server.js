@@ -4,6 +4,7 @@ import helmet from "helmet";
 import cookieParser from "cookie-parser";
 import "dotenv/config";
 import routes from "./src/routes/index.js";
+import { usaParserProprio } from "./src/utils/uploadRoutes.js";
 import { globalLimiter } from "./src/middleware/rateLimiters.js";
 import { redactUrl, requestContext } from "./src/utils/logRedaction.js";
 import "./src/worker.js";
@@ -90,7 +91,9 @@ app.use(
 // chegava a ser usado.
 const jsonParser = express.json({ limit: "1mb" });
 app.use((req, res, next) => {
-  if (req.path === "/api/analyze") return next();
+  // /api/analyze e as rotas de upload do motor pericial (confronto com o
+  // processo e réplica) aplicam o próprio parser. Ver utils/uploadRoutes.js.
+  if (usaParserProprio(req)) return next();
   return jsonParser(req, res, next);
 });
 app.use(cookieParser());

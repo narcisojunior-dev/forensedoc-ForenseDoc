@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { extractPdfText } from "./pdfService.js";
+import { extractPdfTextDetailed } from "./pdfService.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // Note: OCR_LANG_PATH is relative to the root backend dir, which is two levels up from this file.
@@ -51,6 +51,22 @@ const OCR_MAX_PAGES = Number(process.env.OCR_MAX_PAGES || 20);
 const CUSTO_ESTIMADO_POR_PAGINA_MS = Number(process.env.OCR_COST_PER_PAGE_MS) || 9_000;
 
 /*
+ * ─── Releitura de alta precisão das páginas finais ──────────────────────────
+ *
+ * Motor pericial v2: dossiês de contratação trazem a trilha de auditoria (IP,
+ * porta, carimbo de tempo, GPS) nas duas últimas páginas, em fonte pequena. A
+ * 180 DPI o Tesseract confunde dígitos justamente ali, e um octeto errado muda
+ * a geolocalização do ato. Essas páginas são lidas de novo a 240 DPI ou mais.
+ *
+ * A 240 DPI cada página tem cerca de 1,8x os pixels da leitura normal, e é esse
+ * o peso de cada página relida no orçamento de tempo. Nunca se relê mais páginas
+ * do que o documento tem.
+ */
+const PAGINAS_DE_REFINAMENTO = 2;
+const OCR_REFINE_DPI = String(Math.max(240, Number(process.env.OCR_DPI || 180)));
+const CUSTO_EQUIVALENTE_DO_REFINAMENTO = Math.min(PAGINAS_DE_REFINAMENTO, OCR_MAX_PAGES) * 1.8;
+
+/*
  * ─── O orçamento precisa contar a disputa por CPU ────────────────────────────
  *
  * Corrigir a estimativa por página não bastou. O prazo é tempo de RELÓGIO, mas a
@@ -90,9 +106,10 @@ function fatorContencao() {
  * os dois valores divergirem no primeiro ajuste de `OCR_MAX_PAGES`.
  */
 export function ocrBudgetMs() {
+  const paginas = OCR_MAX_PAGES + CUSTO_EQUIVALENTE_DO_REFINAMENTO;
   return (
     Number(process.env.OCR_TIMEOUT_MS) ||
-    Math.max(60_000, Math.round(OCR_MAX_PAGES * CUSTO_ESTIMADO_POR_PAGINA_MS * fatorContencao()))
+    Math.max(60_000, Math.round(paginas * CUSTO_ESTIMADO_POR_PAGINA_MS * fatorContencao()))
   );
 }
 
@@ -124,10 +141,27 @@ export async function findPdftoppm() {
   throw new Error("pdftoppm não encontrado. Configure PDFTOPPM_PATH ou instale Poppler.");
 }
 
+/**
+ * Faixas de páginas para OCR.
+ *
+ * Com mais páginas que `OCR_MAX_PAGES`, ler só as primeiras deixava de fora o
+ * fim do documento, que é onde ficam a trilha de auditoria e o termo de aceite.
+ * O motor pericial divide o orçamento: 60% no início (qualificação e quadro da
+ * operação) e 40% no fim (assinatura e trilha).
+ */
+export function faixasDeOcr(totalPaginas, maxPaginas = OCR_MAX_PAGES) {
+  const total = Math.max(1, Number(totalPaginas) || maxPaginas);
+  if (total <= maxPaginas) return [[1, total]];
+  const inicio = Math.ceil(maxPaginas * 0.6);
+  const fim = maxPaginas - inicio;
+  return fim > 0 ? [[1, inicio], [total - fim + 1, total]] : [[1, inicio]];
+}
+
 export async function extractPdfTextWithOcr(pdfBuffer) {
-  const baseText = await extractPdfText(pdfBuffer);
+  const extraido = await extractPdfTextDetailed(pdfBuffer);
+  const baseText = extraido.text;
   if (!needsOcr(baseText)) {
-    return { text: baseText, usedOcr: false, ocrPages: 0 };
+    return { text: baseText, usedOcr: false, ocrPages: 0, ocrPageNumbers: [], ocrRefinementPages: [] };
   }
 
   /*
@@ -152,30 +186,44 @@ export async function extractPdfTextWithOcr(pdfBuffer) {
   });
 
   try {
-    return await Promise.race([runOcr(baseText, pdfBuffer, controle), prazo]);
+    return await Promise.race([runOcr(baseText, pdfBuffer, extraido.totalPages, controle), prazo]);
   } finally {
     clearTimeout(timer);
     controle.cancelado = true;
   }
 }
 
-async function runOcr(baseText, pdfBuffer, controle = { cancelado: false }) {
+async function runOcr(baseText, pdfBuffer, totalPaginas, controle = { cancelado: false }) {
   const pdftoppm = await findPdftoppm();
   const tempDir = await mkdtemp(join(tmpdir(), "forensedoc-ocr-"));
   let worker = null;
   try {
     const pdfPath = join(tempDir, "input.pdf");
     const imagePrefix = join(tempDir, "page");
+    const refinePrefix = join(tempDir, "audit-page");
     await writeFile(pdfPath, pdfBuffer);
-    await execFileAsync(
-      pdftoppm,
-      ["-png", "-r", OCR_DPI, "-f", "1", "-l", String(OCR_MAX_PAGES), pdfPath, imagePrefix],
-      { maxBuffer: 1024 * 1024 * 80 },
-    );
+    const total = Math.max(1, Number(totalPaginas) || OCR_MAX_PAGES);
+    for (const [primeira, ultima] of faixasDeOcr(total)) {
+      if (controle.cancelado) break;
+      await execFileAsync(
+        pdftoppm,
+        ["-png", "-r", OCR_DPI, "-f", String(primeira), "-l", String(ultima), pdfPath, imagePrefix],
+        { maxBuffer: 1024 * 1024 * 80 },
+      );
+    }
+    if (!controle.cancelado) {
+      await execFileAsync(
+        pdftoppm,
+        ["-png", "-r", OCR_REFINE_DPI, "-f", String(Math.max(1, total - PAGINAS_DE_REFINAMENTO + 1)), "-l", String(total), pdfPath, refinePrefix],
+        { maxBuffer: 1024 * 1024 * 80 },
+      );
+    }
 
-    const files = (await readdir(tempDir))
-      .filter((file) => file.endsWith(".png"))
-      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    const renderizados = await readdir(tempDir);
+    const ordenar = (a, b) => a.localeCompare(b, undefined, { numeric: true });
+    const files = renderizados.filter((file) => /^page-\d+\.png$/.test(file)).sort(ordenar);
+    const refineFiles = renderizados.filter((file) => /^audit-page-\d+\.png$/.test(file)).sort(ordenar);
+    const numeroDaPagina = (file) => Number(file.match(/(\d+)\.png$/)?.[1]);
 
     worker = await createWorker(OCR_LANG, 1, { langPath: OCR_LANG_PATH });
     controle.worker = worker;
@@ -188,11 +236,18 @@ async function runOcr(baseText, pdfBuffer, controle = { cancelado: false }) {
       const { data } = await worker.recognize(join(tempDir, file));
       ocrText += `\n\n--- OCR ${file} ---\n${data.text || ""}`;
     }
+    for (const file of refineFiles) {
+      if (controle.cancelado) break;
+      const { data } = await worker.recognize(join(tempDir, file));
+      ocrText += `\n\n--- OCR ${file} ---\n${data.text || ""}`;
+    }
 
     return {
       text: `${baseText}\n\n${ocrText}`.trim(),
       usedOcr: true,
       ocrPages: files.length,
+      ocrPageNumbers: files.map(numeroDaPagina).filter(Number.isFinite),
+      ocrRefinementPages: refineFiles.map(numeroDaPagina).filter(Number.isFinite),
     };
   } finally {
     // O timeout pode já ter encerrado este worker; encerrar de novo lança, e a

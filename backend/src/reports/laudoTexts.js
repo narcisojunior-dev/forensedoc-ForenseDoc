@@ -26,6 +26,35 @@ export const NOTA_HASH_SISTEMA =
 export const NOTA_DISTANCIA =
   "A distância geográfica, isoladamente, não determina fraude. Deslocamentos compatíveis com a rotina do cliente, como ir da zona rural à capital do estado, podem ser plenamente legítimos. Este resultado deve ser confrontado com a entrevista do cliente, com a data e hora da assinatura e com a localização do correspondente bancário antes de qualquer conclusão sobre irregularidade.";
 
+// Marco normativo do consignado, escolhido pelo produto classificado.
+//
+// O laudo do dossiê C6 citou a Lei 8.213/1991 e as normas do INSS numa operação
+// de consignado do trabalhador celetista. Para CLT fica só a Lei 10.820/2003,
+// que é segura; a regulamentação do Crédito do Trabalhador (averbação pela
+// CTPS Digital) entra depois de validada pelo jurídico.
+// TODO(jurídico): acrescentar a regulamentação vigente do Crédito do
+// Trabalhador ao grupo CONSIGNADO_CLT.
+const GRUPOS_CONSIGNADO = {
+  CONSIGNADO_INSS: {
+    grupo: "Crédito consignado e benefício do INSS",
+    itens: [
+      ["Lei 10.820/2003 e Decreto 4.840/2003", "Disciplinam a autorização e os limites do desconto de prestações de empréstimo consignado em folha de pagamento e em benefício previdenciário."],
+      ["Lei 8.213/1991, art. 115", "Define as hipóteses e os limites de desconto sobre o valor do benefício previdenciário."],
+      ["Normas do INSS sobre consignações e Resoluções do CNPS", "Regulam margem consignável, formalização e averbação. Verificar a Instrução Normativa vigente na data do contrato."],
+    ],
+  },
+  CONSIGNADO_CLT: {
+    grupo: "Crédito consignado do trabalhador (CLT)",
+    itens: [
+      ["Lei 10.820/2003", "Disciplina a autorização para desconto de prestações de empréstimos em folha de pagamento dos empregados regidos pela CLT, os limites da consignação e as obrigações do empregador na retenção e no repasse."],
+    ],
+  },
+};
+
+// Produto não classificado mantém o grupo anterior, para não retirar
+// fundamentação de documentos que já saíam com ela.
+const GRUPO_CONSIGNADO = GRUPOS_CONSIGNADO.CONSIGNADO_INSS;
+
 // §9 — fundamentação normativa, agrupada por tema.
 export const FUNDAMENTACAO = [
   {
@@ -38,14 +67,7 @@ export const FUNDAMENTACAO = [
       ["Súmula 297 do STJ", "O Código de Defesa do Consumidor é aplicável às instituições financeiras."],
     ],
   },
-  {
-    grupo: "Crédito consignado e benefício do INSS",
-    itens: [
-      ["Lei 10.820/2003 e Decreto 4.840/2003", "Disciplinam a autorização e os limites do desconto de prestações de empréstimo consignado em folha de pagamento e em benefício previdenciário."],
-      ["Lei 8.213/1991, art. 115", "Define as hipóteses e os limites de desconto sobre o valor do benefício previdenciário."],
-      ["Normas do INSS sobre consignações e Resoluções do CNPS", "Regulam margem consignável, formalização e averbação. Verificar a Instrução Normativa vigente na data do contrato."],
-    ],
-  },
+  GRUPO_CONSIGNADO,
   {
     grupo: "Custo Efetivo Total (CET)",
     itens: [
@@ -79,6 +101,19 @@ export const FUNDAMENTACAO = [
     ],
   },
 ];
+
+/**
+ * Fundamentação aplicável ao produto classificado na extração.
+ * CDC e renegociação não recebem grupo de consignado; os demais recebem o do
+ * próprio produto.
+ */
+export function fundamentacaoPara(produtoCodigo) {
+  return FUNDAMENTACAO.flatMap((bloco) => {
+    if (bloco !== GRUPO_CONSIGNADO) return [bloco];
+    if (produtoCodigo === "CDC") return [];
+    return [GRUPOS_CONSIGNADO[produtoCodigo] || GRUPO_CONSIGNADO];
+  });
+}
 
 export const NOTA_FUNDAMENTACAO_RESSALVA =
   "A fundamentação acima é referencial e deve ser ajustada ao caso concreto e à data da contratação. A indicação dos dispositivos não dispensa a conferência da redação vigente de cada norma no momento do contrato.";

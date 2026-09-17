@@ -48,7 +48,7 @@
 
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { extractPdfText } from "../../src/services/pdfService.js";
+import { extractPdfTextDetailed } from "../../src/services/pdfService.js";
 import { heuristicExtractionFromText } from "../../src/services/extractionService.js";
 
 /**
@@ -152,7 +152,7 @@ if (!pdf || !mapaPath || !saida) {
 }
 
 const mapa = JSON.parse(await readFile(mapaPath, "utf8"));
-const bruto = await extractPdfText((await readFile(pdf)).toString("base64"));
+const bruto = (await extractPdfTextDetailed(await readFile(pdf))).text;
 const texto = aplicar(bruto, mapa.substituicoes || {});
 
 const residuo = [

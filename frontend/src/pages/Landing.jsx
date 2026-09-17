@@ -6,6 +6,7 @@ import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { FileSearch, Clock, ShieldCheck, Zap, ChevronRight, CheckCircle2, Loader2 } from "lucide-react";
 import Header from "../components/Layout/Header";
 import { api } from "../lib/axios";
+import logoImg from "../assets/logo.png";
 
 gsap.registerPlugin(useGSAP, ScrollTrigger);
 
@@ -393,7 +394,10 @@ export default function Landing() {
       {/* FOOTER */}
       <footer className="border-t border-surface-border bg-background px-4 py-8">
         <div className="mx-auto flex max-w-5xl flex-col items-center gap-4 text-sm text-zinc-500 sm:flex-row sm:justify-between">
-          <p>© {new Date().getFullYear()} ForenseDoc. Todos os direitos reservados.</p>
+          <div className="flex items-center gap-3">
+            <img src={logoImg} alt="ForenseDoc" className="h-6 w-auto object-contain opacity-75" />
+            <p>© {new Date().getFullYear()} ForenseDoc. Todos os direitos reservados.</p>
+          </div>
 
           {/* Os dois documentos precisam ser alcançáveis SEM login: quem ainda
               não é cliente lê antes de decidir, e o titular de dado que aparece

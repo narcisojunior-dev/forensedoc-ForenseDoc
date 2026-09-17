@@ -161,3 +161,30 @@ export function classifyDeclaredDivergence(km, { referenciaConfirmada = false } 
 
   return { ...faixa, km, ressalva };
 }
+
+/**
+ * Régua de distância suprimida pelo histórico do IP (motor pericial).
+ *
+ * Quando o RIPEstat mostra que o bloco mudou de detentor depois do ato, ou que
+ * pertence a marketplace de aluguel de IPv4, a geolocalização ATUAL não descreve
+ * o acesso na data analisada. Manter "DIVERGÊNCIA GRAVE" nesse caso afirmaria uma
+ * origem estrangeira que, na data do contrato, era uma operadora brasileira.
+ *
+ * O número em km continua visível; o que muda é o veredito, que cede lugar à
+ * nota de proveniência do endereço.
+ */
+export function aplicarHistoricoDoIp(divergencia, historico) {
+  if (!divergencia || !historico?.suppressDistanceRisk) return divergencia;
+  return {
+    ...divergencia,
+    nivel: "suprimido",
+    rotulo: historico.label || "REGISTRO ALTERADO",
+    tom: "neutral",
+    sintese:
+      historico.note ||
+      "O registro do bloco de IP foi alterado depois do ato; a geolocalização atual não descreve o acesso na data analisada.",
+    ressalva:
+      "A distância acima usa a geolocalização atual do bloco e não serve como indício de origem do ato.",
+    suprimidoPorHistorico: true,
+  };
+}

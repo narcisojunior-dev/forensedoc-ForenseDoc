@@ -1,4 +1,5 @@
 import { hasCredit } from "../services/creditService.js";
+import { temCreditoIlimitado } from "../utils/creditPolicy.js";
 
 export async function requireCredit(req, res, next) {
   try {
@@ -6,6 +7,9 @@ export async function requireCredit(req, res, next) {
     if (!tenantId) {
       return res.status(401).json({ error: "Não autenticado ou sem tenantId." });
     }
+
+    // Administrador da plataforma não depende de saldo.
+    if (temCreditoIlimitado(req.auth)) return next();
 
     const canProceed = await hasCredit(tenantId);
     

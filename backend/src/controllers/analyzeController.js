@@ -14,6 +14,9 @@ import { validatePdfPayload } from "../utils/pdfValidation.js";
 import { buildReportPdf } from "../services/reportPdfService.js";
 import { haversineKm } from "../utils/geoUtils.js";
 import { recomputeDerived } from "../services/analysisRecompute.js";
+import { coerenciaBloqueante } from "../engine/coerenciaLaudo.js";
+import { geocodeAddress, reverseGeocode } from "../services/geocodingService.js";
+import { ESTADO_CONFRONTO, avaliarConflitoReferencia, descreverEstadoConfronto } from "../utils/referenciaResidencial.js";
 import {
   CAMPOS_REVISAVEIS,
   validarCampos,
@@ -24,6 +27,7 @@ import { getIpInfo } from "../services/apiService.js";
 import { parsePagination } from "../utils/pagination.js";
 import { redis } from "../utils/redis.js";
 import { putPdf, buildKey, deletePdf } from "../services/objectStorageService.js";
+import { temCreditoIlimitado } from "../utils/creditPolicy.js";
 
 /** O extraído é persistido como texto JSON dentro do resultado. */
 function safeParse(raw) {
@@ -66,6 +70,17 @@ function idempotencyKey(tenantId, base64) {
 
 // Coordenada válida no Brasil (lat ~ -34..5, lon ~ -74..-34). Fora disso é
 // erro de digitação — melhor ignorar que gravar um ponto absurdo.
+/**
+ * Contestação do endereço do instrumento pelo operador. Só vale com
+ * justificativa: é ela que o laudo imprime ao liberar um confronto que o próprio
+ * instrumento contradiz.
+ */
+function parseContestacao(contestado, justificativa) {
+  if (contestado !== true && contestado !== "true") return null;
+  const texto = typeof justificativa === "string" ? justificativa.trim().slice(0, 500) : "";
+  return { contestado: true, justificativa: texto };
+}
+
 function parseCoord(lat, lon) {
   const la = Number(lat);
   const lo = Number(lon);
@@ -92,12 +107,14 @@ const ANALYSIS_LOCK_TTL = Math.ceil(ocrBudgetMs() / 1000) + 120;
 
 export async function analyzePdf(req, res) {
   const { userId, tenantId } = req.auth;
+  // Administrador da plataforma: sem débito e, portanto, sem estorno.
+  const creditoIsento = temCreditoIlimitado(req.auth);
   let lockToken = null;
   let analysis = null;
   let pdfKey = null;
 
   try {
-    const { pdfBase64, filename, homeAddress, homeLat, homeLon } = req.body || {};
+    const { pdfBase64, filename, homeAddress, homeLat, homeLon, homeAddressContested, homeAddressJustification } = req.body || {};
 
     // Valida assinatura e tamanho ANTES de travar o tenant ou debitar crédito.
     const validation = validatePdfPayload(pdfBase64);
@@ -112,6 +129,13 @@ export async function analyzePdf(req, res) {
     // Coordenada confirmada pelo operador (padrão-ouro): se informada e válida,
     // vence a geocodificação automática.
     const homeCoord = parseCoord(homeLat, homeLon);
+    const homeContestacao = parseContestacao(homeAddressContested, homeAddressJustification);
+    if (homeContestacao && homeContestacao.justificativa.length < 15) {
+      return res.status(400).json({
+        error: "Para declarar contestado o endereço do instrumento, escreva a justificativa (pelo menos 15 caracteres). Ela é impressa no laudo.",
+        code: "JUSTIFICATIVA_OBRIGATORIA",
+      });
+    }
 
     // Reenvio do MESMO arquivo dentro da janela curta devolve a análise que já
     // existe, sem criar outra nem cobrar de novo. Verificado antes do semáforo e
@@ -181,6 +205,8 @@ export async function analyzePdf(req, res) {
         },
       });
 
+      if (creditoIsento) return { created, balanceBefore: null };
+
       const { balanceBefore } = await debitCredit(tenantId, userId, created.id, tx);
 
       return { created, balanceBefore };
@@ -213,7 +239,7 @@ export async function analyzePdf(req, res) {
 
     // Cache e alerta só depois do commit: dentro da transação, um rollback
     // deixaria o cache invalidado e o alerta enviado por um débito desfeito.
-    await afterDebitCommit(tenantId, debit.balanceBefore);
+    if (!creditoIsento) await afterDebitCommit(tenantId, debit.balanceBefore);
 
     // Enfileira ANTES de responder: se a fila estiver fora do ar, o crédito
     // debitado precisa voltar em vez de deixar a análise presa em PROCESSING.
@@ -229,7 +255,9 @@ export async function analyzePdf(req, res) {
         lockToken,
         homeAddress: home,
         homeCoord,
+        homeContestacao,
         filename: filename || null,
+        creditoIsento,
       },
       { attempts: 1, removeOnComplete: true, removeOnFail: true }
     );
@@ -250,7 +278,7 @@ export async function analyzePdf(req, res) {
           action: "analysis_started",
           ipAddress: req.ip,
           userAgent: req.headers["user-agent"],
-          metadata: { analysisId: analysis.id, sizeBytes: validation.sizeBytes },
+          metadata: { analysisId: analysis.id, sizeBytes: validation.sizeBytes, creditoIsento },
         },
       })
       .catch((err) => console.error("[Analyze] Falha ao registrar audit log:", err.message));
@@ -273,7 +301,12 @@ export async function analyzePdf(req, res) {
 
     // A análise já existia (e o crédito já saiu) quando a falha aconteceu:
     // estorna para o usuário não pagar por um laudo que nunca rodou.
-    if (analysis) {
+    if (analysis && creditoIsento) {
+      // Nada foi debitado: basta não deixar a análise presa em PROCESSING.
+      await prisma.analysis
+        .update({ where: { id: analysis.id }, data: { status: "ERROR" } })
+        .catch((err) => console.error("[Analyze] Falha ao marcar análise isenta como erro:", err.message));
+    } else if (analysis) {
       await refundCredit(tenantId, userId, analysis.id, "Falha ao enfileirar a análise").catch(
         (refundError) => {
           console.error("[Analyze] Falha ao estornar crédito:", refundError.message);
@@ -341,6 +374,25 @@ export async function correctAnalysisGeo(req, res) {
     }
 
     const result = { ...analysis.result };
+    const extraido = safeParse(result.text) || {};
+
+    // A coordenada do operador passa pela mesma conferência do endereço digitado
+    // na análise: em outra UF ou longe do município do instrumento, só entra
+    // com o endereço do instrumento declarado contestado e justificado.
+    const contestacao = parseContestacao(req.body?.contestado, req.body?.justificativa);
+    const conflito = await avaliarConflitoReferencia({
+      cliente: extraido.cliente || {},
+      enderecoManual: null,
+      pontoManual: coord,
+      servicos: { geocodeAddress, reverseGeocode },
+    });
+    if (conflito && !(contestacao && contestacao.justificativa.length >= 15)) {
+      return res.status(409).json({
+        error: `A coordenada conflita com o endereço do instrumento: ${conflito.descricao}. Para usá-la, declare o endereço do instrumento contestado e escreva a justificativa (pelo menos 15 caracteres).`,
+        code: "CONFLITO_REFERENCIA",
+        conflito,
+      });
+    }
 
     // Substitui a residência pela coordenada confirmada e recalcula distâncias.
     result.home = {
@@ -354,7 +406,14 @@ export async function correctAnalysisGeo(req, res) {
         source: "manual",
         cityMatch: true,
       },
+      estado_confronto: conflito ? ESTADO_CONFRONTO.LIBERADO_PELO_OPERADOR : ESTADO_CONFRONTO.DISPONIVEL,
+      conflito,
+      justificativa: conflito ? contestacao.justificativa : null,
+      instrumento: result.home?.instrumento || null,
+      endereco_literal: result.home?.endereco_literal || null,
+      endereco_nao_informado: Boolean(result.home?.endereco_nao_informado),
     };
+    result.home.alerta = descreverEstadoConfronto(result.home);
 
     /*
      * Recalcula TUDO que deriva da coordenada, e não só as distâncias.
@@ -365,7 +424,7 @@ export async function correctAnalysisGeo(req, res) {
      * era de quando a distância era 800. Número e veredito se contradiziam
      * dentro da mesma linha.
      */
-    const corrigido = recomputeDerived(result, safeParse(result.text) || {});
+    const corrigido = recomputeDerived(result, extraido);
     corrigido.geoCorrectedAt = new Date().toISOString();
 
     await prisma.analysis.update({ where: { id: analysis.id }, data: { result: corrigido } });
@@ -378,7 +437,7 @@ export async function correctAnalysisGeo(req, res) {
           action: "analysis_geo_corrected",
           ipAddress: req.ip,
           userAgent: req.headers["user-agent"],
-          metadata: { analysisId: analysis.id, lat: coord.lat, lon: coord.lon },
+          metadata: { analysisId: analysis.id, lat: coord.lat, lon: coord.lon, conflitoLiberado: Boolean(conflito) },
         },
       })
       .catch(() => {});
@@ -399,6 +458,13 @@ export async function getAnalysisPdf(req, res) {
     }
     if (analysis.status !== "COMPLETED" || !analysis.result) {
       return res.status(409).json({ error: "Laudo indisponível: análise não concluída.", status: analysis.status });
+    }
+    if (coerenciaBloqueante() && analysis.result.coerencia?.length) {
+      return res.status(409).json({
+        error: "Laudo com contradição entre seções. Revise os campos indicados antes de emitir.",
+        code: "COERENCIA",
+        coerencia: analysis.result.coerencia,
+      });
     }
 
     res.setHeader("Content-Type", "application/pdf");
