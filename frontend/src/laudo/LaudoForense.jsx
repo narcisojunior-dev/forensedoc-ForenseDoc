@@ -989,7 +989,14 @@ export default function LaudoForense({ report }) {
                 // teto agora só existe para preservar legibilidade em
                 // documentos com dezenas de imagens, não para esconder a
                 // penúltima/última de um inventário pequeno.
-                const listed = (img.imagens || []).slice(0, 100);
+                // Corpo do laudo: só fotografia, biometria e documento. Logotipos,
+                // fios e máscaras alfa ocupavam oito páginas do laudo do dossiê C6
+                // com a mesma observação repetida; o detalhe vai para o Anexo II.
+                const relevante = (item) => item.biometricaProvavel || item.classificacao === "imagem documental";
+                const listed = (img.imagens || []).filter(relevante);
+                const templates = (img.imagens || []).filter((item) => !relevante(item));
+                const templatesPorClasse = templates.reduce((acc, item) => ({ ...acc, [item.classificacao || "outra"]: (acc[item.classificacao || "outra"] || 0) + 1 }), {});
+                const gruposRelevantes = (img.grupos_repetidos || []).filter((group) => (group.imagens || []).some(relevante));
                 const captures = (img.imagens || []).filter((item) => item.biometricaProvavel);
                 return (
                   <Section title="§ 4.2 · Imagens, selfie e prova de vida" danger={critical}>
@@ -1052,10 +1059,20 @@ export default function LaudoForense({ report }) {
                       </>
                     )}
 
-                    {img.grupos_repetidos?.length > 0 && (
+                    {templates.length > 0 && (
+                      <div className="note">
+                        {(() => {
+                          const repetidos = (img.grupos_repetidos?.length || 0) - gruposRelevantes.length;
+                          const classes = Object.entries(templatesPorClasse).map(([classe, n]) => `${n} ${classe}`).join("; ");
+                          return `${templates.length === 1 ? "1 imagem de template, sem relevância" : `${templates.length} imagens de template, sem relevância`} para a perícia (${classes})${repetidos ? `, em ${repetidos === 1 ? "1 grupo repetido" : `${repetidos} grupos repetidos`}` : ""}. Inventário completo no Anexo II.`;
+                        })()}
+                      </div>
+                    )}
+
+                    {gruposRelevantes.length > 0 && (
                       <>
                         <div className="sub-head">Imagens repetidas byte a byte</div>
-                        {img.grupos_repetidos.map((group, index) => (
+                        {gruposRelevantes.map((group, index) => (
                           <div key={`${group.sha256}-${index}`} className="ip-block" style={{ border: "1px solid rgba(133,149,168,0.35)", background: "rgba(133,149,168,0.07)" }}>
                             <div className="ip-head">
                               <div className="ip-id" style={{ color: "#d4dfec" }}>Grupo repetido #{index + 1}</div>
@@ -1078,7 +1095,7 @@ export default function LaudoForense({ report }) {
 
                     {listed.length > 0 && (
                       <>
-                        <div className="sub-head">Inventário técnico das imagens</div>
+                        <div className="sub-head">Imagens relevantes para a perícia</div>
                         <div className="audit-table-wrap">
                           <table className="audit-table">
                             <colgroup>
@@ -1101,9 +1118,7 @@ export default function LaudoForense({ report }) {
                             </tbody>
                           </table>
                         </div>
-                        {img.imagens.length > listed.length && (
-                          <div className="note">Foram listadas {img.imagens.length} imagens; a tabela mostra as primeiras {listed.length} para preservar legibilidade no PDF. Os achados acima consideram o conjunto completo.</div>
-                        )}
+
                       </>
                     )}
 
@@ -1513,6 +1528,33 @@ export default function LaudoForense({ report }) {
                       <div className="norm-sint" style={{ color: "var(--muted)", fontSize: 12 }}>Finalidade: {q.finalidade}</div>
                     </div>
                   ))}
+                </Section>
+              )}
+
+              {/* Anexo II: inventário técnico completo das imagens (FEAT-09). */}
+              {report.extracted.imagens_pdf?.imagens?.length > 0 && (
+                <Section title="Anexo II · Inventário técnico de imagens">
+                  <div className="note" style={{ marginTop: 0 }}>
+                    Todas as imagens listadas por pdfimages, com classificação e SHA-256 individual. Os achados do § 4.2 consideram este conjunto completo.
+                  </div>
+                  <div className="audit-table-wrap">
+                    <table className="audit-table">
+                      <thead><tr><th>Pág.</th><th>Img</th><th>Tipo</th><th>Dimensão</th><th>Classe</th><th>Tam.</th><th>SHA-256</th></tr></thead>
+                      <tbody>
+                        {report.extracted.imagens_pdf.imagens.map((item, index) => (
+                          <tr key={`anexo-${item.page}-${item.num}-${index}`}>
+                            <td>{item.page}</td>
+                            <td>{item.num}</td>
+                            <td>{item.type}</td>
+                            <td className="mono-cell">{item.width} x {item.height}</td>
+                            <td>{item.classificacao || item.enc}</td>
+                            <td>{item.size}</td>
+                            <td className="mono-cell">{shortHash(item.sha256 || "-", 14, 8)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </Section>
               )}
 

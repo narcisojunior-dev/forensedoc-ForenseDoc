@@ -1,3 +1,4 @@
+import { ordenarAchados } from "./eixosAchado.js";
 // Sumário executivo de irregularidades (placar de gravidade, confronto GPS x IP,
 // triagem de IPs e diligências). Portado do motor de geração, onde era calculado
 // no navegador; no SaaS é calculado no servidor e persistido com o laudo.
@@ -527,8 +528,10 @@ export function buildIrregularitySummary(report = {}) {
     addDiligence("review", "Revisão humana do conjunto documental", "Conferir o contrato original e os anexos antes de concluir pela ausência de irregularidades materiais.");
   }
 
-  const severityRank = { ALTA: 0, "MÉDIA": 1, INFO: 2 };
-  const orderedFindings = [...findings].sort((a, b) => severityRank[a.severity] - severityRank[b.severity]);
+  // Gravidade e, dentro dela, eixo da tese (ver eixosAchado.js). No laudo do
+  // dossiê C6, "metadados descritivos ausentes" saía antes da falta de prova do
+  // crédito e da fragilidade biométrica.
+  const orderedFindings = ordenarAchados(findings, { codigo: (f) => f.key, gravidade: (f) => f.severity });
   const displayFindings = orderedFindings.slice(0, 15);
   if (favorable.length) displayFindings.push(favorable[0]);
   if (!displayFindings.length) {

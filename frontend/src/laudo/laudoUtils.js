@@ -1,3 +1,5 @@
+import { ordenarAchados } from "./eixosAchado.js";
+
 // Utilitários de apresentação do laudo técnico pericial. Portados do motor de
 // geração (frontend/src/ForenseDoc.jsx) sem alteração de regra.
 
@@ -99,18 +101,21 @@ export function reportIssues(extracted = {}) {
   const structured = Array.isArray(extracted.achados_irregularidade) ? extracted.achados_irregularidade : [];
   const legacy = structured.length ? [] : (extracted.evidencias_irregularidade || []);
   const seen = new Set();
-  return [...structured, ...legacy].map(normalizeIssue).filter((issue) => {
+  const issues = [...structured, ...legacy].map(normalizeIssue).filter((issue) => {
     if (!issue.titulo && !issue.texto) return false;
     if (seen.has(issue.codigo)) return false;
     seen.add(issue.codigo);
     return true;
   });
+  return ordenarAchados(issues);
 }
 
 export function issueBucket(issue) {
   const code = String(issue.codigo || "");
   const text = `${issue.titulo || ""} ${issue.texto || ""}`;
   if (/FIN3/i.test(code) || /\bcar[eê]ncia\b|contexto econ[oô]mico/i.test(text)) return "contexto";
+  if (/^(LIB|BIO|ASS|TRL|TZ)/.test(code)) return "lacunas";
+  if (/^SEG/.test(code)) return "instrumento";
   if (/INT|LOG|CUS|IMG|OCR|assinatura|hash|c[oó]digo|reimpress|selfie|biometr|trilha|cust[oó]dia/i.test(`${code} ${text}`)) return "lacunas";
   return "instrumento";
 }

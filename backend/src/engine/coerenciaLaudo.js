@@ -17,14 +17,20 @@
  *
  * ─── Modo alerta ─────────────────────────────────────────────────────────────
  *
- * Por enquanto registra em `result.coerencia` e no log, sem bloquear a emissão.
- * Bloquear exige política de estorno do crédito, que ainda não foi decidida.
+ * Registra em `result.coerencia`, no log e na tela do laudo (fora do PDF). Com
+ * `COERENCIA_BLOQUEANTE=true`, a exportação em PDF fica bloqueada enquanto houver
+ * contradição. O padrão é desligado: bloquear sem política de estorno do crédito
+ * puniria o cliente por defeito do sistema.
  */
+
+export function coerenciaBloqueante() {
+  return process.env.COERENCIA_BLOQUEANTE === "true";
+}
 
 const normalizar = (valor) =>
   String(valor || "")
     .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
+    .replace(/[\u0300-\u036f]/g, "")
     .toUpperCase()
     .trim();
 
@@ -113,6 +119,33 @@ const REGRAS = [
       return (extracted.achados_irregularidade || []).some((a) => a.codigo === "CAD2")
         ? "achado CAD2 (benefício do INSS) em consignado CLT"
         : null;
+    },
+  },
+  {
+    id: "seguro-planilha-x-bloco",
+    descricao: "Seguro cobrado na planilha sem bloco de seguro prestamista no laudo",
+    verificar(_result, extracted) {
+      const seguros = String(extracted.contrato?.seguros || "").replace(/\D/g, "");
+      if (!seguros || Number(seguros) === 0) return null;
+      const temProposta = (extracted.documentos_logicos?.documentos || []).some((d) => d.tipo === "SEGURO");
+      return temProposta && !extracted.seguro_prestamista ? `planilha cobra ${extracted.contrato.seguros} de seguro e o arquivo tem proposta, mas não há bloco de seguro` : null;
+    },
+  },
+  {
+    id: "ass1-x-bloco-no-instrumento",
+    descricao: "Achado de instrumento sem assinatura com bloco de assinatura localizado no instrumento",
+    verificar(_result, extracted) {
+      if (!(extracted.achados_irregularidade || []).some((a) => a.codigo === "ASS1")) return null;
+      const principal = (extracted.documentos_logicos?.documentos || []).find((d) => d.tipo === "INSTRUMENTO_PRINCIPAL");
+      return principal?.blocosAssinatura?.length ? `ASS1 emitido com bloco de assinatura na pág. ${principal.blocosAssinatura[0].pagina} do instrumento` : null;
+    },
+  },
+  {
+    id: "biometria-achado-x-bloco",
+    descricao: "Achado biométrico sem o bloco do artefato que o fundamenta",
+    verificar(_result, extracted) {
+      const temAchado = (extracted.achados_irregularidade || []).some((a) => a.codigo === "BIO2");
+      return temAchado && !extracted.imagem_biometrica ? "BIO2 sem imagem_biometrica" : null;
     },
   },
 ];

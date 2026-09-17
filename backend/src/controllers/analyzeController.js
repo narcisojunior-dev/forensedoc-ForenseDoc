@@ -14,6 +14,7 @@ import { validatePdfPayload } from "../utils/pdfValidation.js";
 import { buildReportPdf } from "../services/reportPdfService.js";
 import { haversineKm } from "../utils/geoUtils.js";
 import { recomputeDerived } from "../services/analysisRecompute.js";
+import { coerenciaBloqueante } from "../engine/coerenciaLaudo.js";
 import { geocodeAddress, reverseGeocode } from "../services/geocodingService.js";
 import { ESTADO_CONFRONTO, avaliarConflitoReferencia, descreverEstadoConfronto } from "../utils/referenciaResidencial.js";
 import {
@@ -456,6 +457,13 @@ export async function getAnalysisPdf(req, res) {
     }
     if (analysis.status !== "COMPLETED" || !analysis.result) {
       return res.status(409).json({ error: "Laudo indisponível: análise não concluída.", status: analysis.status });
+    }
+    if (coerenciaBloqueante() && analysis.result.coerencia?.length) {
+      return res.status(409).json({
+        error: "Laudo com contradição entre seções. Revise os campos indicados antes de emitir.",
+        code: "COERENCIA",
+        coerencia: analysis.result.coerencia,
+      });
     }
 
     res.setHeader("Content-Type", "application/pdf");

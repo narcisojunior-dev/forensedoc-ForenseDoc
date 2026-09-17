@@ -162,8 +162,8 @@ export function analisarTrilhaEventos({ texto, segmentacao, ufEmissao, dataHoraA
       "MÉDIA",
       "Eventos da trilha sem IP ou sem geolocalização",
       `A trilha registra IP e geolocalização em parte dos eventos, mas ${[
-        algumComIp && semIp.length ? `${semIp.length} evento(s) não têm IP (${semIp.map((e) => e.nome).join("; ")})` : null,
-        algumComGeo && semGeo.length ? `${semGeo.length} evento(s) não têm geolocalização (${semGeo.map((e) => e.nome).join("; ")})` : null,
+        algumComIp && semIp.length ? `${semIp.length === 1 ? "1 evento não tem" : `${semIp.length} eventos não têm`} IP (${semIp.map((e) => e.nome).join("; ")})` : null,
+        algumComGeo && semGeo.length ? `${semGeo.length === 1 ? "1 evento não tem" : `${semGeo.length} eventos não têm`} geolocalização (${semGeo.map((e) => e.nome).join("; ")})` : null,
       ].filter(Boolean).join(" e ")}. Os registros ausentes justamente nas etapas iniciais impedem vincular o acesso à plataforma ao mesmo aparelho e local do aceite.`
     );
   }

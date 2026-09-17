@@ -24,7 +24,9 @@ async function waitForReportImages(el) {
 }
 
 export function validateRenderableReport(el) {
-  const text = (el?.innerText || "").replace(/\s+/g, " ");
+  // jsdom não implementa innerText: sem o textContent, a higiene passava vazia
+  // em todos os testes e não protegia nada.
+  const text = (el?.innerText ?? el?.textContent ?? "").replace(/\s+/g, " ");
   const prohibited = [
     [/\b[A-Z][A-Z0-9]*_[A-Z0-9_]+\b/, "enum interno cru"],
     [/\b(CET1|FIN\d|IMG\d|INT\d|TRB\d|CAD\d|CUS\d|LOG\d)\s+(ALTA|MEDIA|MÉDIA|MÉDIO|INFO|CRITICO|CRÍTICO)\s*:/, "código de achado em prosa"],

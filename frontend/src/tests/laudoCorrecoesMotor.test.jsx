@@ -82,6 +82,26 @@ describe("laudo com as correções do motor", () => {
     expect(t).toContain('Localizado e vazio no instrumento: "Nao Informado, SD"');
   });
 
+  it("inventário de imagens: corpo só com as relevantes, detalhe no Anexo II", () => {
+    const extracted = JSON.parse(resultado.text);
+    extracted.imagens_pdf = {
+      disponivel: true,
+      total: 3,
+      imagens: [
+        { page: 1, num: 1, type: "image", width: 360, height: 640, classificacao: "fotografia/biometria provável", biometricaProvavel: true, size: "38.4K", sha256: "A".repeat(64) },
+        { page: 2, num: 2, type: "smask", width: 2, height: 2, classificacao: "máscara alfa", size: "12B", sha256: "B".repeat(64) },
+        { page: 3, num: 3, type: "image", width: 242, height: 64, classificacao: "logotipo/template", size: "7440B", sha256: "C".repeat(64) },
+      ],
+      grupos_repetidos: [],
+      achados: [],
+    };
+    const r = montarRelatorio({ analysisId: "a1", result: { ...resultado, text: JSON.stringify(extracted) } });
+    const { container } = render(<LaudoForense report={r} />);
+    expect(container.textContent).toContain("2 imagens de template, sem relevância para a perícia");
+    expect(container.textContent).toContain("Anexo II · Inventário técnico de imagens");
+    expect(() => validateRenderableReport(container)).not.toThrow();
+  });
+
   it("continua passando na higiene de texto exigida antes da exportação", () => {
     const { container } = render(<LaudoForense report={report} />);
     expect(() => validateRenderableReport(container)).not.toThrow();

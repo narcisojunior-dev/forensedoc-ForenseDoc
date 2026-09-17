@@ -58,7 +58,7 @@ export async function analisarDocumento({
   if (imagensBiometricas.length && fallback.assinatura) {
     fallback.assinatura.metodos_mencionados_clausulado = (fallback.assinatura.metodos_mencionados_clausulado || [])
       .filter((metodo) => !/biometr/i.test(metodo));
-    const metodo = `Artefato biométrico no arquivo: ${imagensBiometricas.length} imagem(ns) classificada(s) como fotografia/biometria provável`;
+    const metodo = `Artefato biométrico no arquivo: ${imagensBiometricas.length === 1 ? "1 imagem classificada" : `${imagensBiometricas.length} imagens classificadas`} como fotografia ou biometria provável`;
     fallback.assinatura.metodos_autenticacao = [...(fallback.assinatura.metodos_autenticacao || []), metodo];
   }
 

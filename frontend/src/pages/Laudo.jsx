@@ -88,7 +88,14 @@ export default function Laudo() {
     }
   };
 
+  const contradicoes = analise?.result?.coerencia || [];
+  const exportacaoBloqueada = Boolean(analise?.result?.coerencia_bloqueante) && contradicoes.length > 0;
+
   const gerarPdf = async () => {
+    if (exportacaoBloqueada) {
+      toast.error("O laudo tem contradição entre seções. Revise os campos indicados antes de gerar o PDF.");
+      return;
+    }
     try {
       await exportarLaudoPdf(setPdfBusy, setPdfDownload);
     } catch (err) {
@@ -169,6 +176,21 @@ export default function Laudo() {
 
       {/* Ferramentas do operador: fora da captura do PDF. */}
       <div className="space-y-4" data-html2canvas-ignore="true">
+        {contradicoes.length > 0 && (
+          <div className="rounded-xl border border-red-500/30 bg-red-500/[0.05] p-4">
+            <div className="mb-2 flex items-center gap-2 text-[13px] font-bold uppercase tracking-wider text-red-400">
+              <AlertTriangle className="h-4 w-4" />
+              {exportacaoBloqueada ? "Exportação bloqueada: contradição entre seções" : "Atenção: contradição entre seções do laudo"}
+            </div>
+            <ul className="list-disc space-y-1 pl-5 text-[12.5px] leading-relaxed text-zinc-300">
+              {contradicoes.map((c) => (
+                <li key={c.regra}>
+                  <span className="font-medium text-zinc-200">{c.descricao}.</span> {c.detalhe}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         <RevisaoCampos
           analysisId={id}
           extracted={report.extracted}

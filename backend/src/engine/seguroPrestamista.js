@@ -179,7 +179,7 @@ function avaliarSeguro(seguro, contrato) {
   // SEG3 e SEG4: estipulante e beneficiário iguais ao credor.
   const credorRaiz = raizCnpj(contrato.cnpj_instituicao);
   const estipulanteRaiz = raizCnpj(seguro.estipulante?.cnpj);
-  const normal = (v) => String(v || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase();
+  const normal = (v) => String(v || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
   const credorNome = normal(contrato.banco).replace(/\bBANCO\b|\bS\.?A\.?\b/g, "").trim();
   const estipulanteIgualCredor = Boolean(
     (credorRaiz && estipulanteRaiz && credorRaiz === estipulanteRaiz)

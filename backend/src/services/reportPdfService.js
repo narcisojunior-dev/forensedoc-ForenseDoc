@@ -84,6 +84,7 @@ export async function buildReportPdf(analysis, result) {
   sectionQuesitos(ctx, extracted, result);
   sectionLegal(ctx, extracted);
   sectionExecutiveSummary(ctx, result.sumarioIrregularidades, result.reportId);
+  sectionImageAnnex(ctx, extracted);
   legalNotice(ctx, timestamp);
 
   paintFooters(doc, result.hashes?.sha256);
@@ -959,8 +960,12 @@ function sectionDigitalSignature(ctx, metadata, extracted) {
     if (!imagens.disponivel) {
       paragraph(ctx, imagens.observacao || "Inventário de imagens indisponível.", { color: MUTED, size: 8.5 });
     } else {
+      const lista = imagens.imagens || [];
+      const templates = lista.filter((i) => !i.biometricaProvavel && i.classificacao !== "imagem documental");
       field(ctx, "Imagens listadas", imagens.total ?? 0);
-      field(ctx, "Fotografia / biometria provável", (imagens.imagens || []).filter((i) => i.biometricaProvavel).length);
+      field(ctx, "Fotografia / biometria provável", lista.filter((i) => i.biometricaProvavel).length);
+      field(ctx, "Imagens documentais", lista.filter((i) => i.classificacao === "imagem documental").length);
+      field(ctx, "Elementos de template (logotipos, fios, máscaras)", `${templates.length} · detalhe no anexo técnico`);
       field(ctx, "Grupos de imagens idênticas", imagens.grupos_repetidos?.length ?? 0);
       for (const achado of imagens.achados || []) {
         paragraph(ctx, `${achado.titulo}. ${achado.detalhe}`, { size: 8.5 });
@@ -1051,6 +1056,23 @@ function sectionBiometricArtifact(ctx, extracted) {
   field(ctx, "Imagens faciais no arquivo", b.contagem_faciais);
   if (b.dados_do_processo_ausentes?.length) field(ctx, "Não apresentado pelo dossiê", b.dados_do_processo_ausentes.join(", "));
   if (b.achado) paragraph(ctx, b.achado.texto, { color: DANGER, size: 9 });
+}
+
+/** Anexo técnico: inventário completo de imagens, fora do corpo do laudo. */
+function sectionImageAnnex(ctx, extracted) {
+  const lista = extracted.imagens_pdf?.imagens || [];
+  if (!lista.length) return;
+  ctx.doc.addPage();
+  heading(ctx, "Anexo técnico · Inventário de imagens");
+  paragraph(ctx, "Todas as imagens listadas por pdfimages, com classificação e SHA-256 individual.", { color: MUTED, size: 8.5 });
+  for (const item of lista) {
+    if (ctx.doc.y > ctx.doc.page.height - 90) ctx.doc.addPage();
+    ctx.doc.fontSize(7.5).font("Courier").fillColor(INK).text(
+      `pág. ${item.page} · img ${item.num} · ${item.type} · ${item.width}x${item.height} · ${item.classificacao || item.enc} · ${item.size} · ${String(item.sha256 || "-").slice(0, 16)}`,
+      { width: ctx.contentWidth }
+    );
+  }
+  ctx.doc.font("Helvetica");
 }
 
 /** § 2.1 — dados econômicos complementares e aferição matemática. */

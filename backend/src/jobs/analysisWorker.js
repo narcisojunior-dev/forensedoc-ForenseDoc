@@ -10,7 +10,7 @@ import { cleanPdfBase64 } from "../utils/stringUtils.js";
 import { buildCustodyChain } from "../reports/custodyChain.js";
 import { getPdf } from "../services/objectStorageService.js";
 import { analisarDocumento } from "../engine/analisarDocumento.js";
-import { verificarCoerencia } from "../engine/coerenciaLaudo.js";
+import { verificarCoerencia, coerenciaBloqueante } from "../engine/coerenciaLaudo.js";
 import { buildSummaryForResult } from "../services/analysisRecompute.js";
 
 function fileHashes(buffer) {
@@ -101,6 +101,7 @@ export async function processAnalysis(job) {
     result.sumarioIrregularidades = buildSummaryForResult(result, fallback);
     // Modo alerta: registra contradições entre seções sem bloquear a emissão.
     result.coerencia = verificarCoerencia(result, fallback);
+    result.coerencia_bloqueante = coerenciaBloqueante();
     if (result.coerencia.length) {
       console.warn(`[AnalysisWorker] ${result.coerencia.length} contradição(ões) no laudo ${analysisId}:`, result.coerencia.map((c) => c.regra).join(", "));
     }

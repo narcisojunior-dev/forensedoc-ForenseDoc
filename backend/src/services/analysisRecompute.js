@@ -2,7 +2,7 @@ import { haversineKm } from "../utils/geoUtils.js";
 import { describeIpDivergence, classifyDeclaredDivergence, aplicarHistoricoDoIp } from "../utils/geoDivergence.js";
 import { buildCustodyChain } from "../reports/custodyChain.js";
 import { buildIrregularitySummary } from "../engine/irregularitySummary.js";
-import { verificarCoerencia } from "../engine/coerenciaLaudo.js";
+import { verificarCoerencia, coerenciaBloqueante } from "../engine/coerenciaLaudo.js";
 
 /**
  * Sumário executivo do motor pericial (placar de gravidade, GPS x IP,
@@ -118,6 +118,7 @@ export function recomputeDerived(result, extracted) {
     ...recalculado,
     sumarioIrregularidades,
     coerencia: verificarCoerencia({ ...recalculado, sumarioIrregularidades }, extracted),
+    coerencia_bloqueante: coerenciaBloqueante(),
     // A completude muda quando um elemento que faltava passa a existir, e é
     // justamente esse o efeito de o operador preencher um campo.
     cadeiaCustodia: buildCustodyChain(
