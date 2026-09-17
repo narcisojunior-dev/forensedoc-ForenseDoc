@@ -67,14 +67,19 @@ export async function buildReportPdf(analysis, result) {
   sectionReview(ctx, result);
   sectionIdentity(ctx, result, extracted);
   sectionMetadata(ctx, result.metadata);
+  sectionDigitalSignature(ctx, result.metadata, extracted);
   sectionContract(ctx, extracted);
+  sectionEconomics(ctx, extracted);
   sectionClient(ctx, extracted);
   sectionSignature(ctx, extracted, result);
+  sectionContractingTrail(ctx, extracted);
   sectionGeo(ctx, result, { mapaIpResidencia, mapaResidenciaDeclarado });
   sectionIrregularities(ctx, extracted);
+  sectionProcessComparison(ctx, result.processComparison);
   sectionRemarks(ctx, extracted);
   sectionQuesitos(ctx, extracted, result);
   sectionLegal(ctx);
+  sectionExecutiveSummary(ctx, result.sumarioIrregularidades, result.reportId);
   legalNotice(ctx, timestamp);
 
   paintFooters(doc, result.hashes?.sha256);
@@ -610,6 +615,7 @@ function sectionGeo(ctx, result, mapas = {}) {
     field(ctx, "Coordenada declarada", `${cg.lat}, ${cg.lon}`, { mono: true });
     field(ctx, "   Origem da coordenada", `${cg.fonte || "não informada"} (precisão ${precisionText(cg)})`);
     if (cg.dataHora) field(ctx, "   Data / hora do registro", cg.dataHora);
+    if (cg.municipio) field(ctx, "   Município do local declarado", `${cg.municipio}${cg.uf ? `/${cg.uf}` : ""}`);
 
     // Régua PRÓPRIA deste confronto. `riskFromDistance` (50/300/1000 km) é
     // calibrada para geolocalização de IP e rotulava 1,47 km como "RISCO BAIXO"
@@ -784,6 +790,9 @@ function sectionIpTrace(ctx, result) {
     );
     if (ip.geo.isp) field(ctx, "   Operadora (ISP)", ip.geo.isp);
     field(ctx, "   Fonte da geolocalização", ip.geo.source || "não informada");
+    // Motor pericial v2: registro do bloco na data do ato (RIPEstat).
+    if (ip.historico?.label) field(ctx, "   Registro do bloco na data do ato", ip.historico.label);
+    if (ip.historico?.note) paragraph(ctx, ip.historico.note, { color: MUTED, size: 8.5 });
 
     // Confronto com a referência do operador — o coração do § 5.1.
     const dr = ip.divergenciaResidencia;
@@ -817,7 +826,25 @@ function sectionIpTrace(ctx, result) {
  */
 function sectionIrregularities(ctx, extracted) {
   const evs = extracted.evidencias_irregularidade || [];
-  heading(ctx, "§ 6 · Evidências de irregularidade", { danger: evs.length > 0 });
+  const achados = Array.isArray(extracted.achados_irregularidade) ? extracted.achados_irregularidade : [];
+  heading(ctx, "§ 6 · Evidências de irregularidade", { danger: evs.length > 0 || achados.length > 0 });
+
+  // Motor pericial v2: achado estruturado com código e gravidade.
+  if (achados.length) {
+    for (const achado of achados) {
+      reserve(ctx, 110);
+      const { doc, contentWidth } = ctx;
+      const grave = /CR[IÍ]TIC|ALTA|ALTO/i.test(achado.gravidade || "");
+      doc
+        .fontSize(9.5)
+        .font("Helvetica-Bold")
+        .fillColor(grave ? DANGER : INK)
+        .text(`${achado.codigo} · ${achado.gravidade || ""} · ${achado.titulo}`, MARGIN, doc.y, { width: contentWidth });
+      if (achado.texto) paragraph(ctx, achado.texto, { size: 9 });
+      else doc.moveDown(0.3);
+    }
+    return;
+  }
 
   if (!evs.length) {
     paragraph(
@@ -835,6 +862,255 @@ function sectionIrregularities(ctx, extracted) {
     doc.fillColor(INK).text(ev, { width: contentWidth });
     doc.moveDown(0.2);
   }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Motor pericial v2
+// ─────────────────────────────────────────────────────────────
+
+const PROCEDENCIA_PDF = {
+  NATIVO_PROVAVEL: "arquivo nativo provável",
+  RE_RENDERIZACAO_JUDICIAL: "re-renderizado por sistema processual",
+  REIMPRESSAO_POSTERIOR_PROVAVEL: "reimpressão posterior provável",
+  ARQUIVO_DERIVADO: "arquivo derivado",
+};
+
+/** § 1.2 — assinatura digital incorporada, proveniência e imagens. */
+function sectionDigitalSignature(ctx, metadata, extracted) {
+  const ds = metadata?.digitalSignature;
+  const imagens = extracted.imagens_pdf;
+  if (!ds && !imagens) return;
+  heading(ctx, "§ 1.2 · Assinatura digital, proveniência e imagens do arquivo");
+
+  if (ds) {
+    badge(ctx, "Assinatura criptográfica incorporada", ds.estado || "INDETERMINADO", ds.estado === "PRESENTE");
+    if (ds.motivo) paragraph(ctx, ds.motivo, { color: MUTED, size: 8.5 });
+    if (ds.procedencia?.procedencia) {
+      field(ctx, "Proveniência do arquivo", PROCEDENCIA_PDF[ds.procedencia.procedencia] || ds.procedencia.procedencia);
+      if (ds.procedencia.indicios?.length) field(ctx, "Indícios", ds.procedencia.indicios.join(" · "));
+      if (ds.procedencia.mensagem) paragraph(ctx, ds.procedencia.mensagem, { size: 8.5 });
+    }
+    if (ds.catalog) {
+      field(ctx, "Formulário AcroForm", ds.catalog.acroform);
+      field(ctx, "Atualizações incrementais", `${ds.catalog.incrementalUpdates ?? 0} (${ds.catalog.eofCount ?? 0} marca(s) %%EOF)`);
+    }
+    for (const sig of ds.pdfsig?.assinaturas || []) {
+      reserve(ctx, 120);
+      subheading(ctx, `Assinatura #${sig.numero}${sig.campo ? ` · ${sig.campo}` : ""}`);
+      field(ctx, "   Signatário (CN)", sig.signatario_cn);
+      field(ctx, "   Data da assinatura", sig.data_assinatura);
+      field(ctx, "   Algoritmo de resumo", sig.algoritmo_resumo);
+      field(ctx, "   Validação da assinatura", sig.validacao_assinatura);
+      field(ctx, "   Validação do certificado", sig.validacao_certificado);
+      if (sig.coberturaPercentual != null) {
+        field(ctx, "   Cobertura do documento", `${String(sig.coberturaPercentual).replace(".", ",")}%`);
+      }
+    }
+    for (const alerta of ds.alerts || []) {
+      paragraph(ctx, `${alerta.codigo} · ${alerta.severidade} · ${alerta.titulo}. ${alerta.detalhe}`, {
+        color: alerta.severidade === "CRÍTICO" ? DANGER : INK,
+        size: 8.5,
+      });
+    }
+  }
+
+  if (imagens) {
+    subheading(ctx, "Inventário de imagens incorporadas");
+    if (!imagens.disponivel) {
+      paragraph(ctx, imagens.observacao || "Inventário de imagens indisponível.", { color: MUTED, size: 8.5 });
+    } else {
+      field(ctx, "Imagens listadas", imagens.total ?? 0);
+      field(ctx, "Fotografia / biometria provável", (imagens.imagens || []).filter((i) => i.biometricaProvavel).length);
+      field(ctx, "Grupos de imagens idênticas", imagens.grupos_repetidos?.length ?? 0);
+      for (const achado of imagens.achados || []) {
+        paragraph(ctx, `${achado.titulo}. ${achado.detalhe}`, { size: 8.5 });
+      }
+    }
+  }
+}
+
+/** § 2.1 — dados econômicos complementares e aferição matemática. */
+function sectionEconomics(ctx, extracted) {
+  const c = extracted.contrato || {};
+  const m = extracted.afericao_matematica;
+  const cartao = c.cartao;
+  const linhas = [
+    ["Valor liberado", c.valor_liberado],
+    ["IOF financiado", c.iof_financiado],
+    ["Somatório das parcelas", c.valor_total_parcelas],
+    ["Prazo declarado (dias)", c.prazo_dias],
+    ["Carência até o 1º vencimento (dias)", c.carencia_dias],
+    ["Taxa anual calculada", c.taxa_juros_anual_calculada],
+    ["Tipo de operação", c.tipo_operacao],
+    ["CNPJ da instituição", c.cnpj_instituicao],
+  ].filter(([, v]) => v !== null && v !== undefined && v !== "");
+  if (!linhas.length && !m && !cartao && !c.datas_nota) return;
+
+  heading(ctx, "§ 2.1 · Dados econômicos complementares e aferição matemática");
+  for (const [rotulo, valor] of linhas) field(ctx, rotulo, valor);
+  if (c.datas_nota) paragraph(ctx, c.datas_nota, { color: DANGER, size: 8.5 });
+
+  if (cartao) {
+    subheading(ctx, "Cartão consignado de benefício");
+    field(ctx, "Limite do cartão", cartao.limiteCartao);
+    field(ctx, "Valor máximo de saque", cartao.valorMaximoSaque);
+    field(ctx, "Valor consignado mensal", cartao.valorConsignadoMensal);
+    field(ctx, "Prazo previsto de liquidação (meses)", cartao.prazoPrevistoLiquidacaoMeses);
+    field(ctx, "Tarifa de emissão", cartao.tarifaEmissao);
+  }
+
+  if (m) {
+    subheading(ctx, "Aferição matemática");
+    const confere = (rotulo, valor, detalhe) => {
+      if (valor === null || valor === undefined) return;
+      badge(ctx, `${rotulo}${detalhe ? ` (${detalhe})` : ""}`, valor ? "CONFERE" : "NÃO CONFERE", valor);
+    };
+    confere("Prazo declarado × datas", m.prazo_confere, m.prazo_calculado_dias != null ? `${m.prazo_calculado_dias} dias` : null);
+    confere("Somatório das parcelas", m.somatorio_confere, m.somatorio_calculado);
+    confere("Composição do financiado", m.composicao_confere, m.composicao_financiado_calculada);
+    confere("Valor presente pela taxa declarada", m.vp_confere, m.vp_taxa_declarada);
+    confere("CET anual × CET mensal", m.cet_anual_confere, m.cet_anual_calculado);
+    if (m.cet_implicito_mensal) {
+      field(ctx, "CET implícito no fluxo", `${m.cet_implicito_mensal} a.m.${m.cet_implicito_veredito ? ` · ${m.cet_implicito_veredito}` : ""}`);
+    }
+    if (m.cet_implicito_nota) paragraph(ctx, m.cet_implicito_nota, { color: MUTED, size: 8.5 });
+    if (m.conclusao) paragraph(ctx, m.conclusao, { size: 9 });
+  }
+}
+
+/** § 4.2 — trilha da contratação. */
+function sectionContractingTrail(ctx, extracted) {
+  const a = extracted.assinatura || {};
+  const trilha = extracted.trilha_acesso;
+  const linha = a.linha_do_tempo;
+  const placar = extracted.cadeia_custodia?.placar;
+  if (!a.forma_aceite && !linha && !trilha && !placar && !a.plataforma_nota) return;
+
+  heading(ctx, "§ 4.2 · Trilha da contratação");
+  field(ctx, "Forma de aceite", a.forma_aceite);
+  field(ctx, "Telefone do aceite", a.telefone_aceite);
+  field(ctx, "Dispositivo", a.dispositivo?.resumo);
+  field(ctx, "Código de autenticação declarado", a.codigo_autenticacao_declarado, { mono: true });
+  if (placar) {
+    badge(
+      ctx,
+      "Itens eliminatórios da cadeia de custódia",
+      `${placar.eliminatorios_presentes}/${placar.eliminatorios_total} · auxiliares ${placar.auxiliares_presentes}/${placar.auxiliares_total}`,
+      placar.eliminatorios_presentes === placar.eliminatorios_total
+    );
+  }
+  if (a.plataforma_nota) paragraph(ctx, a.plataforma_nota, { size: 9 });
+  if (a.assinatura_manual_textual) paragraph(ctx, a.assinatura_manual_textual, { size: 9 });
+
+  if (linha?.steps?.length) {
+    subheading(ctx, "Linha do tempo do aceite");
+    for (const step of linha.steps) field(ctx, `   ${step.label}`, step.value, { mono: true });
+    field(ctx, "   Duração total do fluxo", linha.duracao_total);
+    field(ctx, "   Intervalo até o primeiro aceite", linha.intervalo_primeiro_aceite);
+  }
+
+  if (trilha?.events?.length) {
+    subheading(ctx, `Histórico de ações do dossiê (${trilha.eventCount} eventos)`);
+    for (const ev of trilha.events) {
+      field(
+        ctx,
+        `   ${ev.action}`,
+        [
+          [ev.date, ev.time].filter(Boolean).join(" "),
+          ev.ip ? `${ev.ip}${ev.port ? `:${ev.port}` : ""}` : null,
+          Number.isFinite(ev.lat) && Number.isFinite(ev.lon) ? `${ev.lat.toFixed(5)}, ${ev.lon.toFixed(5)}` : null,
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      );
+    }
+    if (trilha.chronologyInconsistent) {
+      paragraph(
+        ctx,
+        "Os carimbos de tempo da trilha não se conciliam com o horário da assinatura, nem no fuso UTC nem no de Brasília. Os logs brutos devem esclarecer o fuso efetivamente aplicado.",
+        { color: DANGER, size: 9 }
+      );
+    }
+  }
+}
+
+/** § 6.1 — confronto com o processo judicial. */
+function sectionProcessComparison(ctx, confronto) {
+  if (!confronto || confronto.status !== "COMPLETED") return;
+  const divergencias = confronto.divergences || [];
+  heading(ctx, "§ 6.1 · Confronto com o processo judicial", { danger: divergencias.length > 0 });
+  field(ctx, "Resultado", confronto.resultado);
+  field(ctx, "Arquivo do processo", confronto.file?.name);
+  field(ctx, "SHA-256 do processo", confronto.file?.sha256, { mono: true });
+  field(ctx, "Páginas do processo", confronto.metadata?.totalPages);
+
+  if (confronto.confirmations?.length) {
+    subheading(ctx, "Dados do contrato procurados no processo");
+    for (const c of confronto.confirmations) {
+      field(ctx, `   ${c.label}`, `${c.contrato ?? "—"} · ${c.processo}`);
+    }
+  }
+  for (const d of divergencias) {
+    reserve(ctx, 110);
+    paragraph(ctx, `${d.label}: contrato ${d.contrato} × processo ${d.processo}. ${d.detalhe}`, {
+      color: d.severidade === "DIVERGÊNCIA" ? DANGER : INK,
+      size: 9,
+    });
+    if (d.trecho) paragraph(ctx, `“${d.trecho}”`, { color: MUTED, size: 8, italic: true });
+  }
+  for (const o of confronto.observations || []) {
+    paragraph(ctx, `${o.label}. ${o.detalhe}`, { size: 9 });
+  }
+  if (confronto.status_note) paragraph(ctx, confronto.status_note, { color: MUTED, size: 8.5 });
+}
+
+/** Sumário executivo de irregularidades, ao final do laudo. */
+function sectionExecutiveSummary(ctx, sumario, reportId) {
+  if (!sumario) return;
+  ctx.doc.addPage();
+  heading(ctx, `Sumário executivo de irregularidades${reportId ? ` · ${reportId}` : ""}`);
+  if (sumario.suspicionGrade) {
+    badge(
+      ctx,
+      "Grau de suspeição técnica",
+      sumario.suspicionGrade.label,
+      !["CRÍTICA", "ALTA"].includes(sumario.suspicionGrade.label)
+    );
+    if (sumario.suspicionGrade.rationale) paragraph(ctx, sumario.suspicionGrade.rationale, { color: MUTED, size: 8.5 });
+  }
+  if (sumario.intro) paragraph(ctx, sumario.intro, { size: 9 });
+
+  subheading(ctx, "Placar de gravidade");
+  for (const f of sumario.findings || []) {
+    reserve(ctx, 90);
+    const { doc, contentWidth } = ctx;
+    doc
+      .fontSize(9)
+      .font("Helvetica-Bold")
+      .fillColor(f.severity === "ALTA" ? DANGER : f.severity === "FAVORÁVEL" ? ACCENT : INK)
+      .text(`${f.severity} · `, MARGIN, doc.y, { width: contentWidth, continued: true })
+      .fillColor(INK)
+      .text(f.title, { continued: true })
+      .font("Helvetica")
+      .text(` ${f.text}`, { align: "justify" });
+    doc.moveDown(0.3);
+  }
+
+  if (sumario.synthesis) {
+    subheading(ctx, "GPS × IP");
+    paragraph(ctx, sumario.synthesis, { size: 9 });
+  }
+  for (const ip of sumario.ipCards || []) {
+    field(ctx, `   ${ip.endereco} · ${ip.badge}`, ip.text);
+  }
+
+  if (sumario.diligences?.length) {
+    subheading(ctx, "Diligências recomendadas");
+    sumario.diligences.forEach((d, i) => {
+      paragraph(ctx, `${String(i + 1).padStart(2, "0")}. ${d.title}. ${d.text}`, { size: 9 });
+    });
+  }
+  if (sumario.disclaimer) paragraph(ctx, sumario.disclaimer, { color: MUTED, size: 8 });
 }
 
 function sectionRemarks(ctx, extracted) {

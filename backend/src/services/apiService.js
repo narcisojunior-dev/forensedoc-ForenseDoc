@@ -75,7 +75,8 @@ const PROVEDORES_GEOIP = [
         : {
             city: d.city,
             region: d.region,
-            country: d.country_name,
+            // ipapi.co devolve o país em inglês; o laudo é em português.
+            country: d.country_name === "Brazil" ? "Brasil" : d.country_name,
             lat: Number(d.latitude),
             lon: Number(d.longitude),
             isp: d.org || d.asn,

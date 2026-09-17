@@ -1,0 +1,172 @@
+// Utilitários de apresentação do laudo técnico pericial. Portados do motor de
+// geração (frontend/src/ForenseDoc.jsx) sem alteração de regra.
+
+export function classifyHashString(s) {
+  if (!s || typeof s !== "string") return null;
+  const v = s.trim();
+  const uuidV4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  const uuidAny = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (uuidV4.test(v)) return { format: "UUID v4", isHash: false, detalhe: "Identificador UUID versão 4, gerado aleatoriamente, sem relação criptográfica com o conteúdo do documento" };
+  if (uuidAny.test(v)) return { format: "UUID", isHash: false, detalhe: "Identificador UUID, sem relação criptográfica com o conteúdo do documento" };
+  if (/^[0-9a-fA-F]{64}$/.test(v)) return { format: "SHA-256", isHash: true, detalhe: "Cadeia hexadecimal de 64 caracteres, compatível com SHA-256" };
+  if (/^[0-9a-fA-F]{40}$/.test(v)) return { format: "SHA-1", isHash: true, detalhe: "Cadeia hexadecimal de 40 caracteres, compatível com SHA-1" };
+  if (/^[0-9a-fA-F]{32}$/.test(v)) return { format: "MD5", isHash: true, detalhe: "Cadeia hexadecimal de 32 caracteres, compatível com MD5" };
+  return { format: "Formato não reconhecido", isHash: false, detalhe: "Cadeia não corresponde a nenhum formato de hash criptográfico conhecido" };
+}
+
+export function shortHash(value, left = 12, right = 8) {
+  const text = String(value || "");
+  return text.length > left + right + 3 ? `${text.slice(0, left)}…${text.slice(-right)}` : text;
+}
+
+export function nBR(value, digits = 0) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return value ?? null;
+  return number.toLocaleString("pt-BR", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+}
+
+export function formatCnpj(value) {
+  const digits = String(value || "").replace(/\D/g, "");
+  if (digits.length !== 14) return value;
+  return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8, 12)}-${digits.slice(12)}`;
+}
+
+export function formatCpf(value) {
+  const digits = String(value || "").replace(/\D/g, "");
+  if (digits.length !== 11) return value;
+  return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9)}`;
+}
+
+export function labelHashState(value) {
+  const labels = {
+    AUSENTE: "Ausente",
+    DECLARADO_NAO_CONFERIVEL: "Declarado, porém não conferível por método público",
+    DECLARADO_CONFERIVEL: "Declarado e conferível",
+  };
+  return labels[value] || value;
+}
+
+export function labelProvenance(value) {
+  const labels = {
+    REIMPRESSAO_POSTERIOR_PROVAVEL: "Reimpressão posterior provável",
+    NATIVO_PROVAVEL: "Nativo provável",
+    RE_RENDERIZACAO_JUDICIAL: "Re-renderização judicial",
+  };
+  return labels[value] || value;
+}
+
+export function noteForDeclaredHashState(state, calc) {
+  if (state === "DECLARADO_NAO_CONFERIVEL") {
+    return `O contrato não traz hash criptográfico conferível. Há, no rodapé do instrumento, código de autenticação declarado pelo emissor, examinado no § 4, que não é redutível a hexadecimal, Base64 ou Base32 e não é conferível por método público. O hash SHA-256 calculado por este sistema sobre o arquivo original é o indicado acima e passa a servir como impressão digital de referência do documento para fins de cadeia de custódia.`;
+  }
+  if (state === "DECLARADO_CONFERIVEL") {
+    return `O contrato traz hash declarado pelo emissor, conferido no § 4. O hash SHA-256 calculado por este sistema sobre o arquivo original é ${calc}.`;
+  }
+  return "O contrato não traz hash criptográfico declarado pelo emissor. O hash SHA-256 calculado por este sistema sobre o arquivo original é o indicado acima e passa a servir como impressão digital de referência do documento para fins de cadeia de custódia.";
+}
+
+export function cleanIssueText(value) {
+  return String(value || "")
+    .replace(/\b(?:CET1|FIN\d|IMG\d|INT\d|TRB\d|CAD\d|CUS\d|LOG\d)\s+(?:ALTA|MEDIA|MÉDIA|MÉDIO|INFO|CRITICO|CRÍTICO)\s*:\s*/g, "")
+    .replace(/\b(?:CET1|FIN\d|IMG\d|INT\d|TRB\d|CAD\d|CUS\d|LOG\d)\s*:\s*/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function normalizeIssue(issue, index = 0) {
+  if (issue && typeof issue === "object") {
+    return {
+      codigo: issue.codigo || `AUTO${index}`,
+      gravidade: issue.gravidade || issue.severidade || "MÉDIA",
+      titulo: cleanIssueText(issue.titulo || "Achado técnico").replace(/\.+$/, ""),
+      texto: cleanIssueText(issue.texto || issue.detalhe || ""),
+    };
+  }
+  const text = cleanIssueText(issue);
+  const [title, ...rest] = text.split(/\. +/);
+  return { codigo: `LEGADO${index}`, gravidade: "MÉDIA", titulo: (title || "Achado técnico").replace(/\.+$/, ""), texto: rest.join(". ") };
+}
+
+export function reportIssues(extracted = {}) {
+  const structured = Array.isArray(extracted.achados_irregularidade) ? extracted.achados_irregularidade : [];
+  const legacy = structured.length ? [] : (extracted.evidencias_irregularidade || []);
+  const seen = new Set();
+  return [...structured, ...legacy].map(normalizeIssue).filter((issue) => {
+    if (!issue.titulo && !issue.texto) return false;
+    if (seen.has(issue.codigo)) return false;
+    seen.add(issue.codigo);
+    return true;
+  });
+}
+
+export function issueBucket(issue) {
+  const code = String(issue.codigo || "");
+  const text = `${issue.titulo || ""} ${issue.texto || ""}`;
+  if (/FIN3/i.test(code) || /\bcar[eê]ncia\b|contexto econ[oô]mico/i.test(text)) return "contexto";
+  if (/INT|LOG|CUS|IMG|OCR|assinatura|hash|c[oó]digo|reimpress|selfie|biometr|trilha|cust[oó]dia/i.test(`${code} ${text}`)) return "lacunas";
+  return "instrumento";
+}
+
+export function extractCnjFromName(name) {
+  const match = String(name || "").match(/(\d{7})-?(\d{2})\.?(\d{4})\.?(\d)\.?(\d{2})\.?(\d{4})/);
+  return match ? `${match[1]}-${match[2]}.${match[3]}.${match[4]}.${match[5]}.${match[6]}` : null;
+}
+
+export function labelComparisonStatus(status) {
+  const labels = {
+    CONFIRMADO: "CONFIRMADO",
+    NAO_LOCALIZADO: "NÃO LOCALIZADO",
+    NAO_CONFRONTAVEL: "NÃO CONFRONTÁVEL",
+    DIVERGENTE: "DIVERGENTE",
+  };
+  return labels[status] || status;
+}
+
+export function comparisonStatusColor(status) {
+  if (status === "CONFIRMADO") return "#3ddc97";
+  if (status === "NAO_CONFRONTAVEL") return "#8595a8";
+  return "#f06363";
+}
+
+export function severityColor(value) {
+  if (/CR[IÍ]TICO/i.test(value || "")) return "#f06363";
+  if (/ALTO/i.test(value || "")) return "#f5853f";
+  if (/M[EÉ]DIO|ATEN/i.test(value || "")) return "#f2b03d";
+  if (/CONFERIDO|OK|BAIXO/i.test(value || "")) return "#3ddc97";
+  return "#8595a8";
+}
+
+export function haversineKm(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+export function riskFromDistance(km) {
+  if (km === null || km === undefined) return { label: "INDETERMINADO", color: "#8595a8", bg: "rgba(133,149,168,0.08)", score: 0 };
+  if (km < 50)   return { label: "RISCO BAIXO",    color: "#3ddc97", bg: "rgba(61,220,151,0.08)",  score: 1 };
+  if (km < 300)  return { label: "RISCO MODERADO", color: "#f2b03d", bg: "rgba(242,176,61,0.09)",  score: 2 };
+  if (km < 1000) return { label: "RISCO ALTO",     color: "#f5853f", bg: "rgba(245,133,63,0.09)",  score: 3 };
+  return             { label: "RISCO CRÍTICO", color: "#f06363", bg: "rgba(240,99,99,0.09)",   score: 4 };
+}
+
+export function riskFromDistanceWithHistory(km, historico) {
+  if (historico?.suppressDistanceRisk) {
+    return { label: historico.label || "REGISTRO ALTERADO", color: "#8595a8", bg: "rgba(133,149,168,0.08)", score: 0, suppressed: true, nota: historico.note };
+  }
+  return { ...riskFromDistance(km), suppressed: false, nota: historico?.note || null };
+}
+
+/**
+ * Valor interpolado antes de um ponto final. Nome de operadora termina em
+ * ponto ("TIM S.A."), e a frase ficava "provedor TIM S.A..": além do erro de
+ * redação, a higiene do laudo recusa ponto duplicado e bloqueava o PDF.
+ */
+export function semPontoFinal(valor) {
+  return valor == null ? valor : String(valor).replace(/\.+\s*$/, "");
+}

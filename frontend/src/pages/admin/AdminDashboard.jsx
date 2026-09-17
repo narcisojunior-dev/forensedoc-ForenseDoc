@@ -71,13 +71,23 @@ function MiniBarChart({ title, data, valueKey, color }) {
 export default function AdminDashboard() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState(null);
 
-  useEffect(() => {
+  const loadData = () => {
+    setLoading(true);
+    setErrorMsg(null);
     api
       .get("/admin/dashboard")
       .then((r) => setData(r.data))
-      .catch(() => setData(null))
+      .catch((err) => {
+        setData(null);
+        setErrorMsg(err.response?.data?.error || "Não foi possível carregar as métricas.");
+      })
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadData();
   }, []);
 
   if (loading) {
@@ -89,7 +99,17 @@ export default function AdminDashboard() {
   }
 
   if (!data) {
-    return <p className="text-sm text-zinc-500 py-10 text-center">Não foi possível carregar as métricas.</p>;
+    return (
+      <div className="py-12 text-center glass rounded-xl border border-surface-border p-6 max-w-md mx-auto my-8">
+        <p className="text-sm text-zinc-300 mb-4">{errorMsg || "Não foi possível carregar as métricas."}</p>
+        <button
+          onClick={loadData}
+          className="px-4 py-2 text-xs font-semibold bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors"
+        >
+          Tentar novamente
+        </button>
+      </div>
+    );
   }
 
   return (

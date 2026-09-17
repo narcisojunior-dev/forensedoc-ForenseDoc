@@ -24,6 +24,7 @@ import { getIpInfo } from "../services/apiService.js";
 import { parsePagination } from "../utils/pagination.js";
 import { redis } from "../utils/redis.js";
 import { putPdf, buildKey, deletePdf } from "../services/objectStorageService.js";
+import { temCreditoIlimitado } from "../utils/creditPolicy.js";
 
 /** O extraído é persistido como texto JSON dentro do resultado. */
 function safeParse(raw) {
@@ -92,6 +93,8 @@ const ANALYSIS_LOCK_TTL = Math.ceil(ocrBudgetMs() / 1000) + 120;
 
 export async function analyzePdf(req, res) {
   const { userId, tenantId } = req.auth;
+  // Administrador da plataforma: sem débito e, portanto, sem estorno.
+  const creditoIsento = temCreditoIlimitado(req.auth);
   let lockToken = null;
   let analysis = null;
   let pdfKey = null;
@@ -181,6 +184,8 @@ export async function analyzePdf(req, res) {
         },
       });
 
+      if (creditoIsento) return { created, balanceBefore: null };
+
       const { balanceBefore } = await debitCredit(tenantId, userId, created.id, tx);
 
       return { created, balanceBefore };
@@ -213,7 +218,7 @@ export async function analyzePdf(req, res) {
 
     // Cache e alerta só depois do commit: dentro da transação, um rollback
     // deixaria o cache invalidado e o alerta enviado por um débito desfeito.
-    await afterDebitCommit(tenantId, debit.balanceBefore);
+    if (!creditoIsento) await afterDebitCommit(tenantId, debit.balanceBefore);
 
     // Enfileira ANTES de responder: se a fila estiver fora do ar, o crédito
     // debitado precisa voltar em vez de deixar a análise presa em PROCESSING.
@@ -230,6 +235,7 @@ export async function analyzePdf(req, res) {
         homeAddress: home,
         homeCoord,
         filename: filename || null,
+        creditoIsento,
       },
       { attempts: 1, removeOnComplete: true, removeOnFail: true }
     );
@@ -250,7 +256,7 @@ export async function analyzePdf(req, res) {
           action: "analysis_started",
           ipAddress: req.ip,
           userAgent: req.headers["user-agent"],
-          metadata: { analysisId: analysis.id, sizeBytes: validation.sizeBytes },
+          metadata: { analysisId: analysis.id, sizeBytes: validation.sizeBytes, creditoIsento },
         },
       })
       .catch((err) => console.error("[Analyze] Falha ao registrar audit log:", err.message));
@@ -273,7 +279,12 @@ export async function analyzePdf(req, res) {
 
     // A análise já existia (e o crédito já saiu) quando a falha aconteceu:
     // estorna para o usuário não pagar por um laudo que nunca rodou.
-    if (analysis) {
+    if (analysis && creditoIsento) {
+      // Nada foi debitado: basta não deixar a análise presa em PROCESSING.
+      await prisma.analysis
+        .update({ where: { id: analysis.id }, data: { status: "ERROR" } })
+        .catch((err) => console.error("[Analyze] Falha ao marcar análise isenta como erro:", err.message));
+    } else if (analysis) {
       await refundCredit(tenantId, userId, analysis.id, "Falha ao enfileirar a análise").catch(
         (refundError) => {
           console.error("[Analyze] Falha ao estornar crédito:", refundError.message);

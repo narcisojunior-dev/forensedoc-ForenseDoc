@@ -5,11 +5,14 @@ import { analysisQueue, cronsQueue, connection, QUEUE_NAMES } from "./queues.js"
 import { processCreditExpirations } from "./jobs/expireCredits.js";
 import { processWebhook, suspendIfStillOverdue } from "./jobs/webhookProcessor.js";
 import { processAnalysis } from "./jobs/analysisWorker.js";
+import { processProcessComparison } from "./jobs/processComparisonWorker.js";
+import { processReplica } from "./jobs/replicaWorker.js";
 import { processEmail } from "./jobs/emailWorker.js";
 import { processRenewalReminders, processOverdueReminders } from "./jobs/reminders.js";
 import { startQueueWatch } from "./services/queueMetricsService.js";
 import { processUploadPurge } from "./jobs/purgeUploads.js";
 import { processRecordPurge } from "./jobs/purgeRecords.js";
+import { processMotorUploadPurge } from "./jobs/purgeMotorUploads.js";
 import { ensureStorageReady } from "./services/objectStorageService.js";
 import { avisarSeServicoPublico } from "./services/nominatimClient.js";
 
@@ -84,6 +87,9 @@ const CONCORRENCIA = {
 const HANDLERS = {
   [QUEUE_NAMES.analysis]: {
     "process-pdf": (job) => processAnalysis(job),
+    // Motor pericial v2: mesmo perfil de CPU da análise, mesma fila.
+    "compare-process": (job) => processProcessComparison(job),
+    "replica-analyze": (job) => processReplica(job),
   },
   [QUEUE_NAMES.payments]: {
     "process-webhook": (job) => processWebhook(job),
@@ -98,6 +104,7 @@ const HANDLERS = {
     "overdue-reminders": () => processOverdueReminders(),
     "purge-uploads": () => processUploadPurge(),
     "purge-records": () => processRecordPurge(),
+    "purge-motor-uploads": () => processMotorUploadPurge(),
   },
 };
 
@@ -170,6 +177,10 @@ const CRONS = [
   // Retenção das tabelas que crescem sem parar. Aos domingos: varre tabelas
   // inteiras e não precisa da frequência diária do expurgo de arquivos.
   { name: "purge-records", pattern: "30 3 * * 0", jobId: "cron-purge-records" },
+  // Arquivos transitórios do motor pericial (PDF do processo, autos da réplica)
+  // que um worker interrompido deixou para trás. De hora em hora: são autos de
+  // terceiros sem nenhum uso depois do job.
+  { name: "purge-motor-uploads", pattern: "15 * * * *", jobId: "cron-purge-motor-uploads" },
 ];
 
 for (const cron of CRONS) {

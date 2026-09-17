@@ -8,6 +8,23 @@ export default function CreditWidget() {
   if (!balance) return null;
 
   const { total, details } = balance;
+
+  // Administrador da plataforma: gera laudos sem consumir créditos, então não
+  // há saldo a vigiar nem compra a oferecer.
+  if (balance.unlimited) {
+    return (
+      <div className="bg-surface border border-surface-border rounded-xl p-4 flex flex-col gap-2 shadow-md mt-auto">
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-medium text-zinc-400 flex items-center gap-2">
+            <Zap className="w-4 h-4 text-accent" />
+            Créditos
+          </span>
+          <span className="text-xl font-bold text-foreground">Ilimitado</span>
+        </div>
+        <p className="text-xs text-zinc-500">Administrador da plataforma</p>
+      </div>
+    );
+  }
   
   // Define o nível de atenção (vermelho se 0, amarelo se <= 2)
   const isCritical = total === 0;

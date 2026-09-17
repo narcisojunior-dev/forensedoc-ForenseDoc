@@ -1,6 +1,36 @@
 import { haversineKm } from "../utils/geoUtils.js";
-import { describeIpDivergence, classifyDeclaredDivergence } from "../utils/geoDivergence.js";
+import { describeIpDivergence, classifyDeclaredDivergence, aplicarHistoricoDoIp } from "../utils/geoDivergence.js";
 import { buildCustodyChain } from "../reports/custodyChain.js";
+import { buildIrregularitySummary } from "../engine/irregularitySummary.js";
+
+/**
+ * Sumário executivo do motor pericial (placar de gravidade, GPS x IP,
+ * diligências), montado a partir do resultado persistido.
+ *
+ * Depende das distâncias e da extração, então é recalculado em todo caminho
+ * que as altera. Falhar aqui não pode derrubar o laudo: o sumário é síntese do
+ * que já está nas seções, e na falha o resultado segue sem ele.
+ */
+export function buildSummaryForResult(result, extracted) {
+  try {
+    return buildIrregularitySummary({
+      reportId: result.reportId,
+      file: result.file
+        ? { name: result.file.name, sizeKB: result.file.sizeBytes != null ? (result.file.sizeBytes / 1024).toFixed(2) : null }
+        : null,
+      hashes: result.hashes,
+      metadata: result.metadata,
+      extracted,
+      home: result.home,
+      contractGeo: result.contractGeo,
+      geoDeclaredPresent: result.geoDeclaredPresent,
+      ipAnalysis: result.ipAnalysis || [],
+    });
+  } catch (err) {
+    console.error("[Recompute] Falha ao montar o sumário executivo:", err.message);
+    return null;
+  }
+}
 
 /**
  * Recalcula tudo que DERIVA dos dados de uma análise.
@@ -66,23 +96,25 @@ export function recomputeDerived(result, extracted) {
       ...ip,
       distance,
       distanceToSignature,
-      divergenciaResidencia: describeIpDivergence({
-        km: distance,
-        referenciaConfirmada,
-        referenciaRotulo: result.home?.source,
-      }),
-      divergenciaAssinatura: describeIpDivergence({
-        km: distanceToSignature,
-        referenciaConfirmada: contractGeo?.precision === "gps",
-        referenciaRotulo: "geolocalização declarada no contrato",
-      }),
+      divergenciaResidencia: aplicarHistoricoDoIp(
+        describeIpDivergence({ km: distance, referenciaConfirmada, referenciaRotulo: result.home?.source }),
+        ip.historico
+      ),
+      divergenciaAssinatura: aplicarHistoricoDoIp(
+        describeIpDivergence({
+          km: distanceToSignature,
+          referenciaConfirmada: contractGeo?.precision === "gps",
+          referenciaRotulo: "geolocalização declarada no contrato",
+        }),
+        ip.historico
+      ),
     };
   });
 
+  const recalculado = { ...result, contractGeo, ipAnalysis };
   return {
-    ...result,
-    contractGeo,
-    ipAnalysis,
+    ...recalculado,
+    sumarioIrregularidades: buildSummaryForResult(recalculado, extracted),
     // A completude muda quando um elemento que faltava passa a existir, e é
     // justamente esse o efeito de o operador preencher um campo.
     cadeiaCustodia: buildCustodyChain(

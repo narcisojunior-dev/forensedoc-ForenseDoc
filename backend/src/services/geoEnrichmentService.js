@@ -1,8 +1,9 @@
 import { getIpInfo } from "./apiService.js";
-import { geocodeAddress } from "./geocodingService.js";
+import { geocodeAddress, reverseGeocode } from "./geocodingService.js";
+import { lookupIpHistory } from "./ipHistoryService.js";
 import { haversineKm } from "../utils/geoUtils.js";
 import { isIP } from "node:net";
-import { describeIpDivergence, classifyDeclaredDivergence } from "../utils/geoDivergence.js";
+import { describeIpDivergence, classifyDeclaredDivergence, aplicarHistoricoDoIp } from "../utils/geoDivergence.js";
 import { lookupRdapIp } from "./rdapService.js";
 import { parseUserAgentForensic } from "../utils/userAgentParser.js";
 
@@ -26,6 +27,10 @@ import { parseUserAgentForensic } from "../utils/userAgentParser.js";
  */
 export async function enrichGeography(extracted, homeAddress, homeCoord = null) {
   const cliente = extracted.cliente || {};
+  // Data do ato para o histórico do IP: a do próprio registro, senão a da
+  // assinatura, senão a do contrato.
+  const dataDoAtoPadrao =
+    extracted.assinatura?.data_hora_assinatura || extracted.contrato?.data_contrato || null;
 
   // 1. Geolocalizar cada IP extraído do PDF.
   //
@@ -52,15 +57,29 @@ export async function enrichGeography(extracted, homeAddress, homeCoord = null) 
       });
       continue;
     }
+    // Faixa privada, loopback ou link-local (classificação do motor pericial):
+    // nenhum provedor localiza isso, e "nenhum provedor respondeu" seria falso.
+    if (ipInfo.classe && !["PUBLICO", "CGNAT"].includes(ipInfo.classe)) {
+      ipResults.push({
+        ...ipInfo,
+        geo: null,
+        geoFailure: `endereço de faixa ${ipInfo.classe.toLowerCase()}: não é roteável na internet pública e não corresponde a uma localização geográfica`,
+      });
+      continue;
+    }
     const [geo, rdap] = await Promise.all([
       getIpInfo(ipInfo.endereco),
       lookupRdapIp(ipInfo.endereco).catch(() => null),
     ]);
     const parsedUa = ipInfo.user_agent ? parseUserAgentForensic(ipInfo.user_agent) : null;
+    const historico = geo
+      ? await lookupIpHistory(ipInfo.endereco, ipInfo.data_hora || dataDoAtoPadrao, geo.isp).catch(() => null)
+      : null;
 
     ipResults.push({
       ...ipInfo,
-      geo,
+      geo: historico?.suppressDistanceRisk && geo ? { ...geo, registro_na_data_nota: historico.note } : geo,
+      historico,
       rdap,
       parsedUserAgent: parsedUa,
       // Distingue "o documento não trazia" de "a consulta falhou" — num laudo,
@@ -159,18 +178,34 @@ export async function enrichGeography(extracted, homeAddress, homeCoord = null) 
       ...ip,
       distance,
       distanceToSignature,
-      divergenciaResidencia: describeIpDivergence({
-        km: distance,
-        referenciaConfirmada,
-        referenciaRotulo: homeSource,
-      }),
-      divergenciaAssinatura: describeIpDivergence({
-        km: distanceToSignature,
-        referenciaConfirmada: contractGeo?.precision === "gps",
-        referenciaRotulo: "geolocalização declarada no contrato",
-      }),
+      divergenciaResidencia: aplicarHistoricoDoIp(
+        describeIpDivergence({ km: distance, referenciaConfirmada, referenciaRotulo: homeSource }),
+        ip.historico
+      ),
+      divergenciaAssinatura: aplicarHistoricoDoIp(
+        describeIpDivergence({
+          km: distanceToSignature,
+          referenciaConfirmada: contractGeo?.precision === "gps",
+          referenciaRotulo: "geolocalização declarada no contrato",
+        }),
+        ip.historico
+      ),
     };
   });
+
+  // Município em que o GPS declarado realmente cai. Um ponto a 40 km pode estar
+  // em outro município, o que pesa mais na diligência do que a distância bruta.
+  if (contractGeo) {
+    const municipio = await reverseGeocode(contractGeo.lat, contractGeo.lon).catch(() => null);
+    if (municipio?.municipio) {
+      contractGeo = {
+        ...contractGeo,
+        municipio: municipio.municipio,
+        uf: municipio.uf,
+        municipioDisplay: municipio.display,
+      };
+    }
+  }
 
   let contractToHomeKm = null;
   if (contractGeo && homeGeo) {

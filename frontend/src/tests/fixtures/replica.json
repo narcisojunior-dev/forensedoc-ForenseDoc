@@ -1,0 +1,1120 @@
+{
+ "id": "r-1",
+ "status": "COMPLETED",
+ "createdAt": "2026-09-16T12:00:00.000Z",
+ "expiresAt": "2026-09-23T12:00:00.000Z",
+ "files": [
+  {
+   "name": "inicial.txt",
+   "sizeBytes": 250
+  },
+  {
+   "name": "contestacao.txt",
+   "sizeBytes": 300
+  },
+  {
+   "name": "procuracao.txt",
+   "sizeBytes": 120
+  }
+ ],
+ "result": {
+  "engine": {
+   "name": "Motor de Réplicas",
+   "caderno": {
+    "edicao": "2ª edição",
+    "sha256": "40c8bb1f317186de9dd38629dee3720306498a1c430cb5bc0bf682982990f8b1"
+   }
+  },
+  "analysis": {
+   "documentos": [
+    {
+     "nome": "inicial.txt",
+     "tipo": "inicial",
+     "paginas": 1,
+     "sem_texto": 0,
+     "ocr": 0,
+     "sha256": "18fd33a606c1fa87",
+     "erro": "",
+     "arquivo_original": "inicial.txt",
+     "documento_pje": null,
+     "paginas_origem": null,
+     "proveniencia": {
+      "kind": "original-upload",
+      "derived": false,
+      "tool": null,
+      "nativeMetadataAssessable": false,
+      "cryptographicSignatureAssessable": false
+     }
+    },
+    {
+     "nome": "contestacao.txt",
+     "tipo": "contestacao",
+     "paginas": 1,
+     "sem_texto": 0,
+     "ocr": 0,
+     "sha256": "99439f9ca3e9e497",
+     "erro": "",
+     "arquivo_original": "contestacao.txt",
+     "documento_pje": null,
+     "paginas_origem": null,
+     "proveniencia": {
+      "kind": "original-upload",
+      "derived": false,
+      "tool": null,
+      "nativeMetadataAssessable": false,
+      "cryptographicSignatureAssessable": false
+     }
+    },
+    {
+     "nome": "procuracao.txt",
+     "tipo": "procuracao",
+     "paginas": 1,
+     "sem_texto": 0,
+     "ocr": 0,
+     "sha256": "9f491fd49cc77a70",
+     "erro": "",
+     "arquivo_original": "procuracao.txt",
+     "documento_pje": null,
+     "paginas_origem": null,
+     "proveniencia": {
+      "kind": "original-upload",
+      "derived": false,
+      "tool": null,
+      "nativeMetadataAssessable": false,
+      "cryptographicSignatureAssessable": false
+     }
+    }
+   ],
+   "achados": {
+    "contrato": {
+     "campo": "contrato",
+     "valor": "nada",
+     "confianca": "alta",
+     "nota": "Nenhum documento juntado tem feição de instrumento contratual.",
+     "evidencias": []
+    },
+    "assinatura": {
+     "campo": "assinatura",
+     "valor": "na",
+     "confianca": "alta",
+     "nota": "Não há contrato nos autos.",
+     "evidencias": []
+    },
+    "testemunhas": {
+     "campo": "testemunhas",
+     "valor": "na",
+     "confianca": "alta",
+     "nota": "Não há contrato nos autos.",
+     "evidencias": []
+    },
+    "cumulacao": {
+     "campo": "cumulacao",
+     "valor": "nao",
+     "confianca": "baixa",
+     "nota": "Não foi possível cruzar rogatário e testemunha pelo texto. Confira no documento.",
+     "evidencias": []
+    },
+    "repeticao": {
+     "campo": "repeticao",
+     "valor": "nao",
+     "confianca": "baixa",
+     "nota": "Nenhuma inscrição repetida foi localizada no texto extraído.",
+     "evidencias": []
+    },
+    "docsubscritores": {
+     "campo": "docsubscritores",
+     "valor": "na",
+     "confianca": "alta",
+     "nota": "Não há contrato nos autos.",
+     "evidencias": []
+    },
+    "impossibilidade": {
+     "campo": "impossibilidade",
+     "valor": null,
+     "confianca": "baixa",
+     "nota": "Nada nos documentos lidos indica analfabetismo ou impossibilidade de assinar. Sem essa base os cenários A a F não se sustentam: responda com o que consta dos autos.",
+     "evidencias": []
+    },
+    "portabilidade": {
+     "campo": "portabilidade",
+     "valor": "nao",
+     "confianca": "media",
+     "nota": "Nenhuma menção a portabilidade ou refinanciamento.",
+     "evidencias": []
+    },
+    "contratacao": {
+     "campo": "contratacao",
+     "valor": "eletronica",
+     "confianca": "media",
+     "nota": "A natureza eletrônica aparece somente na alegação da própria ré (biometria). É uma base secundária e precisa ser confirmada no instrumento bancário.",
+     "evidencias": [
+      {
+       "arquivo": "contestacao.txt",
+       "pagina": 1,
+       "fonte": "texto",
+       "trecho": "escrição. No mérito, a contratação foi realizada por meio digital com biometria facial e o valor foi creditado via TED. Junta cédula de crédito banc",
+       "pagina_documento": 1,
+       "pagina_origem": 1,
+       "documento_pje": null
+      }
+     ]
+    },
+    "elementos_tecnicos": {
+     "campo": "elementos_tecnicos",
+     "valor": "incompletos",
+     "confianca": "media",
+     "nota": "A trilha segundo a contestação; confirme no instrumento não registra 5 de 6 elementos: endereço IP, geolocalização, identificação do dispositivo, carimbo de hora, resumo criptográfico.",
+     "evidencias": [
+      {
+       "arquivo": "contestacao.txt",
+       "pagina": 1,
+       "fonte": "texto",
+       "trecho": "escrição. No mérito, a contratação foi realizada por meio digital com biometria facial e o valor foi creditado via TED. Junta cédula de crédito banc",
+       "pagina_documento": 1,
+       "pagina_origem": 1,
+       "documento_pje": null
+      }
+     ]
+    },
+    "repasse": {
+     "campo": "repasse",
+     "valor": "nada",
+     "confianca": "alta",
+     "nota": "Nenhum documento juntado tem feição de comprovante de repasse.",
+     "evidencias": []
+    },
+    "conta": {
+     "campo": "conta",
+     "valor": "na",
+     "confianca": "alta",
+     "nota": "Não há comprovante a examinar.",
+     "evidencias": []
+    },
+    "extrato": {
+     "campo": "extrato",
+     "valor": "ausente",
+     "confianca": "alta",
+     "nota": "Nenhum extrato bancário foi localizado entre os documentos lidos.",
+     "evidencias": []
+    },
+    "valores": {
+     "campo": "valores",
+     "valor": "na",
+     "confianca": "baixa",
+     "nota": "Não foi possível cotejar valores: falta o valor liberado no contrato ou o valor do comprovante.",
+     "evidencias": []
+    }
+   },
+   "dados": {
+    "re": "CONTESTAÇÃO. BANCO EXEMPLO S.A.",
+    "fls_contrato": "",
+    "fls_comprovante": ""
+   },
+   "preliminares": [
+    {
+     "cod": "III.3",
+     "evidencia": {
+      "arquivo": "contestacao.txt",
+      "pagina": 1,
+      "fonte": "texto",
+      "trecho": "BANCO EXEMPLO S.A. apresenta contestação. Preliminarmente, impugna a justiça gratuita e alega prescrição. No mérito, a contratação foi realizada por meio d",
+      "pagina_documento": 1,
+      "pagina_origem": 1,
+      "documento_pje": null
+     }
+    },
+    {
+     "cod": "III.5",
+     "evidencia": {
+      "arquivo": "contestacao.txt",
+      "pagina": 1,
+      "fonte": "texto",
+      "trecho": "enta contestação. Preliminarmente, impugna a justiça gratuita e alega prescrição. No mérito, a contratação foi realizada por meio digital com biometri",
+      "pagina_documento": 1,
+      "pagina_origem": 1,
+      "documento_pje": null
+     }
+    }
+   ],
+   "conformidade69": [],
+   "avisos": [
+    "6 resposta(s) ficaram com confiança baixa e precisam da sua conferência: cumulacao, repeticao, impossibilidade, contratacao, elementos_tecnicos, valores."
+   ]
+  },
+  "signals": [
+   {
+    "codigo": "DOC-06",
+    "titulo": "A ré afirma o contrato e não o exibe",
+    "gravidade": "critico",
+    "detalhe": "A defesa se apoia na existência de contrato, mas nenhum instrumento foi localizado entre os arquivos juntados. O art. 434 do CPC exige que o documento acompanhe a peça em que se funda.",
+    "dado": "da por meio digital com biometria facial e o valor foi creditado via TED. Junta cédula de crédito bancário assinada eletronicamente.",
+    "arquivo": "contestacao.txt",
+    "pedido": "Reconhecimento de que a ré não se desincumbiu do ônus do art. 373, II, do CPC.",
+    "arquivo_original": "contestacao.txt"
+   },
+   {
+    "codigo": "DOC-01",
+    "titulo": "Documento essencial da autora não localizado",
+    "gravidade": "alto",
+    "detalhe": "Não foi localizado nos arquivos: histórico de consignações do benefício; documento de identificação da autora. O ônus aqui é da autora, e a falta enfraquece a própria peça. Confira se está nos autos e não na pasta, e junte antes de protocolar a réplica.",
+    "dado": "tipos localizados: contestacao, inicial, procuracao",
+    "arquivo": "",
+    "pedido": "Juntada pela autora, com justificativa do art. 435 do CPC se tardia."
+   },
+   {
+    "codigo": "DOC-02",
+    "titulo": "Inicial não afirma a impossibilidade de assinar",
+    "gravidade": "medio",
+    "detalhe": "A inicial não traz afirmação de analfabetismo ou de impossibilidade de assinar. Os cenários A a F do caderno dependem dessa base: sem ela, o vício de forma do art. 595 do Código Civil não é apreciado.",
+    "dado": "nenhuma ocorrência na inicial",
+    "arquivo": "inicial.txt",
+    "pedido": "",
+    "arquivo_original": "inicial.txt"
+   },
+   {
+    "codigo": "MAR-02",
+    "titulo": "Inicial sem requerimento de prova",
+    "gravidade": "medio",
+    "detalhe": "A inicial não requereu produção de prova. Pela Súmula 67 do TJPI, pedir a prova e ter o pedido indeferido protege contra a improcedência por ausência dessa mesma prova: requeira na réplica, em segundo lugar, depois do julgamento antecipado.",
+    "dado": "nenhum requerimento de prova localizado",
+    "arquivo": "inicial.txt",
+    "pedido": "",
+    "arquivo_original": "inicial.txt"
+   },
+   {
+    "codigo": "PRO-01",
+    "titulo": "Pontos da inicial sem correspondência visível na defesa",
+    "gravidade": "medio",
+    "detalhe": "A leitura não localizou, na contestação, tratamento de 1 ponto(s) deduzido(s) na inicial: inversão do ônus da prova. Isso é indício de falta de impugnação específica, e não prova dela: a busca é por termos, e a defesa pode ter enfrentado o tema com outras palavras. Releia esses trechos antes de invocar a presunção do art. 341 do Código de Processo Civil, porque afirmar silêncio que não houve custa credibilidade na réplica.",
+    "dado": "temas sem correspondência: inversão do ônus da prova",
+    "arquivo": "",
+    "pedido": "Se confirmada a omissão na leitura dos autos: reconhecimento da presunção do art. 341 do CPC quanto aos pontos não impugnados."
+   }
+  ],
+  "summary": {
+   "critico": 1,
+   "alto": 1,
+   "medio": 3,
+   "nota": 0
+  },
+  "suppressedChecks": [
+   {
+    "codigo": "FNT-01",
+    "titulo": "Fontes tipográficas incorporadas",
+    "motivo": "O arquivo examinado é derivado de extração de texto ou de fatiamento do caderno do PJe. Metadados internos, data de criação e ausência de assinatura criptográfica pertencem ao arquivo derivado e não permitem conclusão sobre o documento bancário nativo.",
+    "arquivos": [
+     "inicial.txt",
+     "contestacao.txt",
+     "procuracao.txt"
+    ]
+   },
+   {
+    "codigo": "HSH-01",
+    "titulo": "Conferência do hash declarado contra o arquivo nativo",
+    "motivo": "O arquivo examinado é derivado de extração de texto ou de fatiamento do caderno do PJe. Metadados internos, data de criação e ausência de assinatura criptográfica pertencem ao arquivo derivado e não permitem conclusão sobre o documento bancário nativo.",
+    "arquivos": [
+     "inicial.txt",
+     "contestacao.txt",
+     "procuracao.txt"
+    ]
+   },
+   {
+    "codigo": "IMG-01",
+    "titulo": "Camada de texto do arquivo nativo",
+    "motivo": "O arquivo examinado é derivado de extração de texto ou de fatiamento do caderno do PJe. Metadados internos, data de criação e ausência de assinatura criptográfica pertencem ao arquivo derivado e não permitem conclusão sobre o documento bancário nativo.",
+    "arquivos": [
+     "inicial.txt",
+     "contestacao.txt",
+     "procuracao.txt"
+    ]
+   },
+   {
+    "codigo": "IMG-02",
+    "titulo": "Estrutura interna das imagens",
+    "motivo": "O arquivo examinado é derivado de extração de texto ou de fatiamento do caderno do PJe. Metadados internos, data de criação e ausência de assinatura criptográfica pertencem ao arquivo derivado e não permitem conclusão sobre o documento bancário nativo.",
+    "arquivos": [
+     "inicial.txt",
+     "contestacao.txt",
+     "procuracao.txt"
+    ]
+   },
+   {
+    "codigo": "META-01",
+    "titulo": "Data de criação do PDF",
+    "motivo": "O arquivo examinado é derivado de extração de texto ou de fatiamento do caderno do PJe. Metadados internos, data de criação e ausência de assinatura criptográfica pertencem ao arquivo derivado e não permitem conclusão sobre o documento bancário nativo.",
+    "arquivos": [
+     "inicial.txt",
+     "contestacao.txt",
+     "procuracao.txt"
+    ]
+   },
+   {
+    "codigo": "META-02",
+    "titulo": "Data de modificação do PDF",
+    "motivo": "O arquivo examinado é derivado de extração de texto ou de fatiamento do caderno do PJe. Metadados internos, data de criação e ausência de assinatura criptográfica pertencem ao arquivo derivado e não permitem conclusão sobre o documento bancário nativo.",
+    "arquivos": [
+     "inicial.txt",
+     "contestacao.txt",
+     "procuracao.txt"
+    ]
+   },
+   {
+    "codigo": "META-03",
+    "titulo": "Programa produtor do PDF",
+    "motivo": "O arquivo examinado é derivado de extração de texto ou de fatiamento do caderno do PJe. Metadados internos, data de criação e ausência de assinatura criptográfica pertencem ao arquivo derivado e não permitem conclusão sobre o documento bancário nativo.",
+    "arquivos": [
+     "inicial.txt",
+     "contestacao.txt",
+     "procuracao.txt"
+    ]
+   },
+   {
+    "codigo": "META-04",
+    "titulo": "Atualizações incrementais do PDF",
+    "motivo": "O arquivo examinado é derivado de extração de texto ou de fatiamento do caderno do PJe. Metadados internos, data de criação e ausência de assinatura criptográfica pertencem ao arquivo derivado e não permitem conclusão sobre o documento bancário nativo.",
+    "arquivos": [
+     "inicial.txt",
+     "contestacao.txt",
+     "procuracao.txt"
+    ]
+   },
+   {
+    "codigo": "SIG-01",
+    "titulo": "Ausência de assinatura criptográfica incorporada",
+    "motivo": "O arquivo examinado é derivado de extração de texto ou de fatiamento do caderno do PJe. Metadados internos, data de criação e ausência de assinatura criptográfica pertencem ao arquivo derivado e não permitem conclusão sobre o documento bancário nativo.",
+    "arquivos": [
+     "inicial.txt",
+     "contestacao.txt",
+     "procuracao.txt"
+    ]
+   },
+   {
+    "codigo": "SIG-02",
+    "titulo": "Presença de assinatura digital no arquivo",
+    "motivo": "O arquivo examinado é derivado de extração de texto ou de fatiamento do caderno do PJe. Metadados internos, data de criação e ausência de assinatura criptográfica pertencem ao arquivo derivado e não permitem conclusão sobre o documento bancário nativo.",
+    "arquivos": [
+     "inicial.txt",
+     "contestacao.txt",
+     "procuracao.txt"
+    ]
+   },
+   {
+    "codigo": "SIG-03",
+    "titulo": "Menção textual a certificação ICP-Brasil",
+    "motivo": "O arquivo examinado é derivado de extração de texto ou de fatiamento do caderno do PJe. Metadados internos, data de criação e ausência de assinatura criptográfica pertencem ao arquivo derivado e não permitem conclusão sobre o documento bancário nativo.",
+    "arquivos": [
+     "inicial.txt",
+     "contestacao.txt",
+     "procuracao.txt"
+    ]
+   }
+  ],
+  "candidates": [
+   {
+    "letra": "N",
+    "sev": 100,
+    "motivo": "A contestação veio desacompanhada de contrato e de comprovante.",
+    "bloqueados": []
+   },
+   {
+    "letra": "O",
+    "sev": 90,
+    "motivo": "Contratação eletrônica com trilha incompleta: o ataque é aos elementos técnicos e à distinção em relação ao REsp 2.197.156/SP.",
+    "bloqueados": []
+   }
+  ],
+  "nativeDocumentSelection": {
+   "status": "no-eligible-document",
+   "selected": null,
+   "candidates": [
+    {
+     "id": "002-contestacao.txt",
+     "predictedType": "contestacao",
+     "pages": 1,
+     "eligible": false,
+     "score": 6,
+     "positiveSignals": [
+      {
+       "code": "CCB",
+       "label": "Cédula de Crédito Bancário",
+       "weight": 8
+      }
+     ],
+     "caseLinks": [],
+     "linkStatus": "not-demonstrated",
+     "hardExclusions": [
+      {
+       "code": "KNOWN_JUDICIAL_DOCUMENT",
+       "reason": "Documento já reconhecido como peça judicial."
+      }
+     ],
+     "electronic": true,
+     "originalName": "contestacao.txt",
+     "sourceOriginalName": "contestacao.txt",
+     "sourceDocumentId": null,
+     "sourcePages": null,
+     "sourceProvenance": {
+      "kind": "original-upload",
+      "derived": false,
+      "tool": null,
+      "nativeMetadataAssessable": false,
+      "cryptographicSignatureAssessable": false
+     },
+     "sha256": "99439f9ca3e9e49769e9ead67b906dfd7a562d6ba9c1745d595e9d3a340a03d4"
+    },
+    {
+     "id": "001-inicial.txt",
+     "predictedType": "inicial",
+     "pages": 1,
+     "eligible": false,
+     "score": 4,
+     "positiveSignals": [],
+     "caseLinks": [
+      {
+       "type": "contract",
+       "value": "123456789"
+      }
+     ],
+     "linkStatus": "demonstrated",
+     "hardExclusions": [
+      {
+       "code": "KNOWN_JUDICIAL_DOCUMENT",
+       "reason": "Documento já reconhecido como peça judicial."
+      },
+      {
+       "code": "JUDICIAL_ADDRESSING",
+       "reason": "Endereçamento judicial localizado no início do documento."
+      }
+     ],
+     "electronic": false,
+     "originalName": "inicial.txt",
+     "sourceOriginalName": "inicial.txt",
+     "sourceDocumentId": null,
+     "sourcePages": null,
+     "sourceProvenance": {
+      "kind": "original-upload",
+      "derived": false,
+      "tool": null,
+      "nativeMetadataAssessable": false,
+      "cryptographicSignatureAssessable": false
+     },
+     "sha256": "18fd33a606c1fa875f3a46a59983606c1e87a5041dee707c9b71d77d66a9f353"
+    },
+    {
+     "id": "003-procuracao.txt",
+     "predictedType": "procuracao",
+     "pages": 1,
+     "eligible": false,
+     "score": -2,
+     "positiveSignals": [],
+     "caseLinks": [],
+     "linkStatus": "not-demonstrated",
+     "hardExclusions": [],
+     "electronic": false,
+     "originalName": "procuracao.txt",
+     "sourceOriginalName": "procuracao.txt",
+     "sourceDocumentId": null,
+     "sourcePages": null,
+     "sourceProvenance": {
+      "kind": "original-upload",
+      "derived": false,
+      "tool": null,
+      "nativeMetadataAssessable": false,
+      "cryptographicSignatureAssessable": false
+     },
+     "sha256": "9f491fd49cc77a70e8236a17d37414615a8ac107d2425dab60bacadcb6875a54"
+    }
+   ],
+   "ruleVersion": "native-document-selector-v1",
+   "reason": "Nenhum documento bancário sobreviveu às exclusões e apresentou sinal positivo nativo."
+  },
+  "answers": {
+   "contrato": "nada",
+   "portabilidade": "nao",
+   "contratacao": "eletronica",
+   "elementos_tecnicos": "incompletos",
+   "repasse": "nada",
+   "extrato": "ausente"
+  },
+  "review": {
+   "status": "pending",
+   "required": true,
+   "lowConfidenceFields": [
+    "cumulacao",
+    "repeticao",
+    "impossibilidade",
+    "valores"
+   ],
+   "checklist": [
+    "Conferir cada evidência no arquivo e na página indicados.",
+    "Validar manualmente valores, datas e texto obtido por OCR.",
+    "Reler a contestação antes de alegar ausência de impugnação específica.",
+    "Resolver os campos entre colchetes antes do protocolo."
+   ]
+  },
+  "custody": {
+   "originalsModified": false,
+   "temporaryCopiesDeleted": true,
+   "documents": [
+    {
+     "originalName": "inicial.txt",
+     "sha256": "18fd33a606c1fa875f3a46a59983606c1e87a5041dee707c9b71d77d66a9f353",
+     "size": 278
+    },
+    {
+     "originalName": "contestacao.txt",
+     "sha256": "99439f9ca3e9e49769e9ead67b906dfd7a562d6ba9c1745d595e9d3a340a03d4",
+     "size": 300
+    },
+    {
+     "originalName": "procuracao.txt",
+     "sha256": "9f491fd49cc77a70e8236a17d37414615a8ac107d2425dab60bacadcb6875a54",
+     "size": 131
+    }
+   ],
+   "preprocessing": {
+    "logicalDocuments": 3,
+    "documents": [
+     {
+      "originalName": "inicial.txt",
+      "displayName": "inicial.txt",
+      "sourceSha256": "18fd33a606c1fa875f3a46a59983606c1e87a5041dee707c9b71d77d66a9f353",
+      "sourcePages": null,
+      "documentId": null,
+      "provenance": {
+       "kind": "original-upload",
+       "derived": false,
+       "tool": null,
+       "nativeMetadataAssessable": false,
+       "cryptographicSignatureAssessable": false
+      }
+     },
+     {
+      "originalName": "contestacao.txt",
+      "displayName": "contestacao.txt",
+      "sourceSha256": "99439f9ca3e9e49769e9ead67b906dfd7a562d6ba9c1745d595e9d3a340a03d4",
+      "sourcePages": null,
+      "documentId": null,
+      "provenance": {
+       "kind": "original-upload",
+       "derived": false,
+       "tool": null,
+       "nativeMetadataAssessable": false,
+       "cryptographicSignatureAssessable": false
+      }
+     },
+     {
+      "originalName": "procuracao.txt",
+      "displayName": "procuracao.txt",
+      "sourceSha256": "9f491fd49cc77a70e8236a17d37414615a8ac107d2425dab60bacadcb6875a54",
+      "sourcePages": null,
+      "documentId": null,
+      "provenance": {
+       "kind": "original-upload",
+       "derived": false,
+       "tool": null,
+       "nativeMetadataAssessable": false,
+       "cryptographicSignatureAssessable": false
+      }
+     }
+    ]
+   }
+  }
+ },
+ "draft": {
+  "engine": {
+   "name": "Motor de Réplicas",
+   "caderno": {
+    "edicao": "2ª edição",
+    "sha256": "40c8bb1f317186de9dd38629dee3720306498a1c430cb5bc0bf682982990f8b1"
+   }
+  },
+  "status": "draft",
+  "readyForFiling": false,
+  "paragraphs": [
+   {
+    "t": "EXCELENTÍSSIMO(A) SENHOR(A) DOUTOR(A) JUIZ(A) DE DIREITO DA ___ VARA CÍVEL DA COMARCA DE ___________/___",
+    "b": true,
+    "tipo": "abertura"
+   },
+   {
+    "t": "Processo nº: [NÚMERO DO PROCESSO]",
+    "b": true,
+    "tipo": "abertura"
+   },
+   {
+    "t": "Autor(a): [NOME DO AUTOR]",
+    "b": true,
+    "tipo": "abertura"
+   },
+   {
+    "t": "Réu: CONTESTAÇÃO. BANCO EXEMPLO S.A.",
+    "b": true,
+    "tipo": "abertura"
+   },
+   {
+    "t": "[NOME DO AUTOR], já qualificado(a) nos autos da ação declaratória de inexistência de débito cumulada com repetição de indébito e indenização por danos morais que move em face de CONTESTAÇÃO. BANCO EXEMPLO S.A., vem, respeitosamente, por seu advogado que ao final subscreve, com fundamento no artigo 351 do Código de Processo Civil, à presença de Vossa Excelência apresentar",
+    "b": true,
+    "tipo": "abertura"
+   },
+   {
+    "t": "RÉPLICA À CONTESTAÇÃO",
+    "b": true,
+    "tipo": "rotulo"
+   },
+   {
+    "t": "I. SÍNTESE DA CONTROVÉRSIA",
+    "b": true,
+    "tipo": "capitulo"
+   },
+   {
+    "t": "A parte autora pede a declaração de inexistência do consignado. A contestação nega os fatos, mas não veio acompanhada de contrato, de autorização de consignação ou de comprovante de repasse.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "II. DA IMPUGNAÇÃO ESPECIFICADA DOS DOCUMENTOS APRESENTADOS COM A CONTESTAÇÃO",
+    "b": true,
+    "tipo": "capitulo"
+   },
+   {
+    "t": "Antes do mérito, e para que não se cogite adiante de aceitação tácita, a parte autora impugna de forma expressa e especificada todos os documentos que acompanharam a contestação. Impugna a autenticidade das assinaturas neles lançadas, impugna a idoneidade dos comprovantes de transferência apresentados e impugna a admissibilidade das telas de sistema produzidas unilateralmente pela própria ré.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "A impugnação produz consequência processual imediata, e convém explicitá-la. O artigo 411, inciso III, do Código de Processo Civil só considera autêntico o documento particular quando não houver impugnação da parte contra quem ele foi produzido. Feita a impugnação, incide o artigo 428, inciso I, e cessa a fé do documento enquanto não se comprovar sua veracidade. E o artigo 429, inciso II, define quem carrega esse encargo: a parte que produziu o documento, isto é, a instituição financeira. A manifestação encontra respaldo, ainda, no artigo 436, incisos I a IV, do mesmo diploma.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "Registre-se que a parte autora não se limita a negar de forma genérica. Nega e aponta, item por item, no capítulo próprio desta réplica, exatamente onde o documento falha. A distinção importa, porque a jurisprudência mais recente do Superior Tribunal de Justiça tem recusado a negativa vazia, desacompanhada de qualquer elemento, quando o restante do conjunto probatório aponta em sentido contrário. Aqui a impugnação é específica, motivada e ancorada no que os próprios autos revelam.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "III. DAS PRELIMINARES E DA PREJUDICIAL SUSCITADAS NA CONTESTAÇÃO",
+    "b": true,
+    "tipo": "capitulo"
+   },
+   {
+    "t": "III.3. Da impugnação à gratuidade da justiça",
+    "b": true,
+    "tipo": "corpo"
+   },
+   {
+    "t": "A declaração de hipossuficiência firmada por pessoa natural goza de presunção de veracidade, nos termos do artigo 99, parágrafo 3º, do Código de Processo Civil. A presunção só cede diante de prova em sentido contrário, e a instituição não trouxe prova alguma. Trouxe conjectura.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "A parte autora vive de benefício previdenciário no valor de [valor] e sofre desconto mensal de [valor], que é justamente o objeto desta ação. Ainda que se pretendesse superar a presunção, o artigo 99, parágrafo 2º, veda o indeferimento sem que antes se oportunize a comprovação. Requer-se, por isso, a rejeição da impugnação e, subsidiariamente, prazo para juntada de extrato do benefício e comprovante de residência.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "III.5. Da prejudicial de prescrição",
+    "b": true,
+    "tipo": "corpo"
+   },
+   {
+    "t": "A prejudicial não alcança nenhuma das pretensões deduzidas.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "O pedido declaratório de inexistência do negócio jurídico não se sujeita a prazo prescricional. Tratando-se de nulidade, incide o artigo 169 do Código Civil, segundo o qual o negócio nulo não convalesce pelo decurso do tempo.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "O pedido de repetição segue o artigo 27 do Código de Defesa do Consumidor, com prazo de cinco anos, e não o artigo 206, parágrafo 3º, do Código Civil, porque a relação é de consumo e o dano decorre de defeito na prestação do serviço bancário. Ainda que assim não fosse, os descontos são de trato sucessivo e se renovam a cada competência, de modo que o termo inicial acompanha cada parcela debitada.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "IV. DA DEFESA DESACOMPANHADA DE PROVA DOCUMENTAL",
+    "b": true,
+    "tipo": "capitulo"
+   },
+   {
+    "t": "A contestação nega os fatos e não junta nada. Não há contrato, não há autorização de consignação, não há comprovante de crédito, não há documento de identificação da autora e não há registro biométrico. Há apenas a negativa.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "O artigo 434 do Código de Processo Civil impõe à parte o dever de instruir a contestação com os documentos destinados a provar suas alegações. A ré descumpriu esse ônus, e a consequência não é a abertura de nova oportunidade, é o julgamento com o que existe nos autos.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "E o que existe nos autos é simples de enunciar: o extrato do benefício demonstra o desconto mensal, a autora nega a contratação e a instituição, que teria em mãos toda a documentação da operação, não exibiu uma folha sequer. Diante desse quadro, e à luz do artigo 373, inciso II, do Código de Processo Civil, a improcedência exigiria prova que a ré não produziu. A procedência é o desfecho que a instrução autoriza.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "Convém antecipar o argumento que a instituição costuma deduzir em fase recursal, para que ele não surpreenda. Alega-se, então, que a documentação existe e está arquivada, e requer-se prazo suplementar para juntada. O pedido não prospera. A prova documental preexistente tem momento próprio, e o momento passou. Admitir a juntada extemporânea de documento que sempre esteve à disposição da parte transformaria o artigo 434 em recomendação, além de premiar quem contesta sem os autos organizados e onerar quem litiga com verba alimentar comprometida.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "V. DA NÃO CONFORMIDADE DO DOCUMENTO COM O PADRÃO PROBATÓRIO DA SÚMULA 69 DO TRIBUNAL DE JUSTIÇA DO PIAUÍ",
+    "b": true,
+    "tipo": "capitulo"
+   },
+   {
+    "t": "A Súmula 69 do Tribunal de Justiça do Piauí não é enunciado de princípio. Ela lista, um a um, os elementos que o comprovante de repasse precisa reunir, e essa listagem permite conferência objetiva, item por item, sem margem para impressão pessoal.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "Confrontado o documento de fls. [__] com cada exigência do enunciado, o resultado é o seguinte:",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "a) autenticação bancária verificável: [ausente ou presente, e por quê];",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "b) emissão no âmbito do Sistema de Pagamentos Brasileiro, do Sistema de Pagamentos Instantâneos ou equivalente: [ausente ou presente];",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "c) identificação da instituição remetente: [ausente ou presente];",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "d) identificação da instituição destinatária: [ausente ou presente];",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "e) identificação das respectivas contas: [ausente ou presente];",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "f) valor transferido: [ausente ou presente];",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "g) data da operação: [ausente ou presente];",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "h) horário da operação: [ausente ou presente].",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "Os requisitos são cumulativos, e a redação do enunciado não comporta leitura diversa, pois diz que somente serão considerados idôneos os comprovantes que os reúnam. Faltando qualquer deles, o documento não presta à finalidade de comprovar o repasse, e essa conclusão não depende de valoração subjetiva do julgador: decorre da conferência do próprio papel.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "A parte final do enunciado decide a questão de forma ainda mais direta, porque descreve exatamente o documento que a ré apresentou. O Tribunal declarou que não se reputam idôneos, para esse fim, os demonstrativos unilaterais extraídos de sistemas internos das instituições financeiras, desprovidos de autenticação bancária ou de rastreabilidade perante o Banco Central do Brasil.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "Nada impede, contudo, que a instituição apresente documento que atenda ao padrão, se ele existir. Se a operação transitou pelo sistema de liquidação, o registro existe e a ré tem condições técnicas de exibi-lo. Requer-se, por isso, que seja intimada a fazê-lo, em prazo a ser fixado por Vossa Excelência, na forma dos artigos 396 a 400 do Código de Processo Civil, com a advertência do artigo 400, segundo o qual a omissão ou a recusa ilegítima autorizam o juiz a admitir como verdadeiros os fatos que a parte pretendia provar por meio do documento.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "O ponto merece registro claro, para que não se perca: a autora não pede que se presuma a fraude. Pede que se exija da instituição o documento que a própria regulação a obriga a manter e que a súmula do Tribunal define como único idôneo.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "VI. DA MOLDURA REGULATÓRIA DA CONTRATAÇÃO CONSIGNADA",
+    "b": true,
+    "tipo": "capitulo"
+   },
+   {
+    "t": "A formalização do consignado em benefício do INSS não é livre de forma, e a norma aplicável depende da data do contrato. É ponto que a contestação costuma embaralhar e que a réplica precisa organizar.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "VI.1. Da regra de direito intertemporal",
+    "b": true,
+    "tipo": "corpo"
+   },
+   {
+    "t": "Para contratos celebrados até 30 de novembro de 2022, aplica-se a Instrução Normativa INSS/PRES nº 28, de 2008, com as alterações vigentes à época. Para contratos celebrados a partir de 1º de dezembro de 2022, aplica-se a Instrução Normativa PRES/INSS nº 138, de 10 de novembro de 2022, cujo artigo 39 revogou expressamente a Instrução Normativa nº 28, de 2008, e cujo artigo 40 fixou a vigência naquela data.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "Confira a data do contrato antes de escolher os parágrafos seguintes. Invocar a IN 28/2008 para contrato de 2023 ou de 2024 é erro que a defesa aponta e que compromete a peça inteira.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "VI.2. Das exigências aplicáveis ao contrato dos autos",
+    "b": true,
+    "tipo": "corpo"
+   },
+   {
+    "t": "A Instrução Normativa PRES/INSS nº 138/2022 define, no artigo 4º, inciso VIII, o reconhecimento biométrico como a rotina que confirma a operação realizada pelo beneficiário junto à instituição consignatária, garantindo a integridade, o não repúdio, a autenticidade e a titularidade da manifestação. Não é formalidade decorativa: é o mecanismo pelo qual o sistema amarra o ato à pessoa que o praticou.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "O artigo 5º, incisos II e III, converte esse conceito em exigência. A autorização da consignação deve ser expressa e assinada com uso de reconhecimento biométrico. E o inciso III é categórico ao estabelecer que não se aceita autorização dada por ligação telefônica, nem se reconhece a gravação de voz como meio de prova da ocorrência. O dispositivo derruba, sozinho, a defesa que se ampara em áudio de central de atendimento ou em relatório de contato telefônico.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "O artigo 5º, parágrafo 5º, exige ainda que o instrumento de autorização para acesso a dados venha acompanhado de documento de identificação oficial, válido e com foto, do beneficiário, e que, sendo produzido de forma eletrônica, o arquivo contenha os requisitos de segurança que garantam sua integridade e o não repúdio.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "VI.3. Da regulação bancária aplicável",
+    "b": true,
+    "tipo": "corpo"
+   },
+   {
+    "t": "No campo da regulação do sistema financeiro, a Resolução CMN nº 4.935, de 29 de julho de 2021, resolve a alegação de culpa exclusiva de terceiro antes mesmo que ela seja formulada. O artigo 3º estabelece que o correspondente atua por conta e sob as diretrizes da instituição contratante, que assume inteira responsabilidade pelo atendimento prestado aos clientes e usuários por meio do contratado. O parágrafo único acrescenta que cabe à contratante garantir a integridade, a confiabilidade, a segurança e o sigilo das transações realizadas por intermédio do correspondente. Se a captação ocorreu em ponto de venda de rua, em loja de conveniência ou por preposto sem estrutura de conferência, o risco é da instituição, por norma expressa.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "A Circular BCB nº 3.978, de 23 de janeiro de 2020, com as alterações promovidas pelas Resoluções BCB nº 119/2021, nº 282/2022 e nº 344/2023, impõe procedimentos de identificação e de qualificação do cliente e determina, no artigo 18, parágrafo 5º, que as informações coletadas na qualificação sejam mantidas de forma auditável. A instituição que contrata sem observar esses procedimentos, ou que os observa e depois não consegue exibir o registro, não transfere ao consumidor a consequência da própria falha.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "VII. DO ÔNUS DA PROVA E DA INCIDÊNCIA DO TEMA 1.061 DO SUPERIOR TRIBUNAL DE JUSTIÇA",
+    "b": true,
+    "tipo": "capitulo"
+   },
+   {
+    "t": "Cabe à ré, e não à autora, a prova dos fatos impeditivos, modificativos ou extintivos do direito alegado, na forma do artigo 373, inciso II, do Código de Processo Civil. Ao sustentar a existência da dívida e a regularidade da cobrança, foi a instituição quem assumiu esse encargo, e dele não se desincumbiu. A parte autora afirma fato negativo, isto é, que não contratou e nada recebeu, e prova de fato negativo não se exige de ninguém.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "Sobre o ponto existe tese vinculante, e ela precisa ser lida com precisão, porque costuma ser invocada fora de lugar. No julgamento do Tema Repetitivo nº 1.061, o Superior Tribunal de Justiça fixou que, impugnada pelo consumidor a autenticidade da assinatura constante de contrato bancário juntado ao processo pela instituição financeira, cabe a esta o ônus de provar a autenticidade, nos termos dos artigos 6º, 369 e 429, inciso II, do Código de Processo Civil, por intermédio de perícia grafotécnica ou de outro meio de prova legal ou moralmente legítimo. Trata-se de tese sobre ônus de prova documental, e não sobre responsabilidade civil.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "O encaixe no caso dos autos é direto. No capítulo II desta réplica a autora impugnou expressamente a autenticidade das assinaturas apresentadas. Feita a impugnação, o encargo passou à ré. E a ré não requereu perícia grafotécnica, não trouxe laudo, não apresentou registro biométrico e não exibiu trilha de auditoria. Limitou-se a juntar o documento e a afirmar que ele vale. Não é assim que o precedente opera: ele exige da instituição um ato probatório concreto, e esse ato não foi praticado.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "O Código de Defesa do Consumidor reforça o quadro. Reconhece a vulnerabilidade no artigo 4º, inciso I, garante a informação adequada no artigo 6º, inciso III, e admite a inversão da prova no artigo 6º, inciso VIII. Toda a prova da regularidade da contratação e da liberação do crédito está em poder da instituição, única detentora dos sistemas capazes de produzi-la. Não as trazendo aos autos, a dúvida se resolve em favor da consumidora.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "VIII. DA RESPONSABILIDADE OBJETIVA DA INSTITUIÇÃO FINANCEIRA",
+    "b": true,
+    "tipo": "capitulo"
+   },
+   {
+    "t": "A responsabilidade da instituição financeira é objetiva e independe de culpa, nos termos do artigo 14 do Código de Defesa do Consumidor, cuja incidência sobre as instituições financeiras está pacificada pela Súmula 297 do Superior Tribunal de Justiça.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "A fraude eventualmente praticada por terceiro não afasta o dever de indenizar, porque configura fortuito interno, risco próprio da atividade bancária, da qual a instituição aufere lucro e pela qual deve responder. É o teor da Súmula 479 do mesmo Tribunal, segundo a qual as instituições financeiras respondem objetivamente pelos danos gerados por fortuito interno relativo a fraudes e delitos praticados por terceiros no âmbito de operações bancárias.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "A tese de culpa exclusiva de terceiro, quando alegada, esbarra ainda no artigo 3º da Resolução CMN nº 4.935/2021, já referido. Quem escolheu o correspondente, quem desenhou o fluxo de contratação, quem definiu o padrão de conferência documental e quem lucrou com a operação foi a ré.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "IX. DA REPETIÇÃO DO INDÉBITO E DA FORMA DA DEVOLUÇÃO",
+    "b": true,
+    "tipo": "capitulo"
+   },
+   {
+    "t": "Declarada a inexistência do contrato, os descontos perdem causa e o valor debitado deve retornar ao patrimônio da autora. A questão que a contestação costuma levantar diz respeito à forma da devolução, e ela tem resposta consolidada.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "No julgamento do EAREsp nº 676.608/RS, relatado pelo Ministro Og Fernandes, a Corte Especial do Superior Tribunal de Justiça fixou que a repetição em dobro prevista no parágrafo único do artigo 42 do Código de Defesa do Consumidor é cabível quando a cobrança indevida configurar conduta contrária à boa-fé objetiva, independentemente da natureza do elemento volitivo do fornecedor. Não se exige, portanto, prova de dolo ou de má-fé.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "A Corte Especial modulou os efeitos da tese. Em contratos de consumo que não envolvam prestação de serviço público, o entendimento alcança as cobranças realizadas após a publicação do acórdão, ocorrida em 30 de março de 2021.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "Daí decorre a regra prática que convém explicitar desde já, para evitar discussão em liquidação: os descontos efetuados até 30 de março de 2021 são restituídos de forma simples, e os posteriores a essa data, em dobro. Descontar de benefício previdenciário sem contrato válido, e persistir no desconto mesmo depois da reclamação da consumidora, é conduta que contraria a boa-fé objetiva de modo evidente.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "X. DO DANO MORAL",
+    "b": true,
+    "tipo": "capitulo"
+   },
+   {
+    "t": "O desconto indevido em benefício previdenciário não é aborrecimento cotidiano. Recai sobre verba de natureza alimentar, da qual a autora depende para se alimentar, para se medicar e para custear despesas básicas, e a subtração mensal dessa verba atinge diretamente a subsistência.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "A situação se agrava pela condição da autora, pessoa idosa, cuja proteção especial decorre do artigo 230 da Constituição e da Lei nº 10.741/2003. A doutrina consumerista trata essa condição como hipervulnerabilidade, e o conceito não é retórico: descreve exatamente o perfil que os fluxos de contratação irregular procuram, porque é o perfil que menos consegue conferir documento e reagir a tempo.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "Nessas circunstâncias, o dano decorre do próprio fato. Não se exige prova de abalo psíquico específico quando a lesão consiste em retirar, mês após mês, parcela do benefício de quem vive dele.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "Se houver, descreva aqui elementos concretos: negativação, corte de fornecimento, empréstimo tomado para cobrir a falta, atendimento médico, tentativas registradas de solução administrativa. Elemento concreto eleva o arbitramento.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "Quanto ao arbitramento, requer-se a observância da extensão do dano, da condição econômica da ré e do caráter pedagógico da condenação, considerando que a instituição atua em escala e que valores simbólicos convertem a indenização em mero custo operacional.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "XI. DO JULGAMENTO ANTECIPADO DO MÉRITO E DA ORDEM SUBSIDIÁRIA DE INSTRUÇÃO",
+    "b": true,
+    "tipo": "capitulo"
+   },
+   {
+    "t": "Os requerimentos que seguem são deduzidos em ordem, e a ordem é parte do pedido.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "Em primeiro lugar, a controvérsia é documental e se resolve pela leitura do que a ré juntou, ou deixou de juntar, aos autos. Não há fato testemunhável a esclarecer. A matéria está madura e incide o artigo 355, inciso I, do Código de Processo Civil, que autoriza o julgamento antecipado quando dispensável a produção de outras provas. Requer-se, nesse cenário, o julgamento antecipado com a procedência integral dos pedidos, uma vez que a ré, a quem competia a prova da regularidade e do repasse, dela não se desincumbiu.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "Em segundo lugar, e apenas na hipótese de Vossa Excelência entender necessária a produção de prova adicional, a parte autora requer, desde logo e de forma expressa, a exibição do instrumento contratual, da autorização de consignação e do comprovante de repasse, com todos os registros técnicos da contratação. O encargo e o custeio cabem à instituição financeira, que produziu o documento impugnado e detém, em caráter exclusivo, os registros correspondentes, na forma dos artigos 370, 373, inciso II, e 429, inciso II, do Código de Processo Civil. Subsidiariamente, sendo a autora beneficiária da gratuidade da justiça, incide o artigo 95, parágrafo 3º, do mesmo código.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "Este requerimento é afirmativo, e não protocolar, e convém explicar a razão. A parte autora não teme a prova: ela a requer, porque a prova está em poder da ré e porque a sua produção confirmará o que a réplica sustenta. Quem tem os registros e não os exibe é a instituição.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "O que não se admite é o terceiro caminho, que consiste em indeferir a prova requerida e, na sequência, julgar improcedente o pedido pela falta justamente daquela prova. O Tribunal de Justiça do Piauí sumulou a vedação. Diz a Súmula 67:",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "Configura cerceamento do direito de defesa quando o juiz, indeferindo a prova requerida pela parte, julga desprovida a pretensão com fundamento na ausência de prova, cuja realização foi injustificadamente obstada.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "A alternativa, portanto, é binária: ou a matéria está madura, e se julga procedente, ou a prova é necessária, e ela se produz às expensas de quem carrega o ônus. Requer-se, por fim, que eventual indeferimento seja expressamente fundamentado, ficando desde já consignado o protesto da parte autora, para os fins do artigo 1.009, parágrafo 1º, do Código de Processo Civil.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "XII. DOS PEDIDOS",
+    "b": true,
+    "tipo": "capitulo"
+   },
+   {
+    "t": "Ante o exposto, requer a parte autora:",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "a) a rejeição das preliminares e da prejudicial suscitadas na contestação;",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "b) o acolhimento da impugnação especificada dos documentos apresentados pela ré, com a incidência dos artigos 411, inciso III, 428, inciso I, e 429, inciso II, do Código de Processo Civil, e do Tema 1.061 do Superior Tribunal de Justiça;",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "c) a procedência integral dos pedidos, com a declaração de inexistência do contrato nº [número], ante a ausência integral de prova documental da contratação e do repasse;",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "d) o reconhecimento da insuficiência probatória da contestação, nos termos do artigo 373, inciso II, do Código de Processo Civil e dos artigos 6º, incisos III e VIII, do Código de Defesa do Consumidor;",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "e) a condenação da ré à restituição dos valores descontados, de forma simples quanto às parcelas debitadas até 30 de março de 2021 e em dobro quanto às posteriores a essa data, na forma do artigo 42, parágrafo único, do Código de Defesa do Consumidor e do decidido no EAREsp nº 676.608/RS;",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "f) a condenação da ré ao pagamento de indenização por danos morais, em valor a ser arbitrado por Vossa Excelência;",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "g) a intimação da ré para que exiba comprovante de repasse que reúna cumulativamente os requisitos da Súmula 69 do Tribunal de Justiça do Piauí, em prazo a ser fixado por Vossa Excelência, na forma dos artigos 396 a 400 do Código de Processo Civil, sob a advertência do artigo 400, admitindo-se como verdadeira, em caso de omissão ou recusa ilegítima, a ausência de repasse de valores à autora;",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "h) o julgamento antecipado do mérito, na forma do artigo 355, inciso I, do Código de Processo Civil, e, subsidiariamente, caso entendida necessária a instrução, a exibição do instrumento contratual, da autorização de consignação e do comprovante de repasse, com todos os registros técnicos da contratação, às expensas da ré, na forma dos artigos 370, 373, inciso II, e 429, inciso II, do mesmo código, e, subsidiariamente, do artigo 95, parágrafo 3º;",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "i) a condenação da ré ao pagamento das custas processuais e dos honorários advocatícios sucumbenciais.",
+    "b": false,
+    "tipo": "corpo"
+   },
+   {
+    "t": "Termos em que,",
+    "b": false,
+    "tipo": "fecho"
+   },
+   {
+    "t": "Pede deferimento.",
+    "b": false,
+    "tipo": "fecho"
+   },
+   {
+    "t": "[Cidade]/[UF], [data].",
+    "b": false,
+    "tipo": "fecho"
+   },
+   {
+    "t": "[NOME DO ADVOGADO]",
+    "b": true,
+    "tipo": "fecho"
+   },
+   {
+    "t": "OAB/[UF] nº [NÚMERO]",
+    "b": true,
+    "tipo": "fecho"
+   }
+  ],
+  "pendingPlaceholders": 21,
+  "warning": "Minuta gerada para revisão profissional; não está liberada para protocolo.",
+  "letter": "N"
+ }
+}

@@ -23,6 +23,8 @@ import DashboardLayout from "./components/Layout/DashboardLayout.jsx";
 // Rotas Privadas (SaaS)
 import Dashboard from "./pages/Dashboard.jsx";
 import Analyze from "./pages/Analyze.jsx";
+import Replica from "./pages/Replica.jsx";
+import Laudo from "./pages/Laudo.jsx";
 import History from "./pages/History.jsx";
 import Plans from "./pages/Plans.jsx";
 import Settings from "./pages/Settings.jsx";
@@ -83,6 +85,8 @@ function App() {
           <Route index element={<Dashboard />} />
           <Route path="analyze" element={<Analyze />} />
           <Route path="history" element={<History />} />
+          <Route path="replica" element={<Replica />} />
+          <Route path="laudo/:id" element={<Laudo />} />
           <Route path="plans" element={<Plans />} />
           <Route path="settings" element={<Settings />} />
           <Route path="admin" element={<AdminRoute><Admin /></AdminRoute>} />

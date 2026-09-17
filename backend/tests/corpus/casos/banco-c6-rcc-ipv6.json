@@ -2,10 +2,11 @@
  "origem": "Banco C6, dossiê de assinatura eletrônica de RCC",
  "adicionadoEm": "2026-08-04",
  "motivo": "O endereço de IP não era extraído: o regex só via IPv4 e este documento registra a conexão em IPv6, com porta lógica. É o caso que motivou utils/ipExtraction.js",
+ "revisao": "2026-09-16: com o motor pericial v2, contrato.numero passou a ser o número da CCB (CÉDULA DE CRÉDITO BANCÁRIO (CCB) Nº). O valor anterior, 900112233, é o Nº da Proposta do seguro e não identifica o contrato.",
  "esperado": {
   "cliente.cpf": "111.444.777-35",
   "contrato.banco": "BANCO C6",
-  "contrato.numero": "900112233",
+  "contrato.numero": "1234567890",
   "geolocalizacao_assinatura.latitude": "-4.2251337",
   "geolocalizacao_assinatura.longitude": "-61.1174528",
   "ips.0.endereco": "2804:18:aaaa:bbbb:c1c1:d2d2:e3e3:f4f4",

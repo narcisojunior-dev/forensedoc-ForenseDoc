@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Scale, Loader2, ShieldCheck } from "lucide-react";
+import { Loader2, ShieldCheck } from "lucide-react";
 import toast from "react-hot-toast";
 import { useAuthStore } from "../store/authStore";
+import logoImg from "../assets/logo.png";
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -90,13 +91,8 @@ export default function Login() {
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[400px] bg-primary/10 blur-[100px] rounded-full pointer-events-none" />
 
       <div className="sm:mx-auto sm:w-full sm:max-w-md relative z-10 text-center">
-        <Link to="/" className="inline-flex items-center gap-2 group mb-6">
-          <div className="bg-primary/10 p-2 rounded-lg border border-primary/20">
-            <Scale className="w-6 h-6 text-primary" />
-          </div>
-          <span className="font-bold text-2xl tracking-tight text-foreground">
-            Forense<span className="text-primary">Doc</span>
-          </span>
+        <Link to="/" className="inline-flex items-center group mb-6">
+          <img src={logoImg} alt="ForenseDoc" className="h-12 w-auto object-contain mx-auto transition-transform group-hover:scale-105" />
         </Link>
         <h2 className="text-3xl font-bold tracking-tight text-foreground">Acesse sua conta</h2>
         <p className="mt-2 text-sm text-zinc-400">

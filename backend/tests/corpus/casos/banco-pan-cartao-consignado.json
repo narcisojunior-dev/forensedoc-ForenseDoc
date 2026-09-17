@@ -2,12 +2,14 @@
  "origem": "Banco PAN, contrato de cartão de crédito consignado",
  "adicionadoEm": "2026-08-04",
  "motivo": "Contratante virava 'Do Cliente' pela flag /i anulando a classe de caixa alta; geolocalização com 3 casas decimais era dada como ausente; e o número do contrato capturava a palavra 'Documento'",
+ "revisao": "2026-09-16: com o motor pericial v2, contrato.modalidade distingue RMC de RCC em vez do rótulo genérico; o produto passa a ter campo próprio.",
  "esperado": {
   "cliente.nome": "Maria Aparecida Souza",
   "cliente.cpf": "111.444.777-35",
   "contrato.banco": "BANCO PAN",
   "contrato.numero": "900112233",
-  "contrato.modalidade": "Cartão consignado",
+  "contrato.modalidade": "RMC",
+  "contrato.produto": "Cartão consignado de benefício",
   "geolocalizacao_assinatura.latitude": "-8.221",
   "geolocalizacao_assinatura.longitude": "-35.11402",
   "ips.0.endereco": "177.104.55.201"
