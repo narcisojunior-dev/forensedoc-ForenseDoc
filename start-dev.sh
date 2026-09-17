@@ -7,8 +7,10 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Exportadas ANTES de subir o backend: o dotenv não sobrescreve variáveis que
 # já existem no ambiente, então isto vence o que estiver em backend/.env — que
 # aponta para o Railway (postgres.railway.internal) e não é alcançável daqui.
-export DATABASE_URL="${DATABASE_URL:-postgresql://forensedoc:forensedoc_dev@localhost:5432/forensedoc_dev}"
-export REDIS_URL="${REDIS_URL:-redis://localhost:6379}"
+# Sempre os bancos locais: herdar DATABASE_URL/REDIS_URL do shell ou do .env
+# apontava o backend para o Railway, e o worker de lá consumia os jobs locais.
+export DATABASE_URL="postgresql://forensedoc:forensedoc_dev@localhost:55432/forensedoc_dev"
+export REDIS_URL="redis://localhost:56379"
 export NODE_ENV="${NODE_ENV:-development}"
 
 if [ ! -f "$ROOT_DIR/backend/.env" ]; then

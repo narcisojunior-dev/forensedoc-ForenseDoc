@@ -21,8 +21,10 @@ services:
       POSTGRES_USER: forensedoc
       POSTGRES_PASSWORD: forensedoc_dev
       POSTGRES_DB: forensedoc_dev
+    # 55432 e 56379 no host: 5432 e 6379 costumam estar ocupadas por outro
+    # projeto, e aí o backend conectava em outro banco sem avisar.
     ports:
-      - "5432:5432"
+      - "55432:5432"
     volumes:
       - dev_pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -35,7 +37,7 @@ services:
     image: redis:7-alpine
     container_name: forensedoc_dev_redis
     ports:
-      - "6379:6379"
+      - "56379:6379"
     volumes:
       - dev_redisdata:/data
     healthcheck:
