@@ -83,7 +83,12 @@ export function segmentarDocumentos(texto) {
       documentos.push({ tipo: "OUTRO", titulo: "Documento não identificado", paginaInicial: numero, paginaFinal: numero, tituloDetectado: false, blocosAssinatura: [] });
     }
     const bloco = blocosDeAssinatura(pagina);
-    if (bloco) documentos.at(-1).blocosAssinatura.push({ pagina: numero, ...bloco });
+    if (bloco) {
+      // FINO-03 (rodada 2): no dossiê o quadro é descritivo, emitido pela própria
+      // instituição, e não assinatura aposta a instrumento negocial.
+      const tipo = documentos.at(-1).tipo === "DOSSIE" ? "QUADRO_DESCRITIVO" : "BLOCO_ASSINATURA";
+      documentos.at(-1).blocosAssinatura.push({ pagina: numero, tipo, ...bloco });
+    }
   });
 
   const titulados = documentos.filter((d) => d.tituloDetectado).length;
@@ -104,13 +109,22 @@ export function avaliarAssinaturaPorDocumento(segmentacao) {
   const principal = segmentacao.documentos.find((d) => d.tipo === "INSTRUMENTO_PRINCIPAL" && d.tituloDetectado);
   const acessoriosAssinados = segmentacao.documentos.filter((d) => d !== principal && d.tipo !== "DOSSIE" && d.blocosAssinatura.length);
   const faixa = (d) => (d.paginaInicial === d.paginaFinal ? `pág. ${d.paginaInicial}` : `págs. ${d.paginaInicial} a ${d.paginaFinal}`);
-  const resumo = segmentacao.documentos
-    .map((d) => `${d.titulo} (${faixa(d)}): ${d.blocosAssinatura.length ? `bloco de assinatura na pág. ${d.blocosAssinatura.map((b) => b.pagina).join(", ")}` : "sem bloco de assinatura"}`)
-    .join("; ");
+  const descrever = (d) => {
+    if (!d.blocosAssinatura.length) return "sem bloco de assinatura";
+    const paginas = (tipo) => d.blocosAssinatura.filter((b) => (b.tipo || "BLOCO_ASSINATURA") === tipo).map((b) => b.pagina);
+    return [
+      paginas("BLOCO_ASSINATURA").length ? `bloco de assinatura na pág. ${paginas("BLOCO_ASSINATURA").join(", ")}` : null,
+      paginas("QUADRO_DESCRITIVO").length ? `quadro descritivo de assinatura, emitido pela instituição, na pág. ${paginas("QUADRO_DESCRITIVO").join(", ")}` : null,
+    ].filter(Boolean).join(" e ");
+  };
+  const resumo = segmentacao.documentos.map((d) => `${d.titulo} (${faixa(d)}): ${descrever(d)}`).join("; ");
+  // Só blocos apostos a documento negocial contam como assinatura.
+  const totalBlocos = segmentacao.documentos.reduce((n, d) => n + d.blocosAssinatura.filter((b) => (b.tipo || "BLOCO_ASSINATURA") === "BLOCO_ASSINATURA").length, 0);
 
-  if (!principal || principal.blocosAssinatura.length || !acessoriosAssinados.length) return { achado: null, resumo };
+  if (!principal || principal.blocosAssinatura.length || !acessoriosAssinados.length) return { achado: null, resumo, totalBlocos };
   return {
     resumo,
+    totalBlocos,
     achado: {
       codigo: "ASS1",
       gravidade: "ALTA",

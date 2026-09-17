@@ -545,10 +545,14 @@ export default function LaudoForense({ report }) {
                           ["Somatório das parcelas", `${m.somatorio_calculado || "n/i"} calculado${m.somatorio_declarado ? ` contra ${m.somatorio_declarado} declarado` : ""} · ${ok(m.somatorio_confere) || "não aferido"}`],
                           ["Composição do financiado", `${m.composicao_financiado_calculada || "n/i"} calculado${m.composicao_componentes?.length ? ` (${m.composicao_componentes.map((c) => `${c.rotulo} ${c.localizado ? c.valor : "não localizado"}`).join(" + ")})` : ""} · ${ok(m.composicao_confere) || "não aferido"}`],
                           ["Valor presente pela taxa declarada", `${m.vp_taxa_declarada || "n/i"} · ${ok(m.vp_confere) || "não aferido"}`],
+                          ["Taxa implícita sobre o valor financiado", m.juros_implicito_mensal
+                            ? `${m.juros_implicito_mensal} a.m. · ${m.juros_implicito_confere ? "confere com" : "diverge da"} taxa declarada${m.juros_implicito_delta_pp !== null ? ` (diferença de ${Math.abs(m.juros_implicito_delta_pp).toFixed(3).replace(".", ",")} ponto)` : ""} · valor presente a essa taxa ${m.vp_taxa_implicita}`
+                            : null],
                           ["CET implícito mensal", m.cet_implicito_mensal
                             ? `${m.cet_implicito_mensal}${m.cet_implicito_anual_calculado ? ` (${m.cet_implicito_anual_calculado} a.a. em 365 dias)` : ""}${m.cet_implicito_nota ? ` · ${m.cet_implicito_nota}` : ""} · ${m.cet_implicito_veredito || "não aferido"}`
                             : m.cet_implicito_motivo ? `não aferido: ${m.cet_implicito_motivo}` : null],
-                          ["Anualização do CET mensal declarado", m.cet_anual_calculado ? `${m.cet_anual_calculado} em 365 dias · ${m.cet_anual_calculado_12m} em 12 meses${m.cet_anual_convencao ? ` · contrato usa ${m.cet_anual_convencao}` : ""} · ${ok(m.cet_anual_confere) || "não aferido"}` : null],
+                          [m.cet_anual_base === "IMPLICITO" ? `Anualização do CET implícito (${m.cet_anual_base_mensal} a.m.)` : "Anualização do CET mensal declarado", m.cet_anual_calculado ? `${m.cet_anual_calculado} em 365 dias · ${m.cet_anual_calculado_12m} em 12 meses${m.cet_anual_convencao ? ` · contrato usa ${m.cet_anual_convencao}` : ""} · ${ok(m.cet_anual_confere) || "não aferido"}` : null],
+                          ["Anualização do CET mensal declarado, arredondado (informativa)", m.cet_anual_calculado_declarado ? `${m.cet_anual_calculado_declarado} em 365 dias` : null],
                           ["Anualização da taxa de juros mensal", m.juros_anual_calculado_365 ? `${m.juros_anual_calculado_365} em 365 dias · ${m.juros_anual_calculado_12m} em 12 meses${m.juros_anual_convencao ? ` · contrato usa ${m.juros_anual_convencao}` : ""} · ${ok(m.juros_anual_confere) || "não aferido"}` : null],
                           ["CET maior que taxa de juros", ok(m.cet_maior_que_juros)],
                         ].map(([lbl, val]) => <Row key={lbl} label={lbl} value={val} />)}
@@ -738,6 +742,7 @@ export default function LaudoForense({ report }) {
                         ["Telefone/celular do aceite", a.telefone_aceite],
                         ["Menção textual de assinatura", a.mencao_textual ? `${a.mencao_textual}${a.mencao_textual_documento ? ` (${a.mencao_textual_documento})` : ""}` : null],
                         ["Blocos de assinatura por documento", a.blocos_por_documento],
+                        ["Blocos de assinatura em documentos negociais", Number.isFinite(a.blocos_assinatura_total) ? String(a.blocos_assinatura_total) : null],
                         ["Assinatura textual/manual no corpo", a.assinatura_manual_textual],
                         ["Código de autenticação declarado", a.codigo_autenticacao_declarado],
                         ["Origem do código de autenticação", a.codigo_autenticacao_origem],

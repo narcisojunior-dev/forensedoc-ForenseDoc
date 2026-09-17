@@ -217,6 +217,15 @@ export function buildMathAudit(contract) {
   const fluxoValido = dataBase && fluxos.length && fluxos.every(({ data }) => diasEntre(dataBase, data) >= 0);
   const vpTaxaDeclarada = jurosMensal && fluxoValido ? valorPresente(jurosMensal, fluxos, dataBase) : null;
 
+  // FINO-01 (rodada 2): taxa implícita sobre o valor financiado. O valor presente
+  // pela taxa declarada arredondada (5,06%) não coincide ao centavo com o
+  // financiado; a taxa que coincide é mostrada ao lado, sem trocar o número que
+  // a taxa declarada produz.
+  const tirFinanciado = financiado && fluxoValido ? taxaImplicita({ valorPresenteAlvo: financiado, fluxos, dataBase }) : null;
+  const jurosImplicito = tirFinanciado?.status === "AFERIDO" ? tirFinanciado.taxa : null;
+  const jurosImplicitoDeltaPp = jurosImplicito !== null && jurosMensal !== null ? (jurosMensal - jurosImplicito) * 100 : null;
+  const vpTaxaImplicita = jurosImplicito !== null ? valorPresente(jurosImplicito, fluxos, dataBase) : null;
+
   // ── CET implícito: só com raiz verificada ──────────────────────────────────
   const tir = liberado && fluxos.length
     ? taxaImplicita({ valorPresenteAlvo: liberado, fluxos, dataBase })
@@ -246,7 +255,14 @@ export function buildMathAudit(contract) {
           : `CET declarado inferior ao implícito no fluxo em ${Math.abs(cetDeltaPp).toFixed(2).replace(".", ",")} ponto percentual; indício de subdeclaração. ${memoriaTexto}`;
 
   // ── Anualização pelas duas convenções ──────────────────────────────────────
-  const cetAnualizado = cetMensal !== null ? conferirAnualizacao(cetMensal, cetAnual) : null;
+  // FINO-02 (rodada 2): com o CET implícito aferido e conferindo com o declarado,
+  // a anualização parte dele, e não do mensal arredondado (7,59% dava 143,53%
+  // contra os 143,52% do contrato). A conta pelo declarado fica informativa.
+  const anualizaPeloImplicito = cetImplicito !== null && cetImplicitoVeredito === "Confere" && cetDeltaPp !== null && Math.abs(cetDeltaPp) <= TOLERANCIA_TAXA_PP;
+  const cetAnualizado = anualizaPeloImplicito
+    ? conferirAnualizacao(cetImplicito, cetAnual)
+    : cetMensal !== null ? conferirAnualizacao(cetMensal, cetAnual) : null;
+  const cetDeclaradoAnualizado = anualizaPeloImplicito && cetMensal !== null ? conferirAnualizacao(cetMensal, cetAnual) : null;
   const jurosAnualizado = jurosMensal !== null ? conferirAnualizacao(jurosMensal, jurosAnual) : null;
   const cetImplicitoAnual = cetImplicito !== null ? conferirAnualizacao(cetImplicito, null) : null;
 
@@ -273,6 +289,11 @@ export function buildMathAudit(contract) {
     vp_taxa_declarada: moeda(vpTaxaDeclarada),
     vp_taxa_declarada_numero: vpTaxaDeclarada,
     vp_confere: financiado !== null && vpTaxaDeclarada !== null ? Math.abs(financiado - vpTaxaDeclarada) <= 2 : null,
+    juros_implicito_mensal: jurosImplicito === null ? null : pct(jurosImplicito, 4),
+    juros_implicito_mensal_numero: jurosImplicito,
+    juros_implicito_delta_pp: jurosImplicitoDeltaPp === null ? null : Number(jurosImplicitoDeltaPp.toFixed(4)),
+    juros_implicito_confere: jurosImplicitoDeltaPp === null ? null : Math.abs(jurosImplicitoDeltaPp) <= TOLERANCIA_TAXA_PP,
+    vp_taxa_implicita: moeda(vpTaxaImplicita),
     cet_implicito_status: tir.status,
     cet_implicito_motivo: tir.status === "AFERIDO" ? null : tir.motivo,
     cet_implicito_mensal: cetImplicito === null ? null : pct(cetImplicito, 4),
@@ -283,6 +304,9 @@ export function buildMathAudit(contract) {
     cet_implicito_nota: cetImplicitoNota,
     memoria_calculo_cet: tir.memoria,
     cet_anual_calculado: cetAnualizado ? pct(cetAnualizado.dias365) : null,
+    cet_anual_base: cetAnualizado ? (anualizaPeloImplicito ? "IMPLICITO" : "DECLARADO") : null,
+    cet_anual_base_mensal: cetAnualizado ? pct(anualizaPeloImplicito ? cetImplicito : cetMensal, anualizaPeloImplicito ? 4 : 2) : null,
+    cet_anual_calculado_declarado: cetDeclaradoAnualizado ? pct(cetDeclaradoAnualizado.dias365) : null,
     cet_anual_calculado_12m: cetAnualizado ? pct(cetAnualizado.meses12) : null,
     cet_anual_convencao: cetAnualizado?.convencao || null,
     cet_anual_confere: cetAnualizado?.confere ?? null,
@@ -1369,6 +1393,7 @@ export function heuristicExtractionFromText(rawText) {
   extracted.documentos_logicos = segmentacao;
   if (extracted.assinatura) {
     extracted.assinatura.blocos_por_documento = assinaturaPorDocumento.resumo;
+    extracted.assinatura.blocos_assinatura_total = assinaturaPorDocumento.resumo ? assinaturaPorDocumento.totalBlocos : null;
     // A menção textual sempre com o documento de origem: a legenda de uma
     // proposta de seguro não é assinatura da cédula.
     const mencao = extracted.assinatura.mencao_textual;

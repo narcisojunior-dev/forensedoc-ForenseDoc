@@ -169,3 +169,31 @@ describe("MED-03: IMG2 de template fora do corpo", () => {
     expect(achados.find((a) => a.codigo === "IMG2")).toMatchObject({ severidade: "CRÍTICO" });
   });
 });
+
+describe("ajustes finos da rodada 2", () => {
+  const m = extraido.afericao_matematica;
+
+  it("FINO-01 (D4): valor presente pela taxa declarada mantido, com a taxa implícita sobre o financiado ao lado", () => {
+    expect(m.vp_taxa_declarada).toBe("R$ 2.034,08");
+    expect(m.vp_confere).toBe(true);
+    expect(m.juros_implicito_mensal).toBe("5,0620%");
+    expect(m.juros_implicito_confere).toBe(true);
+    expect(m.vp_taxa_implicita).toBe("R$ 2.033,86");
+  });
+
+  it("FINO-02: anualização pelo CET implícito fecha com os 143,52% do contrato", () => {
+    expect(m.cet_anual_base).toBe("IMPLICITO");
+    expect(m.cet_anual_base_mensal).toBe("7,5894%");
+    expect(m.cet_anual_calculado).toBe("143,52%");
+    expect(m.cet_anual_calculado_declarado).toBe("143,53%");
+    expect(m.cet_anual_confere).toBe(true);
+  });
+
+  it("FINO-03 (D6): quadro da pág. 1 do dossiê é descritivo e fica fora da contagem", () => {
+    const dossie = extraido.documentos_logicos.documentos.find((d) => d.tipo === "DOSSIE");
+    expect(dossie.blocosAssinatura.map((b) => b.tipo)).toEqual(["QUADRO_DESCRITIVO"]);
+    expect(extraido.assinatura.blocos_por_documento).toMatch(/Dossiê probatório \(págs\. 1 a 2\): quadro descritivo de assinatura, emitido pela instituição, na pág\. 1/);
+    expect(extraido.assinatura.blocos_por_documento).toMatch(/Cédula de Crédito Bancário \(condições específicas\) \(págs\. 3 a 7\): bloco de assinatura na pág\. 6/);
+    expect(extraido.assinatura.blocos_assinatura_total).toBe(2);
+  });
+});

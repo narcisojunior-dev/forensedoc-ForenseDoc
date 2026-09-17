@@ -407,6 +407,7 @@ function sectionSignature(ctx, extracted, result = {}) {
   if (a.metodos_mencionados_clausulado?.length) field(ctx, "Métodos apenas mencionados no clausulado", a.metodos_mencionados_clausulado.join(" · "));
   if (a.mencao_textual) field(ctx, "Menção textual de assinatura", `${a.mencao_textual}${a.mencao_textual_documento ? ` (${a.mencao_textual_documento})` : ""}`);
   if (a.blocos_por_documento) paragraph(ctx, `Blocos de assinatura por documento: ${a.blocos_por_documento}.`, { size: 8.5 });
+  if (Number.isFinite(a.blocos_assinatura_total)) field(ctx, "Blocos de assinatura em documentos negociais", a.blocos_assinatura_total);
   if (a.codigo_autenticacao_declarado) {
     field(ctx, "Hash declarado", a.hash_documento_assinado ? "Declarado" : "Ausente");
     field(ctx, "Código de autenticação", `Declarado, conferível apenas pelo emissor (${a.codigo_autenticacao_origem || "origem não identificada"})`);
@@ -1135,12 +1136,20 @@ function sectionEconomics(ctx, extracted) {
     confere("Composição do financiado", m.composicao_confere, m.composicao_financiado_calculada);
     if (m.composicao_nota) paragraph(ctx, m.composicao_nota, { color: MUTED, size: 8.5 });
     confere("Valor presente pela taxa declarada", m.vp_confere, m.vp_taxa_declarada);
+    if (m.juros_implicito_mensal) {
+      field(
+        ctx,
+        "Taxa implícita sobre o valor financiado",
+        `${m.juros_implicito_mensal} a.m. · ${m.juros_implicito_confere ? "confere com" : "diverge da"} taxa declarada${m.juros_implicito_delta_pp !== null ? ` (diferença de ${Math.abs(m.juros_implicito_delta_pp).toFixed(3).replace(".", ",")} ponto)` : ""} · valor presente a essa taxa ${m.vp_taxa_implicita}`
+      );
+    }
     // As duas convenções lado a lado: a diferença entre elas não é divergência.
     confere(
-      "CET anual × CET mensal",
+      m.cet_anual_base === "IMPLICITO" ? `CET anual × CET implícito ${m.cet_anual_base_mensal} a.m.` : "CET anual × CET mensal",
       m.cet_anual_confere,
       m.cet_anual_calculado ? `365 dias ${m.cet_anual_calculado} · 12 meses ${m.cet_anual_calculado_12m}${m.cet_anual_convencao ? ` · contrato usa ${m.cet_anual_convencao}` : ""}` : null
     );
+    if (m.cet_anual_calculado_declarado) field(ctx, "Anualização do CET mensal declarado, arredondado (informativa)", `${m.cet_anual_calculado_declarado} em 365 dias`);
     confere(
       "Juros anual × juros mensal",
       m.juros_anual_confere,
