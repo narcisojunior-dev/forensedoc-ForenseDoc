@@ -675,6 +675,21 @@ export default function LaudoForense({ report }) {
                   </div>
                 )}
 
+                {/* Verificação de endereços, dois a dois: cada linha diz o que compara. */}
+                {report.confrontoEnderecos?.pares?.length > 0 && (
+                  <>
+                    <div className="sub-head">Verificação de endereços (confrontos dois a dois)</div>
+                    {report.confrontoEnderecos.pares.map((par) => (
+                      <Row key={par.id} label={par.rotulo} value={par.texto || (par.indisponivel?.length ? "não aferido" : null)} />
+                    ))}
+                    {report.confrontoEnderecos.pontos?.instrumento?.precisao === "municipio" && (
+                      <div className="note">
+                        O endereço do instrumento foi resolvido em nível de município ({report.confrontoEnderecos.pontos.instrumento.rotulo}), porque a instituição não registrou o endereço do contratante. As distâncias que partem dele são aproximadas.
+                      </div>
+                    )}
+                  </>
+                )}
+
                 <div className="sub-head">Endereço de referência (ponto de origem das distâncias)</div>
                 {report.home.alerta && (
                   <div className="note" style={{ borderLeftColor: "var(--crit)", background: "rgba(240,99,99,0.07)" }}>

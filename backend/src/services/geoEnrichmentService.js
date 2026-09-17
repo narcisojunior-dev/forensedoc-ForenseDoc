@@ -7,6 +7,7 @@ import { describeIpDivergence, classifyDeclaredDivergence, aplicarHistoricoDoIp 
 import { lookupRdapIp } from "./rdapService.js";
 import { parseUserAgentForensic } from "../utils/userAgentParser.js";
 import { ESTADO_CONFRONTO, avaliarConflitoReferencia, descreverEstadoConfronto } from "../utils/referenciaResidencial.js";
+import { montarConfrontoEnderecos } from "../utils/confrontoEnderecos.js";
 
 /**
  * Confronto geográfico do §5 do laudo (Módulo 4, Fase A).
@@ -125,6 +126,25 @@ export async function enrichGeography(extracted, homeAddress, homeCoord = null, 
   } else {
     homeGeo = homeQuery ? await geocodeAddress(homeQuery) : null;
   }
+
+  // Ponto do endereço que o próprio instrumento registra. Com o endereço do
+  // contratante em branco, vale a sede do município declarado, com a precisão
+  // anotada: é o que o dossiê afirma sobre onde o contratante está.
+  const consultaInstrumento = extractedAddr || [instrumento.cidade, instrumento.uf, instrumento.cep].filter(Boolean).join(", ");
+  const geoInstrumento = consultaInstrumento ? await geocodeAddress(consultaInstrumento).catch(() => null) : null;
+  const pontoInstrumento = geoInstrumento && Number.isFinite(geoInstrumento.lat)
+    ? {
+        lat: geoInstrumento.lat,
+        lon: geoInstrumento.lon,
+        rotulo: consultaInstrumento,
+        precisao: extractedAddr ? geoInstrumento.precision || "endereco" : "municipio",
+      }
+    : null;
+  // A referência informada na geração do laudo continua registrada mesmo quando
+  // é recusada como referência: a distância até o instrumento mede o conflito.
+  const pontoLaudo = referenciaManual && homeGeo && Number.isFinite(homeGeo.lat)
+    ? { lat: homeGeo.lat, lon: homeGeo.lon, rotulo: homeQuery, precisao: homeGeo.precision || null }
+    : null;
 
   let estadoConfronto = ESTADO_CONFRONTO.DISPONIVEL;
   let conflito = null;
@@ -248,6 +268,14 @@ export async function enrichGeography(extracted, homeAddress, homeCoord = null, 
     contractToHomeKm = haversineKm(homeGeo.lat, homeGeo.lon, contractGeo.lat, contractGeo.lon);
   }
 
+  const pontoIp = ipAnalysis.find((ip) => Number.isFinite(ip.geo?.lat) && Number.isFinite(ip.geo?.lon));
+  const confrontoEnderecos = montarConfrontoEnderecos({
+    instrumento: pontoInstrumento,
+    laudo: pontoLaudo,
+    ip: pontoIp ? { lat: pontoIp.geo.lat, lon: pontoIp.geo.lon, rotulo: [pontoIp.geo.city, pontoIp.geo.region].filter(Boolean).join("/") || pontoIp.endereco, precisao: "ip" } : null,
+    gps: contractGeo ? { lat: contractGeo.lat, lon: contractGeo.lon, rotulo: contractGeo.municipio || "coordenada do log", precisao: "gps" } : null,
+  });
+
   const home = {
     query: homeQuery,
     source: homeSource,
@@ -258,11 +286,14 @@ export async function enrichGeography(extracted, homeAddress, homeCoord = null, 
     instrumento,
     endereco_literal: cliente.endereco_literal || cliente.estados_campos?.endereco?.valor || null,
     endereco_nao_informado: enderecoNaoInformado,
+    instrumento_geo: pontoInstrumento,
+    referencia_informada_geo: pontoLaudo,
   };
   home.alerta = descreverEstadoConfronto(home);
 
   return {
     home,
+    confronto_enderecos: confrontoEnderecos,
     // A classificação do Confronto 2 é persistida junto com a distância, pelo
     // mesmo motivo de `divergenciaResidencia`: PDF e tela leem a MESMA análise.
     // Enquanto cada lado calculava a sua, as duas versões do laudo divergiam —

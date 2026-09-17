@@ -4,6 +4,7 @@ import { buildCustodyChain } from "../reports/custodyChain.js";
 import { buildIrregularitySummary } from "../engine/irregularitySummary.js";
 import { verificarCoerencia, coerenciaBloqueante } from "../engine/coerenciaLaudo.js";
 import { montarConfrontoGeografico } from "../utils/distancia.js";
+import { montarConfrontoEnderecos } from "../utils/confrontoEnderecos.js";
 
 /**
  * Sumário executivo do motor pericial (placar de gravidade, GPS x IP,
@@ -25,6 +26,7 @@ export function buildSummaryForResult(result, extracted) {
       extracted,
       home: result.home,
       confronto_geografico: result.confronto_geografico || montarConfrontoGeografico(result),
+      confronto_enderecos: result.confronto_enderecos || montarConfrontoEnderecos(pontosDoConfronto(result)),
       contractGeo: result.contractGeo,
       geoDeclaredPresent: result.geoDeclaredPresent,
       ipAnalysis: result.ipAnalysis || [],
@@ -63,6 +65,22 @@ export function buildSummaryForResult(result, extracted) {
  * em microssegundos, o que é o que permite a correção ser síncrona na requisição
  * em vez de virar mais um job na fila.
  */
+/** Pontos dos quatro pares, a partir do resultado já recalculado. */
+export function pontosDoConfronto(result) {
+  const ip = (result.ipAnalysis || []).find((i) => Number.isFinite(i.geo?.lat) && Number.isFinite(i.geo?.lon));
+  const laudo = result.home?.geo && Number.isFinite(result.home.geo.lat)
+    ? { lat: result.home.geo.lat, lon: result.home.geo.lon, rotulo: result.home.query, precisao: result.home.geo.precision || null }
+    : result.home?.referencia_informada_geo || null;
+  return {
+    instrumento: result.home?.instrumento_geo || null,
+    laudo,
+    ip: ip ? { lat: ip.geo.lat, lon: ip.geo.lon, rotulo: [ip.geo.city, ip.geo.region].filter(Boolean).join("/") || ip.endereco, precisao: "ip" } : null,
+    gps: result.contractGeo && Number.isFinite(result.contractGeo.lat)
+      ? { lat: result.contractGeo.lat, lon: result.contractGeo.lon, rotulo: result.contractGeo.municipio || "coordenada do log", precisao: "gps" }
+      : null,
+  };
+}
+
 export function recomputeDerived(result, extracted) {
   const home = result.home?.geo;
   const referenciaConfirmada = home?.precision === "manual";
@@ -116,6 +134,7 @@ export function recomputeDerived(result, extracted) {
 
   const recalculado = { ...result, contractGeo, ipAnalysis };
   recalculado.confronto_geografico = montarConfrontoGeografico(recalculado);
+  recalculado.confronto_enderecos = montarConfrontoEnderecos(pontosDoConfronto(recalculado));
   const sumarioIrregularidades = buildSummaryForResult(recalculado, extracted);
   return {
     ...recalculado,

@@ -72,3 +72,56 @@ describe("MED-05: quesitos por achado", () => {
     expect(lib.quesito).toMatch(/R\$ 1\.779,15 na conta 005555-1, agência 1234, Banco 237/);
   });
 });
+
+describe("verificação de endereços na tela", () => {
+  const comPares = {
+    ...semDistancias,
+    home: { query: "Rua X - Pedro II - PI", source: "Informado manualmente", geo: null, estado_confronto: "RECUSADO_CONFLITO", alerta: "CONFRONTO RECUSADO: conflito de UF." },
+    confronto_enderecos: {
+      pontos: { instrumento: { lat: -3.44, lon: -60.45, rotulo: "Manaquiri, AM, 69435-000", precisao: "municipio" }, laudo: { lat: -4.42, lon: -41.45 }, ip: { lat: -3.29, lon: -60.62 }, gps: { lat: -3.43, lon: -60.45 } },
+      pares: [
+        { id: "ip-x-instrumento", rotulo: "IP do dossiê × endereço do instrumento", papel: "instrumento", km: 73.4, texto: "73,4 km", indisponivel: null, precisao: "municipio" },
+        { id: "laudo-x-instrumento", rotulo: "Endereço informado no laudo × endereço do instrumento", papel: "instrumento", km: 2153, texto: "2.153 km", indisponivel: null, precisao: "municipio" },
+        { id: "ip-x-laudo", rotulo: "IP do dossiê × endereço informado no laudo", papel: "laudo", km: 2130, texto: "2.130 km", indisponivel: null, precisao: "ip" },
+        { id: "gps-x-ip", rotulo: "GPS da assinatura × IP do dossiê", papel: "gps", km: 23.31, texto: "23,3 km", indisponivel: null, precisao: "ip" },
+      ],
+    },
+    sumarioIrregularidades: {
+      ...resultado.sumarioIrregularidades,
+      geo: {
+        modo: "pares",
+        referencia: "pares",
+        description: "Confronto de endereços, dois a dois.",
+        items: [
+          { label: "IP × instrumento", distance: 73.4, texto: "73,4 km", role: "instrumento", referencia: "par", par: "ip-x-instrumento" },
+          { label: "Laudo × instrumento", distance: 2153, texto: "2.153 km", role: "instrumento", referencia: "par", par: "laudo-x-instrumento" },
+          { label: "IP × laudo", distance: 2130, texto: "2.130 km", role: "laudo", referencia: "par", par: "ip-x-laudo" },
+          { label: "GPS × IP", distance: 23.31, texto: "23,3 km", role: "gps", referencia: "par", par: "gps-x-ip" },
+        ],
+      },
+    },
+  };
+
+  it("o § 3 lista os quatro pares e avisa a precisão de município", () => {
+    const { container } = render(<LaudoForense report={montarRelatorio({ analysisId: "a1", result: comPares })} />);
+    const texto = container.textContent;
+    expect(texto).toContain("Verificação de endereços (confrontos dois a dois)");
+    expect(texto).toContain("IP do dossiê × endereço do instrumento73,4 km");
+    expect(texto).toContain("Endereço informado no laudo × endereço do instrumento2.153 km");
+    expect(texto).toContain("IP do dossiê × endereço informado no laudo2.130 km");
+    expect(texto).toContain("GPS da assinatura × IP do dossiê23,3 km");
+    expect(texto).toMatch(/resolvido em nível de município \(Manaquiri, AM, 69435-000\)/);
+  });
+
+  it("o sumário desenha os quatro pares, com título e legenda próprios", () => {
+    const report = montarRelatorio({ analysisId: "a1", result: comPares });
+    const { container } = render(<LaudoForense report={report} />);
+    const texto = container.textContent;
+    expect(texto).toContain("VERIFICAÇÃO DE ENDEREÇOS: OS CONFRONTOS QUE IMPORTAM");
+    expect(texto).toContain("com o endereço do instrumento");
+    expect(texto).toContain("com o endereço do laudo");
+    expect(report.sumarioIrregularidades.geo.items).toHaveLength(4);
+    expect(container.querySelector(".summary-geo-chart")).not.toBeNull();
+  });
+});
+

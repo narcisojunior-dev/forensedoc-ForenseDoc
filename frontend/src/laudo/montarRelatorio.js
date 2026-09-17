@@ -10,6 +10,8 @@ const CHAVES_DISTANCIA_RESIDENCIA = new Set(["gps-near-home", "gps-home-distance
  * residência: são descartados e refeitos a partir do enriquecimento.
  */
 function geoMedidoAteOGps(geo, ipAnalysis, contractGeo) {
+  // Pares de endereços já dizem o que comparam: passam inteiros.
+  if (geo.modo === "pares") return { ...geo, items: (geo.items || []).filter((i) => distanciaKm(i.distance) !== null) };
   const valida = (km) => distanciaKm(km) !== null && !distanciaSuspeita(km);
   const items = geo.referencia === "gps"
     ? (geo.items || []).filter((i) => i.referencia === "gps" && valida(i.distance))
@@ -40,6 +42,9 @@ function sanearSumario(sumario, home, ipAnalysis, contractGeo) {
   const recusado = ["RECUSADO_CONFLITO", "INDISPONIVEL_NAO_INFORMADO"].includes(home?.estado_confronto);
   const semDistancia = distanciaKm(contractGeo?.distance) === null && ipAnalysis.every((ip) => distanciaKm(ip.distance) === null);
   const valida = (km) => distanciaKm(km) !== null && !distanciaSuspeita(km);
+  if (sumario.geo?.modo === "pares") {
+    return { ...sumario, geo: { ...sumario.geo, items: (sumario.geo.items || []).filter((i) => distanciaKm(i.distance) !== null) } };
+  }
   if (!recusado && !semDistancia) {
     return { ...sumario, geo: sumario.geo ? { ...sumario.geo, items: (sumario.geo.items || []).filter((i) => valida(i.distance)) } : sumario.geo };
   }
@@ -139,6 +144,7 @@ export function montarRelatorio({ analysisId, result, createdAt }) {
       conflito: home.conflito || null,
       justificativa: home.justificativa || null,
     },
+    confrontoEnderecos: result?.confronto_enderecos || null,
     contractGeo: result?.contractGeo || null,
     geoDeclaredPresent: Boolean(result?.geoDeclaredPresent),
     ipAnalysis,

@@ -171,14 +171,18 @@ describe("dossiê C6: testes negativos do relatório de homologação", () => {
       expect(s.checks.find((c) => c.key === "gps-residencia")).toMatchObject({ status: "INDETERMINADO" });
     });
 
-    it("negativo 3: o gráfico não tem ponto medido até a residência, e passa a medir o IP até o GPS", async () => {
+    it("negativo 3: nenhum ponto do gráfico mede a residência; os pares de endereços dizem o que comparam", async () => {
       const r = await montarResultado();
       const geo = r.sumarioIrregularidades.geo;
-      expect(geo.referencia).toBe("gps");
-      expect(geo.items.length).toBeGreaterThan(0);
-      expect(geo.items.every((i) => i.referencia === "gps")).toBe(true);
-      expect(geo.items[0].distance).toBeCloseTo(r.confronto_geografico.gps_ip, 5);
-      expect(geo.description).toMatch(/até o GPS declarado da assinatura \(Manaquiri\/AM\).*não foram calculadas/);
+      expect(geo.modo).toBe("pares");
+      expect(geo.items.every((i) => i.referencia === "par")).toBe(true);
+      const ids = geo.items.map((i) => i.par);
+      expect(ids).toEqual(expect.arrayContaining(["ip-x-instrumento", "laudo-x-instrumento", "ip-x-laudo", "gps-x-ip"]));
+      expect(geo.items.find((i) => i.par === "gps-x-ip").distance).toBeCloseTo(r.confronto_geografico.gps_ip, 5);
+      // O endereço informado no laudo (Pedro II/PI) contra o instrumento (Manaquiri/AM).
+      expect(geo.items.find((i) => i.par === "laudo-x-instrumento").distance).toBeGreaterThan(2000);
+      expect(geo.description).toMatch(/nível de município/);
+      expect(geo.description).toMatch(/não é usado como domicílio/);
     });
 
     it("a distância entre GPS e IP, independente da residência, continua disponível", async () => {

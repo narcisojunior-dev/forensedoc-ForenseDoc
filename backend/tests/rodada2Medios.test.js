@@ -8,6 +8,7 @@ import { extrairCamposOperacao, lerFinalidadeMarcada } from "../src/engine/campo
 import { generateJudicialQuesitos } from "../src/reports/quesitosTemplate.js";
 import { descreverEstadoConfronto } from "../src/utils/referenciaResidencial.js";
 import { buildImageFindings } from "../src/engine/pdfForensics.js";
+import { montarConfrontoEnderecos, descreverIndisponibilidade } from "../src/utils/confrontoEnderecos.js";
 
 /**
  * Ajustes de média prioridade da rodada 2 (relatorio-V2-MOTOR_NOVO.md):
@@ -195,5 +196,35 @@ describe("ajustes finos da rodada 2", () => {
     expect(extraido.assinatura.blocos_por_documento).toMatch(/Dossiê probatório \(págs\. 1 a 2\): quadro descritivo de assinatura, emitido pela instituição, na pág\. 1/);
     expect(extraido.assinatura.blocos_por_documento).toMatch(/Cédula de Crédito Bancário \(condições específicas\) \(págs\. 3 a 7\): bloco de assinatura na pág\. 6/);
     expect(extraido.assinatura.blocos_assinatura_total).toBe(2);
+  });
+});
+
+describe("verificação de endereços, dois a dois", () => {
+  const MANAQUIRI = { lat: -3.4417, lon: -60.4596, rotulo: "Manaquiri, AM", precisao: "municipio" };
+  const PEDRO_II = { lat: -4.4257, lon: -41.4586, rotulo: "Pedro II - PI", precisao: "city" };
+  const IP = { lat: -3.29972, lon: -60.62056, rotulo: "Manacapuru/Amazonas", precisao: "ip" };
+  const GPS = { lat: -3.4340189, lon: -60.4593232, rotulo: "Manaquiri", precisao: "gps" };
+
+  it("mede os quatro pares e diz o que cada um compara", () => {
+    const { pares } = montarConfrontoEnderecos({ instrumento: MANAQUIRI, laudo: PEDRO_II, ip: IP, gps: GPS });
+    const por = Object.fromEntries(pares.map((p) => [p.id, p]));
+    expect(pares.map((p) => p.id)).toEqual(["ip-x-instrumento", "laudo-x-instrumento", "ip-x-laudo", "gps-x-ip"]);
+    expect(por["laudo-x-instrumento"].km).toBeGreaterThan(2000);
+    expect(por["gps-x-ip"].km).toBeCloseTo(23.3, 0);
+    expect(por["ip-x-instrumento"].precisao).toBe("municipio");
+    expect(pares.every((p) => p.texto && p.indisponivel === null)).toBe(true);
+  });
+
+  it("par sem os dois pontos não vira zero: fica não aferido, dizendo o que falta", () => {
+    const { pares } = montarConfrontoEnderecos({ instrumento: MANAQUIRI, laudo: null, ip: IP, gps: null });
+    const por = Object.fromEntries(pares.map((p) => [p.id, p]));
+    expect(por["laudo-x-instrumento"]).toMatchObject({ km: null, texto: null });
+    expect(descreverIndisponibilidade(por["laudo-x-instrumento"])).toMatch(/endereço informado na geração do laudo não disponível/);
+    expect(descreverIndisponibilidade(por["gps-x-ip"])).toMatch(/GPS da assinatura não disponível/);
+  });
+
+  it("pontos muito próximos não imprimem 0,00 km", () => {
+    const { pares } = montarConfrontoEnderecos({ instrumento: MANAQUIRI, laudo: { ...MANAQUIRI }, ip: null, gps: null });
+    expect(pares.find((p) => p.id === "laudo-x-instrumento").texto).toBe("menos de 0,1 km");
   });
 });

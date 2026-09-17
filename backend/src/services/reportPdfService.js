@@ -14,6 +14,7 @@ import { buildCustodyChain } from "../reports/custodyChain.js";
 import { calculateForensicScore } from "../utils/forensicScore.js";
 import { generateJudicialQuesitos } from "../reports/quesitosTemplate.js";
 import { montarConfrontoGeografico } from "../utils/distancia.js";
+import { descreverIndisponibilidade } from "../utils/confrontoEnderecos.js";
 
 // Paleta sóbria para peça processual (impressão em preto e branco continua legível).
 const INK = "#1a1a1a";
@@ -579,6 +580,23 @@ function sectionGeo(ctx, result, mapas = {}) {
   if (result.home?.alerta) {
     paragraph(ctx, result.home.alerta, { color: DANGER, size: 9 });
   }
+  // Verificação de endereços, dois a dois: cada linha diz o que compara, e
+  // nenhuma delas afirma domicílio.
+  const paresEndereco = result.confronto_enderecos?.pares || [];
+  if (paresEndereco.length) {
+    subheading(ctx, "Verificação de endereços · confrontos dois a dois");
+    for (const par of paresEndereco) {
+      field(ctx, par.rotulo, par.texto || (par.indisponivel?.length ? `não aferido (${descreverIndisponibilidade(par)})` : null));
+    }
+    if (result.confronto_enderecos?.pontos?.instrumento?.precisao === "municipio") {
+      paragraph(
+        ctx,
+        `O endereço do instrumento foi resolvido em nível de município (${result.confronto_enderecos.pontos.instrumento.rotulo}), porque a instituição não registrou o endereço do contratante. As distâncias que partem dele são aproximadas.`,
+        { color: MUTED, size: 8.5 }
+      );
+    }
+  }
+
   // MED-01: recusado o confronto, o endereço aparece como não utilizado e o
   // alerta acima é o único motivo impresso.
   const referenciaRecusada = ["RECUSADO_CONFLITO", "INDISPONIVEL_NAO_INFORMADO"].includes(result.home?.estado_confronto);

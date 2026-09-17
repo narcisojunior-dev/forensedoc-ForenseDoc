@@ -43,7 +43,11 @@ function GeoScale({ geo }) {
   const maxLog = 4;
   const xFor = (distance) => 48 + ((Math.log10(Math.max(0.1, Math.min(10000, distance))) - minLog) / (maxLog - minLog)) * 604;
   const ticks = [0.1, 1, 10, 100, 1000, 10000];
-  const colorFor = (role) => role === "gps" ? "#2f6846" : role === "access" ? "#bc631e" : "#203f52";
+  const colorFor = (role) => role === "gps" ? "#2f6846" : role === "access" || role === "laudo" ? "#bc631e" : "#203f52";
+  // Nos pares, a legenda diz o que cada cor compara; na régua antiga, o tipo de ponto.
+  const legenda = geo.modo === "pares"
+    ? [["#203f52", "com o endereço do instrumento"], ["#bc631e", "com o endereço do laudo"], ["#2f6846", "GPS do ato × IP"]]
+    : [["#2f6846", "GPS da assinatura"], ["#bc631e", "IP de acesso"], ["#203f52", "Infraestrutura"]];
   return (
     <svg className="summary-geo-chart" viewBox="0 0 700 205" aria-label="Confronto de distâncias entre GPS e endereços IP">
       <line x1="48" y1="144" x2="652" y2="144" stroke="#d8d0c3" strokeWidth="2" />
@@ -58,20 +62,23 @@ function GeoScale({ geo }) {
       })}
       {items.map((item, index) => {
         const x = xFor(item.distance);
-        const labelY = 25 + (index % 3) * 34;
+        const labelY = 25 + (index % 4) * 30;
         return (
           <g key={`${item.role}-${item.label}-${index}`}>
             <line x1={x} y1={labelY + 12} x2={x} y2="136" stroke={colorFor(item.role)} strokeWidth="2" />
             <circle cx={x} cy="144" r="7" fill={colorFor(item.role)} stroke="#fff" strokeWidth="3" />
             <text x={x} y={labelY} textAnchor="middle" fontFamily="monospace" fontSize="10" fontWeight="700" fill={colorFor(item.role)}>{item.label}</text>
-            <text x={x} y={labelY + 12} textAnchor="middle" fontFamily="monospace" fontSize="9" fill="#405060">{formatKm(item.distance)}</text>
+            <text x={x} y={labelY + 12} textAnchor="middle" fontFamily="monospace" fontSize="9" fill="#405060">{item.texto || formatKm(item.distance)}</text>
           </g>
         );
       })}
       <g transform="translate(48 195)">
-        <circle cx="0" cy="0" r="5" fill="#2f6846" /><text x="10" y="4" fontSize="10" fill="#405060">GPS da assinatura</text>
-        <circle cx="150" cy="0" r="5" fill="#bc631e" /><text x="160" y="4" fontSize="10" fill="#405060">IP de acesso</text>
-        <circle cx="275" cy="0" r="5" fill="#203f52" /><text x="285" y="4" fontSize="10" fill="#405060">Infraestrutura</text>
+        {legenda.map(([cor, texto], i) => (
+          <g key={texto} transform={`translate(${i * 190} 0)`}>
+            <circle cx="0" cy="0" r="5" fill={cor} />
+            <text x="10" y="4" fontSize="10" fill="#405060">{texto}</text>
+          </g>
+        ))}
       </g>
     </svg>
   );
@@ -97,7 +104,9 @@ export default function SumarioIrregularidades({ summary }) {
             Sem residência aferida, o gráfico mede os IPs até o GPS declarado. */}
         {summary.geo && (
           <>
-            <div className="summary-section-title summary-section-title-line">GPS CONTRA IP: O CONFRONTO QUE IMPORTA</div>
+            <div className="summary-section-title summary-section-title-line">
+              {summary.geo.modo === "pares" ? "VERIFICAÇÃO DE ENDEREÇOS: OS CONFRONTOS QUE IMPORTAM" : "GPS CONTRA IP: O CONFRONTO QUE IMPORTA"}
+            </div>
             <div className="summary-geo-box">
               <h3>Onde o documento diz que o ato ocorreu</h3>
               <p>{summary.geo.description}</p>

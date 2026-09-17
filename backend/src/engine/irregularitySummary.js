@@ -1,5 +1,6 @@
 import { ordenarAchados } from "./eixosAchado.js";
 import { distanciaKm, distanciaSuspeita, formatarDistancia, montarConfrontoGeografico, STATUS_CONFRONTO } from "../utils/distancia.js";
+import { descreverIndisponibilidade } from "../utils/confrontoEnderecos.js";
 // Sumário executivo de irregularidades (placar de gravidade, confronto GPS x IP,
 // triagem de IPs e diligências). Portado do motor de geração, onde era calculado
 // no navegador; no SaaS é calculado no servidor e persistido com o laudo.
@@ -547,7 +548,7 @@ export function buildIrregularitySummary(report = {}) {
   }
 
   const geoItems = [];
-  if (gpsDistance !== null && !distanciaSuspeita(gpsDistance)) {
+  if (!(report.confronto_enderecos?.pares || []).length && gpsDistance !== null && !distanciaSuspeita(gpsDistance)) {
     geoItems.push({ label: "GPS · assinatura", distance: gpsDistance, role: "gps", location: report.contractGeo?.endereco || "coordenada do log" });
   }
   const selectedIps = [
@@ -557,12 +558,21 @@ export function buildIrregularitySummary(report = {}) {
     ipCards.find((ip) => ip.role === "infrastructure"),
     ipCards.find((ip) => ip.role === "unknown"),
   ].filter((ip, index, list) => ip && list.indexOf(ip) === index).slice(0, 3);
+  // Verificação de endereços por pares: cada ponto do gráfico diz o que compara
+  // (IP, endereço do instrumento, endereço informado no laudo, GPS do ato), e
+  // nenhum deles afirma domicílio. Ver utils/confrontoEnderecos.js.
+  const pares = report.confronto_enderecos?.pares || [];
+  const paresMedidos = pares.filter((par) => distanciaKm(par.km) !== null);
+  for (const par of paresMedidos) {
+    geoItems.push({ label: ROTULO_CURTO[par.id] || par.rotulo, distance: distanciaKm(par.km), texto: par.texto, role: par.papel, referencia: "par", par: par.id, precisao: par.precisao });
+  }
+
   // Sem residência aferida, o gráfico passa a medir cada IP até o GPS declarado
   // da assinatura. Essa verificação não depende da residência e não pode sumir
   // do laudo junto com ela.
   const referenciaDoGrafico = residenciaCalculada ? "residencia" : "gps";
   const rotuloIp = (ip) => (ip.role === "access" ? `${ip.geo?.isp || "IP"} · acesso` : ip.role === "bank" ? `${bank} · servidor` : ip.role === "cdn" ? `${ip.geo?.isp || "CDN"} · CDN` : `${ip.geo?.isp || "IP"} · rede`);
-  if (!residenciaCalculada && report.contractGeo) {
+  if (!paresMedidos.length && !residenciaCalculada && report.contractGeo) {
     for (const ip of selectedIps) {
       const original = (report.ipAnalysis || []).find((o) => o.endereco === ip.endereco);
       const km = distanciaKm(original?.distanceToSignature);
@@ -571,7 +581,7 @@ export function buildIrregularitySummary(report = {}) {
       }
     }
   }
-  for (const ip of residenciaCalculada ? selectedIps : []) {
+  for (const ip of residenciaCalculada && !paresMedidos.length ? selectedIps : []) {
     if (ip.distancia_residencia !== null && ip.distancia_residencia !== undefined) {
       geoItems.push({
         label: ip.role === "access" ? `${ip.geo?.isp || "IP"} · acesso` : ip.role === "bank" ? `${bank} · servidor` : ip.role === "cdn" ? `${ip.geo?.isp || "CDN"} · CDN` : `${ip.geo?.isp || "IP"} · rede`,
@@ -626,8 +636,12 @@ export function buildIrregularitySummary(report = {}) {
     geo: {
       items: geoItems.slice(0, 4),
       status: confronto.status,
-      referencia: referenciaDoGrafico,
-      description: residenciaCalculada
+      referencia: pares.length ? "pares" : referenciaDoGrafico,
+      pares,
+      modo: pares.length ? "pares" : "referencia",
+      description: pares.length
+        ? descreverPares(pares, paresMedidos, residenciaCalculada, confronto)
+        : residenciaCalculada
         ? geoItems.length
           ? "Distâncias aproximadas até a referência residencial. O GPS representa o ponto declarado no ato; os IPs foram separados entre acesso provável e infraestrutura."
           : "Não houve coordenadas suficientes para construir o confronto geográfico."
@@ -663,3 +677,30 @@ function computeSuspicionGrade(findingsList) {
 }
 
 export { formatKm };
+
+const MOTIVO_CURTO = {
+  RECUSADO_CONFLITO: "ele conflita com o endereço do instrumento",
+  INDISPONIVEL_NAO_INFORMADO: "o instrumento registra o endereço do contratante como não informado",
+  SEM_REFERENCIA: "não há coordenada de referência residencial",
+  SEM_PONTOS: "não há coordenada de assinatura nem de IP para confrontar",
+};
+
+/** Rótulo curto de cada par, para caber no gráfico do sumário. */
+const ROTULO_CURTO = {
+  "ip-x-instrumento": "IP × instrumento",
+  "laudo-x-instrumento": "Laudo × instrumento",
+  "ip-x-laudo": "IP × laudo",
+  "gps-x-ip": "GPS × IP",
+};
+
+function descreverPares(pares, medidos, residenciaCalculada, confronto) {
+  const lista = medidos.map((par) => `${par.rotulo}: ${par.texto}`).join("; ");
+  const faltando = pares.filter((par) => par.indisponivel?.length).map((par) => `${par.rotulo} (${descreverIndisponibilidade(par)})`);
+  const precisaoMunicipio = medidos.some((par) => par.precisao === "municipio");
+  return [
+    lista ? `Confronto de endereços, dois a dois: ${lista}.` : "Não houve pontos suficientes para confrontar endereços.",
+    precisaoMunicipio ? "O endereço do instrumento foi resolvido em nível de município, porque a instituição não registrou o endereço do contratante." : null,
+    residenciaCalculada ? null : `O endereço informado na geração do laudo não é usado como domicílio: ${MOTIVO_CURTO[confronto.status] || "referência residencial recusada ou indisponível"} (ver § 3).`,
+    faltando.length ? `Não aferidos: ${faltando.join("; ")}.` : null,
+  ].filter(Boolean).join(" ");
+}
