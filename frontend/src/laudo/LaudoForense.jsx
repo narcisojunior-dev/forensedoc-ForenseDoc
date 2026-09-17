@@ -23,6 +23,8 @@ import { distanciaKm } from "./distancia.js";
 
 const API_BASE = `${import.meta.env.VITE_API_BASE || ""}/api`;
 
+const referenciaRecusada = (home) => ["RECUSADO_CONFLITO", "INDISPONIVEL_NAO_INFORMADO"].includes(home?.estado_confronto);
+
 function Row({ label, value, mono = false, nullText = "Não identificado" }) {
   const isEmpty = value === null || value === undefined || value === "";
   return (
@@ -492,7 +494,7 @@ export default function LaudoForense({ report }) {
                   ["Produto", report.extracted.contrato?.produto],
                   ["Modalidade", report.extracted.contrato?.modalidade],
                   ["Tipo de operação", report.extracted.contrato?.tipo_operacao],
-                  ["Operação portada", report.extracted.contrato?.operacao_portada === true ? "Sim" : report.extracted.contrato?.operacao_portada === false ? "Não há" : null],
+                  ["Operação portada", report.extracted.contrato?.operacao_portada === true ? "Sim" : report.extracted.contrato?.operacao_portada === false ? "Não" : null],
                   ["Empregador declarado", report.extracted.contrato?.empregador ? `${report.extracted.contrato.empregador.literal}${report.extracted.contrato.empregador.identificado ? "" : " (sem razão social e sem CNPJ)"}` : null],
                   ["Valor liberado/solicitado", report.extracted.contrato?.valor_liberado],
                   ["Saldo portado / refinanciado", report.extracted.contrato?.saldo_portado],
@@ -674,9 +676,19 @@ export default function LaudoForense({ report }) {
                     {report.home.alerta}
                   </div>
                 )}
-                <Row label="Endereço adotado" value={report.home.query} nullText="Nenhum endereço informado ou extraído" />
-                <Row label="Origem do endereço" value={report.home.source} />
-                {report.home.geo && (report.ipAnalysis.length > 0 || report.contractGeo) ? (
+                {/* MED-01: recusado o confronto, o alerta acima é o único motivo e o
+                    endereço aparece como não utilizado, sem nota de geocodificação. */}
+                {referenciaRecusada(report.home) ? (
+                  (report.home.conflito?.manual?.texto || report.home.query) && (
+                    <Row label="Endereço informado, não utilizado" value={report.home.conflito?.manual?.texto || report.home.query} />
+                  )
+                ) : (
+                  <>
+                    <Row label="Endereço adotado" value={report.home.query} nullText="Nenhum endereço informado ou extraído" />
+                    <Row label="Origem do endereço" value={report.home.source} />
+                  </>
+                )}
+                {referenciaRecusada(report.home) ? null : report.home.geo && (report.ipAnalysis.length > 0 || report.contractGeo) ? (
                   <Row
                     label={report.home.geo.precision === "manual" ? "Coordenadas (residencial · confirmadas pelo operador)" : "Coordenadas (residencial · aprox.)"}
                     value={`${report.home.geo.lat.toFixed(6)}, ${report.home.geo.lon.toFixed(6)}`}
@@ -999,6 +1011,8 @@ export default function LaudoForense({ report }) {
                 const templatesPorClasse = templates.reduce((acc, item) => ({ ...acc, [item.classificacao || "outra"]: (acc[item.classificacao || "outra"] || 0) + 1 }), {});
                 const gruposRelevantes = (img.grupos_repetidos || []).filter((group) => (group.imagens || []).some(relevante));
                 const captures = (img.imagens || []).filter((item) => item.biometricaProvavel);
+                // MED-03: análises gravadas antes da correção ainda trazem o IMG2 de template.
+                const achadosImagem = (img.achados || []).filter((f) => !(f.codigo === "IMG2" && f.titulo === "Reuso de imagem de template"));
                 return (
                   <Section title="§ 4.2 · Imagens, selfie e prova de vida" danger={critical}>
                     <div className="note" style={{ marginTop: 0 }}>
@@ -1045,10 +1059,10 @@ export default function LaudoForense({ report }) {
                       );
                     })()}
 
-                    {img.achados?.length > 0 && (
+                    {achadosImagem.length > 0 && (
                       <>
                         <div className="sub-head">Achados de imagem</div>
-                        {img.achados.map((finding, index) => (
+                        {achadosImagem.map((finding, index) => (
                           <div key={`${finding.codigo}-${index}`} className="ip-block" style={{ border: `1px solid ${severityColor(finding.severidade)}55`, background: `${severityColor(finding.severidade)}12` }}>
                             <div className="ip-head">
                               <div className="ip-id" style={{ color: severityColor(finding.severidade) }}>{finding.codigo} · {finding.titulo}</div>
@@ -1189,11 +1203,17 @@ export default function LaudoForense({ report }) {
                         <div className="gcoord" style={{ color: "var(--accent)" }}>
                           {report.home.geo ? `${report.home.geo.lat.toFixed(6)}, ${report.home.geo.lon.toFixed(6)}` : report.home.alerta ? "Confronto não realizado" : "Não geocodificada"}
                         </div>
-                        <div className="gmeta">
-                          {report.home.query || "Endereço não informado"}<br />
-                          Origem: {report.home.source || "não disponível"}<br />
-                          {report.home.geo?.precision === "manual" ? "Coordenada confirmada pelo operador" : "Coordenada aproximada por geocodificação"}
-                        </div>
+                        {referenciaRecusada(report.home) ? (
+                          <div className="gmeta">
+                            {report.home.conflito?.manual?.texto || report.home.query ? <>Endereço informado, não utilizado: {report.home.conflito?.manual?.texto || report.home.query}</> : "Endereço do contratante não informado no instrumento"}
+                          </div>
+                        ) : (
+                          <div className="gmeta">
+                            {report.home.query || "Endereço não informado"}<br />
+                            Origem: {report.home.source || "não disponível"}<br />
+                            {report.home.geo?.precision === "manual" ? "Coordenada confirmada pelo operador" : "Coordenada aproximada por geocodificação"}
+                          </div>
+                        )}
                       </div>
                       <div className="geo-card" style={{ borderTopColor: "var(--warn)" }}>
                         <div className="gtitle" style={{ color: "var(--warn)" }}>Geolocalização declarada no contrato</div>
@@ -1226,7 +1246,8 @@ export default function LaudoForense({ report }) {
                       </div>
                     ) : report.home.alerta ? (
                       <div className="note" style={{ borderLeftColor: "var(--crit)", background: "rgba(240,99,99,0.07)" }}>
-                        {report.home.alerta}
+                        {/* MED-01: o motivo completo fica só no § 3; aqui, a remissão. */}
+                        Distância não calculada: a referência residencial foi recusada ou está indisponível (ver § 3).
                       </div>
                     ) : (
                       <div className="note" style={{ borderLeftColor: "var(--warn)", background: "rgba(242,176,61,0.07)" }}>

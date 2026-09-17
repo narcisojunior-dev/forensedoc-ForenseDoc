@@ -295,9 +295,10 @@ function classifyEmbeddedImage(image) {
   return "imagem documental";
 }
 
+const TEMPLATE_CLASSE = /template|logotipo|c[oó]digo|linha gr[aá]fica|m[aá]scara/;
+
 function isTemplateGraphic(image) {
-  const kind = classifyEmbeddedImage(image);
-  return /template|logotipo|c[oó]digo|linha gr[aá]fica|m[aá]scara/.test(kind);
+  return TEMPLATE_CLASSE.test(classifyEmbeddedImage(image));
 }
 
 /** Segmento APP1 "Exif" num JPEG, percorrendo os marcadores até o início dos dados. */
@@ -313,7 +314,7 @@ function temExif(data) {
   return false;
 }
 
-function buildImageFindings(images, repeatedGroups, extractedCount, available, options = {}) {
+export function buildImageFindings(images, repeatedGroups, extractedCount, available, options = {}) {
   const findings = [];
   if (!available) {
     findings.push({
@@ -350,13 +351,20 @@ function buildImageFindings(images, repeatedGroups, extractedCount, available, o
       titulo: "Imagem repetida byte a byte",
       detalhe: `${plural(relevantRepeatedGroups.length, "grupo", "grupos")} de imagens biométricas prováveis possuem o mesmo SHA-256. Quando a mesma imagem aparece como identificação e prova de vida, a vivacidade não fica demonstrada pelo PDF.`,
     });
-  } else if (repeatedGroups.length) {
-    findings.push({
-      codigo: "IMG2",
-      severidade: "INFO",
-      titulo: "Reuso de imagem de template",
-      detalhe: `${plural(repeatedGroups.length, "grupo repetido", "grupos repetidos")} parecem ser logotipo, linha gráfica, máscara ou elemento gráfico do template. Não foi gerado alerta biométrico por esse reuso.`,
-    });
+  } else {
+    // MED-03 (rodada 2): grupos só de template, logotipo ou máscara alfa não viram
+    // achado; a contagem continua em `grupos_repetidos` e na linha consolidada.
+    const gruposForaDoTemplate = repeatedGroups.filter(
+      (group) => !(group.imagens || []).every((img) => TEMPLATE_CLASSE.test(img.classificacao || ""))
+    );
+    if (gruposForaDoTemplate.length) {
+      findings.push({
+        codigo: "IMG2",
+        severidade: "INFO",
+        titulo: "Reuso de imagem documental",
+        detalhe: `${plural(gruposForaDoTemplate.length, "grupo repetido", "grupos repetidos")} de imagens documentais, sem fotografia ou biometria provável. Não foi gerado alerta biométrico por esse reuso.`,
+      });
+    }
   }
   const tiny = biometricImages.filter((img) => {
     if (!img.width || !img.height) return false;

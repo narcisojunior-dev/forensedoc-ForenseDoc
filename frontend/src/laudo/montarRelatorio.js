@@ -137,6 +137,8 @@ export function montarRelatorio({ analysisId, result, createdAt }) {
           cidadeDomicilio: home.geo ? home.geo.display || home.query : null,
           distanciaKm: distanciaKm(primeiroIp?.distance) !== null ? distanciaKm(primeiroIp.distance).toFixed(1) : null,
           dataHora: primeiroIp?.data_hora || extracted.assinatura?.data_hora_assinatura,
+          achados: extracted.achados_irregularidade || [],
+          extracted,
         })
       : [],
   };

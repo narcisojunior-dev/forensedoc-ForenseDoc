@@ -257,6 +257,7 @@ export async function enrichGeography(extracted, homeAddress, homeCoord = null, 
     justificativa: estadoConfronto === ESTADO_CONFRONTO.LIBERADO_PELO_OPERADOR ? String(contestacao.justificativa).trim() : null,
     instrumento,
     endereco_literal: cliente.endereco_literal || cliente.estados_campos?.endereco?.valor || null,
+    endereco_nao_informado: enderecoNaoInformado,
   };
   home.alerta = descreverEstadoConfronto(home);
 

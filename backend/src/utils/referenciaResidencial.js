@@ -115,8 +115,14 @@ export function descreverEstadoConfronto(home) {
   const inst = home.instrumento || home.conflito?.instrumento || {};
   const instrumentoTexto = [inst.cidade, inst.uf, inst.cep].filter(Boolean).join(", ") || "não identificados";
   switch (home.estado_confronto) {
-    case ESTADO_CONFRONTO.RECUSADO_CONFLITO:
-      return `CONFRONTO RECUSADO: ${home.conflito?.descricao || "conflito entre o endereço informado e o do instrumento"}. Nenhuma distância, mapa ou selo de risco é calculado a partir de uma referência que o próprio instrumento contradiz. Endereço informado: ${home.conflito?.manual?.texto || "coordenada informada pelo operador"}. Cidade, UF e CEP do instrumento: ${instrumentoTexto}.`;
+    case ESTADO_CONFRONTO.RECUSADO_CONFLITO: {
+      // MED-01 (rodada 2): um único motivo. Quando o instrumento também não traz
+      // o endereço, a orientação é essa lacuna, e não "corrigir a grafia".
+      const semEnderecoNoInstrumento = home.endereco_nao_informado
+        ? ` O instrumento registra o endereço do contratante como "${home.endereco_literal || "não informado"}", de modo que o confronto de residência não pode ser feito a partir deste arquivo; essa lacuna é atribuível à instituição.`
+        : "";
+      return `CONFRONTO RECUSADO: ${home.conflito?.descricao || "conflito entre o endereço informado e o do instrumento"}. Nenhuma distância, mapa ou selo de risco é calculado a partir de uma referência que o próprio instrumento contradiz. Endereço informado: ${home.conflito?.manual?.texto || "coordenada informada pelo operador"}. Cidade, UF e CEP do instrumento: ${instrumentoTexto}.${semEnderecoNoInstrumento}`;
+    }
     case ESTADO_CONFRONTO.LIBERADO_PELO_OPERADOR:
       return `REFERÊNCIA LIBERADA PELO OPERADOR: ${home.conflito?.descricao || "conflito entre o endereço informado e o do instrumento"}. O operador declarou contestado o endereço do instrumento, com a seguinte justificativa: "${home.justificativa}". As distâncias abaixo usam o endereço informado e devem ser lidas com essa ressalva.`;
     case ESTADO_CONFRONTO.INDISPONIVEL_NAO_INFORMADO:

@@ -6,6 +6,8 @@ import { extractAuditTrail } from "./audit.js";
 import { separarCarimboProcessual, paginaDoIndice } from "./carimboProcessual.js";
 import { extrairDataContrato } from "./dataContrato.js";
 import { extrairPlanilhaCalculo } from "./planilhaCalculo.js";
+import { extrairCamposOperacao } from "./camposOperacao.js";
+import { redigirConclusaoAfericao } from "./conclusaoAfericao.js";
 import { taxaImplicita, valorPresente, vencimentosMensais, conferirAnualizacao, diasEntre } from "./matematicaFinanceira.js";
 import { classificarProduto, extrairEmpregador } from "./produto.js";
 import { avaliarQualificacao, ESTADO as ESTADO_CAMPO } from "./camposSuspeitos.js";
@@ -871,6 +873,12 @@ export function heuristicExtractionFromText(rawText) {
     ? { codigo: "CONSIGNADO_INSS", rotulo: "Cartão consignado de benefício", marcadores: ["modalidade RMC/RCC"], confianca: "ALTA" }
     : classificarProduto(flat);
   const empregador = produtoClassificado.codigo === "CONSIGNADO_CLT" ? extrairEmpregador(text) : null;
+  // Layouts dedicados (Quadro V-2, "Tipo de Operação") têm precedência; o quadro
+  // de caixas de seleção cobre o C6 e similares (MED-04).
+  const camposOperacao = extrairCamposOperacao(text, {
+    produtoCodigo: produtoClassificado.codigo,
+    saldoPortado: isCartaoConsignado ? null : planilha?.componentes.saldo_portado.valor ?? null,
+  });
   const contratoExtraido = {
     numero: [layout.contratoNumero, contratoNumero].find(numeroContratoPlausivel) || null,
     banco: bankByCnpj?.nome || (layout.isBradesco ? "Banco Bradesco S.A." : (layout.banco || normalizedBank || firstField(creditorBlock, [/\b(Banco\s+[A-ZÁÀÂÃÉÊÍÓÔÕÚÇ0-9 .-]{3,80}?)(?=\s+(?:S\.?A\.?|CNPJ|Ag[êe]ncia|Endere[cç]o)\b)/i]))),
@@ -933,9 +941,10 @@ export function heuristicExtractionFromText(rawText) {
     conta_corrente: layout.contaCorrente,
     nome_agencia: layout.nomeAgencia,
     banco_recebimento: layout.bancoRecebimento,
-    modalidade_desconto_provavel: null,
-    tipo_operacao: layout.tipoOperacao,
-    operacao_portada: layout.operacaoPortada,
+    modalidade_desconto_provavel: camposOperacao.modalidade_desconto_provavel,
+    tipo_operacao: layout.tipoOperacao || camposOperacao.tipo_operacao,
+    tipo_operacao_desmarcadas: layout.tipoOperacao ? null : camposOperacao.tipo_operacao_desmarcadas,
+    operacao_portada: layout.operacaoPortada ?? camposOperacao.operacao_portada,
     cartao: isCartaoConsignado ? layout.cartao : null,
     conta_beneficio: layout.contaBeneficio || null,
     correspondente: layout.correspondente || null,
@@ -1080,9 +1089,7 @@ export function heuristicExtractionFromText(rawText) {
     }
   }
 
-  mathAudit.conclusao = [mathAudit.prazo_confere, mathAudit.somatorio_confere, mathAudit.composicao_confere, mathAudit.vp_confere, mathAudit.cet_maior_que_juros].every(Boolean)
-    ? "Não se identificou inconsistência aritmética entre a taxa de juros declarada, o valor financiado, o número e o valor das parcelas, o somatório e o Custo Efetivo Total informado. As irregularidades apontadas neste laudo são de natureza formal e informacional, não de cálculo."
-    : "A aferição matemática encontrou pontos que exigem conferência manual antes de conclusão sobre consistência financeira.";
+  mathAudit.conclusao = redigirConclusaoAfericao(mathAudit);
 
   const platformIndependence = assessPlatformIndependence(layout.trilha?.validadorUrl, contratoExtraido.banco);
   const uaParsed = parseUserAgent(layout.trilha?.dispositivoUtilizado);

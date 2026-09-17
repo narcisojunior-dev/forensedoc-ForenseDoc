@@ -559,8 +559,14 @@ function sectionGeo(ctx, result, mapas = {}) {
   if (result.home?.alerta) {
     paragraph(ctx, result.home.alerta, { color: DANGER, size: 9 });
   }
-  if (result.home?.query) field(ctx, `Endereço (${result.home.source || "referência"})`, result.home.query);
-  if (home && Number.isFinite(home.lat) && Number.isFinite(home.lon)) {
+  // MED-01: recusado o confronto, o endereço aparece como não utilizado e o
+  // alerta acima é o único motivo impresso.
+  const referenciaRecusada = ["RECUSADO_CONFLITO", "INDISPONIVEL_NAO_INFORMADO"].includes(result.home?.estado_confronto);
+  const enderecoInformado = result.home?.conflito?.manual?.texto || result.home?.query;
+  if (referenciaRecusada) {
+    if (enderecoInformado) field(ctx, "Endereço informado, não utilizado", enderecoInformado);
+  } else if (result.home?.query) field(ctx, `Endereço (${result.home.source || "referência"})`, result.home.query);
+  if (!referenciaRecusada && home && Number.isFinite(home.lat) && Number.isFinite(home.lon)) {
     // A coordenada NUMÉRICA é obrigatória: todas as distâncias abaixo derivam
     // dela, e sem o valor o laudo deixa de ser reproduzível por terceiro.
     field(ctx, "Coordenada adotada", `${home.lat}, ${home.lon}`, { mono: true });
@@ -970,7 +976,8 @@ function sectionDigitalSignature(ctx, metadata, extracted) {
       field(ctx, "Imagens documentais", lista.filter((i) => i.classificacao === "imagem documental").length);
       field(ctx, "Elementos de template (logotipos, fios, máscaras)", `${templates.length} · detalhe no anexo técnico`);
       field(ctx, "Grupos de imagens idênticas", imagens.grupos_repetidos?.length ?? 0);
-      for (const achado of imagens.achados || []) {
+      // Análises gravadas antes do MED-03 ainda trazem o IMG2 de template.
+      for (const achado of (imagens.achados || []).filter((a) => !(a.codigo === "IMG2" && a.titulo === "Reuso de imagem de template"))) {
         paragraph(ctx, `${achado.titulo}. ${achado.detalhe}`, { size: 8.5 });
       }
     }
@@ -1097,7 +1104,9 @@ function sectionEconomics(ctx, extracted) {
     ["Juros acumulados na carência", c.juros_carencia],
     ["Custo total (somatório − liberado)", c.custo_total ? `${c.custo_total} (${c.custo_total_percentual} do liberado)` : null],
     ["Taxa anual calculada", c.taxa_juros_anual_calculada],
-    ["Tipo de operação", c.tipo_operacao],
+    ["Tipo de operação", c.tipo_operacao ? `${c.tipo_operacao}${c.tipo_operacao_desmarcadas?.length ? ` (desmarcadas: ${c.tipo_operacao_desmarcadas.join(", ").toLowerCase()})` : ""}` : null],
+    ["Operação portada", c.operacao_portada === true ? "Sim" : c.operacao_portada === false ? "Não" : null],
+    ["Modalidade de desconto provável", c.modalidade_desconto_provavel],
     ["CNPJ da instituição", c.cnpj_instituicao],
   ].filter(([, v]) => v !== null && v !== undefined && v !== "");
   if (!linhas.length && !m && !cartao && !c.datas_nota) return;
@@ -1313,6 +1322,8 @@ function sectionQuesitos(ctx, extracted, result) {
     cidadeDomicilio: result.home?.geo ? result.home.geo.display || result.home.query : null,
     distanciaKm: result.contractGeo?.distance != null ? result.contractGeo.distance.toFixed(1) : null,
     dataHora: ipItem?.data_hora || extracted.assinatura?.data_hora_assinatura,
+    achados: extracted.achados_irregularidade || [],
+    extracted,
   });
 
   for (const q of quesitos) {

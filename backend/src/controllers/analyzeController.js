@@ -411,6 +411,7 @@ export async function correctAnalysisGeo(req, res) {
       justificativa: conflito ? contestacao.justificativa : null,
       instrumento: result.home?.instrumento || null,
       endereco_literal: result.home?.endereco_literal || null,
+      endereco_nao_informado: Boolean(result.home?.endereco_nao_informado),
     };
     result.home.alerta = descreverEstadoConfronto(result.home);
 

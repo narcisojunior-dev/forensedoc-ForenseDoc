@@ -24,6 +24,11 @@ vi.mock("../src/services/apiService.js", () => ({
   getIpInfo: vi.fn(async () => ({ lat: -3.2999, lon: -60.6206, city: "Manacapuru", region: "Amazonas", country: "Brasil", isp: "TELEFÔNICA BRASIL S.A", source: "teste" })),
 }));
 vi.mock("../src/services/rdapService.js", () => ({ lookupRdapIp: vi.fn(async () => null) }));
+vi.mock("../src/services/staticMapService.js", () => ({
+  fetchStaticMap: vi.fn(async () => null),
+  mapPointsIpVsHome: () => [],
+  mapPointsHomeVsDeclared: () => [],
+}));
 vi.mock("../src/services/ipHistoryService.js", () => ({ lookupIpHistory: vi.fn(async () => null) }));
 
 const { heuristicExtractionFromText } = await import("../src/services/extractionService.js");
@@ -33,6 +38,8 @@ const { verificarCoerencia } = await import("../src/engine/coerenciaLaudo.js");
 const { buildSummaryForResult } = await import("../src/services/analysisRecompute.js");
 const { montarConfrontoGeografico } = await import("../src/utils/distancia.js");
 const { calculateForensicScore } = await import("../src/utils/forensicScore.js");
+const { buildReportPdf } = await import("../src/services/reportPdfService.js");
+const { extractPdfTextDetailed } = await import("../src/services/pdfService.js");
 
 const CASO = path.join(path.dirname(fileURLToPath(import.meta.url)), "corpus/casos/c6-consig-clt-dossie.json");
 const { texto } = JSON.parse(await readFile(CASO, "utf8"));
@@ -185,6 +192,27 @@ describe("dossiê C6: testes negativos do relatório de homologação", () => {
     it("sem contradição crítica no resultado corrigido", async () => {
       const r = await montarResultado();
       expect(verificarCoerencia(r, extraido).filter((v) => v.nivel === "CRITICA")).toEqual([]);
+    });
+
+    it("negativos 4 e 5 (MED-01): § 5 do PDF com um único motivo e sem \"endereço adotado\"", async () => {
+      const r = await montarResultado();
+      expect(r.home.endereco_nao_informado).toBe(true);
+      expect(r.home.alerta).toMatch(/essa lacuna é atribuível à instituição/);
+      const doc = await buildReportPdf({ id: "11111111-2222-3333-4444-555555555555", createdAt: new Date() }, {
+        ...r,
+        text: JSON.stringify(extraido),
+        metadata: { warnings: [] },
+        hashes: { sha256: "A".repeat(64), sha1: "B".repeat(40) },
+        generatedAt: new Date().toISOString(),
+      });
+      const partes = [];
+      for await (const p of doc) partes.push(p);
+      const { text } = await extractPdfTextDetailed(Buffer.concat(partes));
+      const plano = text.replace(/\s+/g, " ");
+      expect(plano).toMatch(/Endereço informado, não utilizado/);
+      expect(plano).not.toMatch(/Endereço \(Informado manualmente\)|Endereço adotado|Coordenada adotada/);
+      expect(plano).not.toMatch(/tente novamente|Verifique a grafia/);
+      expect(plano.match(/CONFRONTO RECUSADO/g)).toHaveLength(1);
     });
 
     it("o validador acusa o sumário do laudo da rodada 2 (0,00 km em selo favorável)", async () => {
