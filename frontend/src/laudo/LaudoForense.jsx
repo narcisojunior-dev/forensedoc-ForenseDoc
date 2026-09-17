@@ -145,6 +145,7 @@ function GeoMap({
   distanceKm,
   riskColor,
   targetLabel = "Assinatura declarada",
+  homeLabel = "Residência",
   caption = "Cartografia real em projeção Web Mercator. Marcadores posicionados pelas coordenadas registradas; distância geodésica calculada por Haversine. A base cartográfica é contextual e não aumenta a precisão do GPS, da geocodificação ou da localização por IP.",
 }) {
   const W = 660, H = 380, TILE = 256, fitPad = 92;
@@ -243,7 +244,7 @@ function GeoMap({
             <rect x="-52" y="-13" width="104" height="26" rx="13" fill="#ffffff" stroke={riskColor} strokeWidth="1.5" />
             <text x="0" y="4" textAnchor="middle" fontFamily="monospace" fontSize="11" fontWeight="700" fill="#263640">{distanceKm.toFixed(2)} km</text>
           </g>
-          <Pin p={A} color="#087ea4" label="Residência" sub={`${home.lat.toFixed(5)}, ${home.lon.toFixed(5)}`} above />
+          <Pin p={A} color="#087ea4" label={homeLabel} sub={`${home.lat.toFixed(5)}, ${home.lon.toFixed(5)}`} above />
           <Pin p={B} color="#c48109" label={targetLabel} sub={`${sign.lat.toFixed(5)}, ${sign.lon.toFixed(5)}`} above={false} />
           <g transform={`translate(24, ${H - 24})`}>
             <rect x="-8" y="-24" width={barPx + 16} height="32" rx="3" fill="#ffffff" fillOpacity="0.9" />
@@ -551,7 +552,7 @@ export default function LaudoForense({ report }) {
                           ["CET implícito mensal", m.cet_implicito_mensal
                             ? `${m.cet_implicito_mensal}${m.cet_implicito_anual_calculado ? ` (${m.cet_implicito_anual_calculado} a.a. em 365 dias)` : ""}${m.cet_implicito_nota ? ` · ${m.cet_implicito_nota}` : ""} · ${m.cet_implicito_veredito || "não aferido"}`
                             : m.cet_implicito_motivo ? `não aferido: ${m.cet_implicito_motivo}` : null],
-                          [m.cet_anual_base === "IMPLICITO" ? `Anualização do CET implícito (${m.cet_anual_base_mensal} a.m.)` : "Anualização do CET mensal declarado", m.cet_anual_calculado ? `${m.cet_anual_calculado} em 365 dias · ${m.cet_anual_calculado_12m} em 12 meses${m.cet_anual_convencao ? ` · contrato usa ${m.cet_anual_convencao}` : ""} · ${ok(m.cet_anual_confere) || "não aferido"}` : null],
+                          [m.cet_anual_base === "IMPLICITO" ? `Anualização do CET implícito (${m.cet_anual_base_mensal} a.m.)` : "Anualização do CET mensal declarado", m.cet_anual_calculado ? `${m.cet_anual_calculado} em 365 dias${m.cet_anual_calculado_12m ? ` · ${m.cet_anual_calculado_12m} em 12 meses` : ""}${m.cet_anual_convencao ? ` · contrato usa ${m.cet_anual_convencao}` : ""} · ${ok(m.cet_anual_confere) || "não aferido"}` : null],
                           ["Anualização do CET mensal declarado, arredondado (informativa)", m.cet_anual_calculado_declarado ? `${m.cet_anual_calculado_declarado} em 365 dias` : null],
                           ["Anualização da taxa de juros mensal", m.juros_anual_calculado_365 ? `${m.juros_anual_calculado_365} em 365 dias · ${m.juros_anual_calculado_12m} em 12 meses${m.juros_anual_convencao ? ` · contrato usa ${m.juros_anual_convencao}` : ""} · ${ok(m.juros_anual_confere) || "não aferido"}` : null],
                           ["CET maior que taxa de juros", ok(m.cet_maior_que_juros)],
@@ -1252,13 +1253,46 @@ export default function LaudoForense({ report }) {
                     ) : report.home.alerta ? (
                       <div className="note" style={{ borderLeftColor: "var(--crit)", background: "rgba(240,99,99,0.07)" }}>
                         {/* MED-01: o motivo completo fica só no § 3; aqui, a remissão. */}
-                        Distância não calculada: a referência residencial foi recusada ou está indisponível (ver § 3).
+                        Distância à residência não calculada: a referência residencial foi recusada ou está indisponível (ver § 3). O confronto entre a geolocalização declarada e a origem da conexão, abaixo, não depende da residência.
                       </div>
                     ) : (
                       <div className="note" style={{ borderLeftColor: "var(--warn)", background: "rgba(242,176,61,0.07)" }}>
                         Há geolocalização declarada no contrato, mas o endereço residencial não pôde ser geocodificado. Informe o endereço residencial do cliente na tela inicial para que a distância seja calculada.
                       </div>
                     )}
+
+                    {/* Confronto independente da residência: continua no laudo quando
+                        a referência residencial é recusada ou indisponível. */}
+                    {report.contractGeo.municipio && (
+                      <Row label="Município do local declarado" value={`${report.contractGeo.municipio}${report.contractGeo.uf ? `/${report.contractGeo.uf}` : ""}`} />
+                    )}
+                    {(() => {
+                      const ipRef = report.ipAnalysis.find((ip) => Number.isFinite(ip.geo?.lat) && Number.isFinite(ip.geo?.lon) && distanciaKm(ip.distanceToSignature) !== null);
+                      if (!ipRef) return null;
+                      const d = ipRef.divergenciaAssinatura;
+                      const cor = d?.tom === "ok" ? "#3ddc97" : d?.tom === "danger" ? "#f06363" : "#f2b03d";
+                      return (
+                        <>
+                          <div className="sub-head">Confronto · geolocalização declarada no contrato × origem da conexão (IP)</div>
+                          <div className="geo-visual-block">
+                            <div className="row">
+                              <span className="row-label">Distância entre o local declarado e a origem do IP {ipRef.endereco}</span>
+                              <span className="row-value" style={{ color: cor, fontWeight: 700 }}>{distanciaKm(ipRef.distanceToSignature).toFixed(2).replace(".", ",")} km{d?.rotulo ? ` · ${d.rotulo}` : ""}</span>
+                            </div>
+                            {d?.sintese && <div className="note" style={{ borderLeftColor: cor }}>{d.sintese}</div>}
+                            <GeoMap
+                              home={{ lat: report.contractGeo.lat, lon: report.contractGeo.lon }}
+                              homeLabel="Assinatura declarada"
+                              sign={{ lat: ipRef.geo.lat, lon: ipRef.geo.lon }}
+                              distanceKm={distanciaKm(ipRef.distanceToSignature)}
+                              riskColor={cor}
+                              targetLabel="Localização aproximada do IP"
+                              caption="Coordenada declarada no log da assinatura × localização aproximada do IP informada pelo provedor. Este confronto não usa a residência. O ponto do IP pode representar a central da operadora, CGNAT ou VPN, e só incompatibilidade de ordem de grandeza tem valor indiciário."
+                            />
+                          </div>
+                        </>
+                      );
+                    })()}
                   </>
                 ) : (
                   <div className="note" style={{ borderLeftColor: "var(--muted)", background: "rgba(133,149,168,0.07)" }}>
@@ -1316,6 +1350,9 @@ export default function LaudoForense({ report }) {
                                 ["Fonte da geolocalização", ip.geo.source],
                               ].map(([lbl, val]) => <Row key={lbl} label={lbl} value={val} />)}
                               {hasIpGeoCoords && <Row label="Coordenadas do IP (registro atual)" value={`${ip.geo.lat.toFixed(7)}, ${ip.geo.lon.toFixed(7)}`} mono />}
+                              {distanciaKm(ip.distanceToSignature) !== null && (
+                                <Row label="Distância ao local declarado da assinatura" value={`${distanciaKm(ip.distanceToSignature).toFixed(2).replace(".", ",")} km${ip.divergenciaAssinatura?.rotulo ? ` · ${ip.divergenciaAssinatura.rotulo}` : ""}`} />
+                              )}
                               {distanciaKm(ip.distance) !== null && hasIpGeoCoords && !risk.suppressed ? (
                                 <>
                                   <div className="row">

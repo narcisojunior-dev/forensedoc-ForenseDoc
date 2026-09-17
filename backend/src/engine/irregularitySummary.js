@@ -557,7 +557,21 @@ export function buildIrregularitySummary(report = {}) {
     ipCards.find((ip) => ip.role === "infrastructure"),
     ipCards.find((ip) => ip.role === "unknown"),
   ].filter((ip, index, list) => ip && list.indexOf(ip) === index).slice(0, 3);
-  for (const ip of selectedIps) {
+  // Sem residência aferida, o gráfico passa a medir cada IP até o GPS declarado
+  // da assinatura. Essa verificação não depende da residência e não pode sumir
+  // do laudo junto com ela.
+  const referenciaDoGrafico = residenciaCalculada ? "residencia" : "gps";
+  const rotuloIp = (ip) => (ip.role === "access" ? `${ip.geo?.isp || "IP"} · acesso` : ip.role === "bank" ? `${bank} · servidor` : ip.role === "cdn" ? `${ip.geo?.isp || "CDN"} · CDN` : `${ip.geo?.isp || "IP"} · rede`);
+  if (!residenciaCalculada && report.contractGeo) {
+    for (const ip of selectedIps) {
+      const original = (report.ipAnalysis || []).find((o) => o.endereco === ip.endereco);
+      const km = distanciaKm(original?.distanceToSignature);
+      if (km !== null && !distanciaSuspeita(km)) {
+        geoItems.push({ label: rotuloIp(ip), distance: km, role: ip.role, location: locationLabel(ip.geo), referencia: "gps" });
+      }
+    }
+  }
+  for (const ip of residenciaCalculada ? selectedIps : []) {
     if (ip.distancia_residencia !== null && ip.distancia_residencia !== undefined) {
       geoItems.push({
         label: ip.role === "access" ? `${ip.geo?.isp || "IP"} · acesso` : ip.role === "bank" ? `${bank} · servidor` : ip.role === "cdn" ? `${ip.geo?.isp || "CDN"} · CDN` : `${ip.geo?.isp || "IP"} · rede`,
@@ -612,11 +626,14 @@ export function buildIrregularitySummary(report = {}) {
     geo: {
       items: geoItems.slice(0, 4),
       status: confronto.status,
-      description: geoItems.length
-        ? "Distâncias aproximadas até a referência residencial. O GPS representa o ponto declarado no ato; os IPs foram separados entre acesso provável e infraestrutura."
-        : residenciaCalculada
-          ? "Não houve coordenadas suficientes para construir o confronto geográfico."
-          : `Distâncias à residência não calculadas (${confronto.motivo}).`,
+      referencia: referenciaDoGrafico,
+      description: residenciaCalculada
+        ? geoItems.length
+          ? "Distâncias aproximadas até a referência residencial. O GPS representa o ponto declarado no ato; os IPs foram separados entre acesso provável e infraestrutura."
+          : "Não houve coordenadas suficientes para construir o confronto geográfico."
+        : geoItems.length
+          ? `Distância aproximada de cada IP até o GPS declarado da assinatura${report.contractGeo?.municipio ? ` (${report.contractGeo.municipio}${report.contractGeo.uf ? `/${report.contractGeo.uf}` : ""})` : ""}. As distâncias à residência não foram calculadas porque a referência residencial foi recusada ou está indisponível (ver § 3).`
+          : "Distâncias à residência não calculadas: a referência residencial foi recusada ou está indisponível (ver § 3). Não há IP geolocalizado e GPS declarado para o confronto entre os dois.",
     },
     ipCards: ipCards.slice(0, 3),
     synthesis,

@@ -16,6 +16,7 @@ vi.mock("../src/services/staticMapService.js", () => ({
   fetchStaticMap: vi.fn(async () => null),
   mapPointsIpVsHome: () => [],
   mapPointsHomeVsDeclared: () => [],
+  mapPointsDeclaredVsIp: () => [],
 }));
 
 const { buildReportPdf } = await import("../src/services/reportPdfService.js");

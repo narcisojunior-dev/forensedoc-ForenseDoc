@@ -5,6 +5,32 @@ import { distanciaKm, distanciaSuspeita } from "./distancia.js";
 const CHAVES_DISTANCIA_RESIDENCIA = new Set(["gps-near-home", "gps-home-distance"]);
 
 /**
+ * Sem residência aferida, o gráfico mede cada IP até o GPS declarado da
+ * assinatura. Sumários gravados antes disso traziam pontos medidos até a
+ * residência: são descartados e refeitos a partir do enriquecimento.
+ */
+function geoMedidoAteOGps(geo, ipAnalysis, contractGeo) {
+  const valida = (km) => distanciaKm(km) !== null && !distanciaSuspeita(km);
+  const items = geo.referencia === "gps"
+    ? (geo.items || []).filter((i) => i.referencia === "gps" && valida(i.distance))
+    : contractGeo
+      ? ipAnalysis
+          .filter((ip) => valida(ip.distanceToSignature))
+          .slice(0, 3)
+          .map((ip) => ({ label: `${ip.geo?.isp || "IP"} · rede`, distance: distanciaKm(ip.distanceToSignature), role: "access", referencia: "gps" }))
+      : [];
+  const local = contractGeo?.municipio ? ` (${contractGeo.municipio}${contractGeo.uf ? `/${contractGeo.uf}` : ""})` : "";
+  return {
+    ...geo,
+    referencia: "gps",
+    items,
+    description: items.length
+      ? `Distância aproximada de cada IP até o GPS declarado da assinatura${local}. As distâncias à residência não foram calculadas porque a referência residencial foi recusada ou está indisponível (ver § 3).`
+      : "Distâncias à residência não calculadas: a referência residencial foi recusada ou está indisponível (ver § 3). Não há IP geolocalizado e GPS declarado para o confronto entre os dois.",
+  };
+}
+
+/**
  * Sumário persistido por versões anteriores do motor pode trazer distância à
  * residência calculada a partir de nulo ("0,00 km" em selo favorável). Sem
  * confronto válido, a tela retira esses itens em vez de exibi-los.
@@ -24,7 +50,7 @@ function sanearSumario(sumario, home, ipAnalysis, contractGeo) {
     allFindings: semResidencia(sumario.allFindings),
     favorable: semResidencia(sumario.favorable),
     checks: (sumario.checks || []).map((c) => (c.key === "gps-residencia" ? { ...c, status: "INDETERMINADO", detail: "Distância à residência não calculada." } : c)),
-    geo: sumario.geo ? { ...sumario.geo, items: [], description: home?.alerta || "Distâncias à residência não calculadas." } : sumario.geo,
+    geo: sumario.geo ? geoMedidoAteOGps(sumario.geo, ipAnalysis, contractGeo) : sumario.geo,
     ipCards: (sumario.ipCards || []).map((card) => ({
       ...card,
       distance: null,

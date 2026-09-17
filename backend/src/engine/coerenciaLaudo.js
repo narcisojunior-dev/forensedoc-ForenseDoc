@@ -62,7 +62,8 @@ const REGRAS = [
       const sumario = result.sumarioIrregularidades;
       if (!sumario) return null;
       const achados = [...(sumario.allFindings || sumario.findings || []), ...(sumario.favorable || [])].filter((f) => CHAVES_DISTANCIA_RESIDENCIA.has(f.key));
-      const pontos = (sumario.geo?.items || []).length;
+      // Pontos medidos até o GPS da assinatura não dependem da residência.
+      const pontos = (sumario.geo?.items || []).filter((i) => i.referencia !== "gps").length;
       const cards = (sumario.ipCards || []).filter((c) => /km da refer[êe]ncia residencial/i.test(c.text || "")).length;
       const partes = [
         achados.length ? `achado(s) ${achados.map((f) => f.key).join(", ")}` : null,

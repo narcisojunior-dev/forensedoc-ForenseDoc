@@ -28,6 +28,7 @@ vi.mock("../src/services/staticMapService.js", () => ({
   fetchStaticMap: vi.fn(async () => null),
   mapPointsIpVsHome: () => [],
   mapPointsHomeVsDeclared: () => [],
+  mapPointsDeclaredVsIp: () => [],
 }));
 vi.mock("../src/services/ipHistoryService.js", () => ({ lookupIpHistory: vi.fn(async () => null) }));
 
@@ -170,10 +171,14 @@ describe("dossiê C6: testes negativos do relatório de homologação", () => {
       expect(s.checks.find((c) => c.key === "gps-residencia")).toMatchObject({ status: "INDETERMINADO" });
     });
 
-    it("negativo 3: o gráfico de distâncias à residência não tem pontos", async () => {
+    it("negativo 3: o gráfico não tem ponto medido até a residência, e passa a medir o IP até o GPS", async () => {
       const r = await montarResultado();
-      expect(r.sumarioIrregularidades.geo.items).toEqual([]);
-      expect(r.sumarioIrregularidades.geo.description).toMatch(/não calculadas/);
+      const geo = r.sumarioIrregularidades.geo;
+      expect(geo.referencia).toBe("gps");
+      expect(geo.items.length).toBeGreaterThan(0);
+      expect(geo.items.every((i) => i.referencia === "gps")).toBe(true);
+      expect(geo.items[0].distance).toBeCloseTo(r.confronto_geografico.gps_ip, 5);
+      expect(geo.description).toMatch(/até o GPS declarado da assinatura \(Manaquiri\/AM\).*não foram calculadas/);
     });
 
     it("a distância entre GPS e IP, independente da residência, continua disponível", async () => {
@@ -213,6 +218,13 @@ describe("dossiê C6: testes negativos do relatório de homologação", () => {
       expect(plano).not.toMatch(/Endereço \(Informado manualmente\)|Endereço adotado|Coordenada adotada/);
       expect(plano).not.toMatch(/tente novamente|Verifique a grafia/);
       expect(plano.match(/CONFRONTO RECUSADO/g)).toHaveLength(1);
+      // A verificação geográfica que não depende da residência continua no PDF.
+      expect(plano).toMatch(/Confronto 3 · geolocalização declarada × origem da conexão \(IP\)/);
+      // Capa: domicílio pela qualificação do instrumento e GPS do ato presente.
+      expect(plano).toMatch(/Domicílio do titular: Manaquiri\/AM \(qualificação do instrumento; o endereço informado não foi utilizado\)/);
+      expect(plano).toMatch(/GPS registrado no ato: Manaquiri\/AM \(-?\d/);
+      expect(plano).not.toMatch(/Domicílio do titular: Rua|GPS registrado no ato: Não registrado/);
+      expect(plano).toMatch(/Distância entre a geolocalização declarada e a origem do IP: \d+\.\d{2} km · COMPATÍVEL/);
     });
 
     it("o validador acusa o sumário do laudo da rodada 2 (0,00 km em selo favorável)", async () => {

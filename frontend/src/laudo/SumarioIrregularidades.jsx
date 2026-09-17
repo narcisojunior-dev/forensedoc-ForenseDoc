@@ -93,13 +93,15 @@ export default function SumarioIrregularidades({ summary }) {
           {summary.findings.map((finding) => <SeverityRow key={finding.key} finding={finding} />)}
         </div>
 
-        {(summary.geo.items || []).some((item) => distanciaKm(item.distance) !== null && !distanciaSuspeita(item.distance)) && (
+        {/* Sempre presente: a verificação geográfica é parte central do laudo.
+            Sem residência aferida, o gráfico mede os IPs até o GPS declarado. */}
+        {summary.geo && (
           <>
             <div className="summary-section-title summary-section-title-line">GPS CONTRA IP: O CONFRONTO QUE IMPORTA</div>
             <div className="summary-geo-box">
               <h3>Onde o documento diz que o ato ocorreu</h3>
               <p>{summary.geo.description}</p>
-              <GeoScale geo={summary.geo} />
+              {(summary.geo.items || []).some((item) => distanciaKm(item.distance) !== null && !distanciaSuspeita(item.distance)) && <GeoScale geo={summary.geo} />}
             </div>
           </>
         )}

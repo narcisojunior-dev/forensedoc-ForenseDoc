@@ -1,6 +1,6 @@
 import PDFDocument from "pdfkit";
 import { classifyDeclaredDivergence } from "../utils/geoDivergence.js";
-import { fetchStaticMap, mapPointsIpVsHome, mapPointsHomeVsDeclared } from "./staticMapService.js";
+import { fetchStaticMap, mapPointsIpVsHome, mapPointsHomeVsDeclared, mapPointsDeclaredVsIp } from "./staticMapService.js";
 import {
   FIRM,
   NOTA_ASSINATURA,
@@ -41,9 +41,10 @@ export async function buildReportPdf(analysis, result) {
   // Pré-busca dos DOIS mapas do § 5, em paralelo. Cada um responde a uma
   // pergunta pericial distinta (ver staticMapService.js) e nenhum é requisito:
   // se a busca falhar, a seção sai com as coordenadas e as distâncias.
-  const [mapaIpResidencia, mapaResidenciaDeclarado] = await Promise.all([
+  const [mapaIpResidencia, mapaResidenciaDeclarado, mapaDeclaradoIp] = await Promise.all([
     fetchStaticMap(mapPointsIpVsHome(result)).catch(() => null),
     fetchStaticMap(mapPointsHomeVsDeclared(result)).catch(() => null),
+    fetchStaticMap(mapPointsDeclaredVsIp(result)).catch(() => null),
   ]);
 
   const doc = new PDFDocument({
@@ -78,7 +79,7 @@ export async function buildReportPdf(analysis, result) {
   sectionContractingTrail(ctx, extracted);
   sectionEventTrail(ctx, extracted);
   sectionBiometricArtifact(ctx, extracted);
-  sectionGeo(ctx, result, { mapaIpResidencia, mapaResidenciaDeclarado });
+  sectionGeo(ctx, result, { mapaIpResidencia, mapaResidenciaDeclarado, mapaDeclaradoIp });
   sectionIrregularities(ctx, extracted);
   sectionProcessComparison(ctx, result.processComparison);
   sectionRemarks(ctx, extracted);
@@ -253,7 +254,25 @@ function cover(ctx, analysis, result, timestamp) {
   const ipLoc = result.ipAnalysis?.[0]?.geo?.city
     ? `${result.ipAnalysis[0].geo.city}/${result.ipAnalysis[0].geo.region || ""}`
     : "Não localizada";
-  const homeLoc = result.home?.geo?.display || result.home?.query || "Domicílio declarado";
+  // Referência recusada não é domicílio: a capa usa a qualificação do
+  // instrumento e diz que o endereço informado não foi utilizado.
+  const recusada = confrontoCapa.status === "RECUSADO_CONFLITO" || confrontoCapa.status === "INDISPONIVEL_NAO_INFORMADO";
+  const inst = result.home?.instrumento || {};
+  const cidadeInstrumento = [inst.cidade, inst.uf].filter(Boolean).join("/");
+  const homeLoc = recusada
+    ? `${cidadeInstrumento || "não identificado no instrumento"} (qualificação do instrumento; o endereço informado não foi utilizado)`
+    : result.home?.geo?.display || result.home?.query || "Domicílio declarado";
+  const km = (v) => `${v.toFixed(1).replace(".", ",")} km`;
+  const cg = result.contractGeo;
+  const temGps = cg && Number.isFinite(cg.lat) && Number.isFinite(cg.lon);
+  const origemDetalhe = distKmIp !== null
+    ? `${km(distKmIp)} do domicílio`
+    : distKmIpVsGps !== null
+      ? `${km(distKmIpVsGps)} do GPS declarado no ato`
+      : "N/D";
+  const gpsTexto = !temGps
+    ? "Não registrado"
+    : `${cg.municipio ? `${cg.municipio}${cg.uf ? `/${cg.uf}` : ""} ` : ""}(${cg.lat}, ${cg.lon})${distKmGps !== null ? `, ${km(distKmGps)} do domicílio` : ", confronto com a residência não aferido"}`;
 
   doc
     .fontSize(8.5)
@@ -261,8 +280,8 @@ function cover(ctx, analysis, result, timestamp) {
     .fillColor(INK)
     .text(
       `• Domicílio do titular: ${homeLoc}\n` +
-      `• Origem técnica da conexão: ${ipLoc} (${distKmIp ? `${distKmIp.toFixed(1)} km de distância` : "N/D"})\n` +
-      `• GPS registrado no ato: ${distKmGps ? `${distKmGps.toFixed(1)} km do domicílio declarado` : "Não registrado"}`,
+      `• Origem técnica da conexão: ${ipLoc} (${origemDetalhe})\n` +
+      `• GPS registrado no ato: ${gpsTexto}`,
       boxX + 12,
       boxY + 48,
       { width: boxWidth - 24, lineGap: 1.5 }
@@ -552,7 +571,7 @@ function sectionGeo(ctx, result, mapas = {}) {
   // ─── Ponto de referência ───────────────────────────────────────────────────
   paragraph(
     ctx,
-    "Esta seção apresenta DOIS confrontos independentes, cada um com seu mapa. Eles respondem a perguntas diferentes e não se somam: o primeiro verifica de onde partiu a CONEXÃO que gerou o ato; o segundo verifica o que o DOCUMENTO afirma sobre o local do ato. Ambos usam como referência a residência informada.",
+    "Esta seção apresenta TRÊS confrontos independentes, cada um com seu mapa. Eles respondem a perguntas diferentes e não se somam: o primeiro verifica de onde partiu a CONEXÃO que gerou o ato; o segundo verifica o que o DOCUMENTO afirma sobre o local do ato; ambos usam como referência a residência informada. O terceiro confronta a geolocalização declarada com a origem da conexão e não depende da residência, por isso continua valendo quando ela é recusada.",
     { size: 9 }
   );
 
@@ -679,6 +698,39 @@ function sectionGeo(ctx, result, mapas = {}) {
         ctx,
         mapas.mapaResidenciaDeclarado,
         "Mapa 2. Residência informada (R, azul) × geolocalização declarada no documento (A, âmbar). A linha representa a distância geodésica (Haversine). Ambos os pontos têm precisão métrica, ao contrário do Mapa 1. Base cartográfica OpenStreetMap."
+      );
+    }
+  }
+
+  // ─── Confronto 3: geolocalização declarada × origem da conexão ────────────
+  // Independe da residência. Com a referência recusada, é a verificação
+  // geográfica que resta ao laudo, e não pode sumir junto com as outras duas.
+  subheading(ctx, "§ 5.2.1 · Confronto 3 · geolocalização declarada × origem da conexão (IP)");
+  paragraph(
+    ctx,
+    "Pergunta: a conexão que originou a assinatura partiu da região que o próprio documento registra como local do ato? Não usa a residência. A precisão é a do IP, de nível de operadora: divergências de dezenas de quilômetros são esperadas, e só a incompatibilidade de ordem de grandeza tem valor indiciário.",
+    { color: MUTED, size: 8.5 }
+  );
+  const ipAssinatura = (result.ipAnalysis || []).find((ip) => ip.divergenciaAssinatura?.km != null);
+  if (!cg || !ipRef) {
+    paragraph(
+      ctx,
+      !cg
+        ? "Confronto não realizado: o documento não traz coordenada declarada da assinatura."
+        : "Confronto não realizado: nenhum endereço IP do documento foi geolocalizado.",
+      { color: MUTED, size: 9 }
+    );
+  } else if (ipAssinatura) {
+    const da = ipAssinatura.divergenciaAssinatura;
+    reserve(ctx, 170);
+    field(ctx, "Endereço IP", ipAssinatura.endereco, { mono: true });
+    badge(ctx, "Distância entre a geolocalização declarada e a origem do IP", `${da.km.toFixed(2)} km · ${da.rotulo}`, da.tom === "ok");
+    paragraph(ctx, da.sintese, { size: 9, color: da.tom === "danger" ? DANGER : INK });
+    if (mapas.mapaDeclaradoIp) {
+      drawMap(
+        ctx,
+        mapas.mapaDeclaradoIp,
+        "Mapa 3. Geolocalização declarada no documento (A, âmbar) × origem da conexão pelo endereço IP (I, vermelho). A linha representa a distância geodésica (Haversine). O ponto I indica o ponto de presença da operadora, NÃO a posição do aparelho. Base cartográfica OpenStreetMap."
       );
     }
   }

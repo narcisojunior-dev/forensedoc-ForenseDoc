@@ -75,11 +75,11 @@ export default function SumarioExecutivo({ sumario: bruto }) {
         ))}
       </div>
 
-      {sumario.geo?.items?.length > 0 && (
+      {sumario.geo && (
         <>
           <SubHead>GPS × IP: onde o documento diz que o ato ocorreu</SubHead>
           <p className="text-[12.5px] leading-relaxed text-zinc-400">{sumario.geo.description}</p>
-          <div data-report-block className="rounded-xl border border-surface-border bg-surface/20 px-4 pb-4 pt-6">
+          {sumario.geo.items?.length > 0 && <div data-report-block className="rounded-xl border border-surface-border bg-surface/20 px-4 pb-4 pt-6">
             <div className="relative h-2 rounded-full bg-surface-border">
               {sumario.geo.items.map((item, i) => (
                 <div
@@ -101,12 +101,12 @@ export default function SumarioExecutivo({ sumario: bruto }) {
             <ul className="mt-3 space-y-1 text-[12px] text-zinc-400">
               {sumario.geo.items.map((item, i) => (
                 <li key={`${item.label}-l-${i}`}>
-                  <b className="text-foreground">{item.label}</b> · {formatKm(item.distance)} da referência ·{" "}
+                  <b className="text-foreground">{item.label}</b> · {formatKm(item.distance)} {item.referencia === "gps" ? "do GPS da assinatura" : "da referência"} ·{" "}
                   {item.location}
                 </li>
               ))}
             </ul>
-          </div>
+          </div>}
         </>
       )}
 
