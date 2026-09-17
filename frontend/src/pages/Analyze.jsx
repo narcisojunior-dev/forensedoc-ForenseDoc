@@ -104,6 +104,12 @@ export default function Analyze() {
   const [dragging, setDragging] = useState(false);
   const [homeAddr, setHomeAddr] = useState("");
   const [homeCoordInput, setHomeCoordInput] = useState("");
+  // Referência manual fica recolhida: o padrão é o endereço do próprio
+  // instrumento. Um endereço digitado por engano (o do escritório, no dossiê
+  // homologado) levou 2.111 km e um quesito errado ao laudo.
+  const [mostrarReferencia, setMostrarReferencia] = useState(false);
+  const [enderecoContestado, setEnderecoContestado] = useState(false);
+  const [justificativaContestacao, setJustificativaContestacao] = useState("");
   const fileRef = useRef();
   const navigate = useNavigate();
 
@@ -144,6 +150,12 @@ export default function Analyze() {
       return;
     }
 
+    if (enderecoContestado && justificativaContestacao.trim().length < 15) {
+      setError("Para declarar contestado o endereço do instrumento, escreva a justificativa (pelo menos 15 caracteres). Ela é impressa no laudo.");
+      setStage("error");
+      return;
+    }
+
     const runId = ++runIdRef.current;
     const desatualizado = () => runId !== runIdRef.current || !mountedRef.current;
 
@@ -166,6 +178,9 @@ export default function Analyze() {
         filename: file.name,
         homeAddress: (homeAddr || "").trim(),
         ...(coord ? { homeLat: coord.lat, homeLon: coord.lon } : {}),
+        ...(enderecoContestado
+          ? { homeAddressContested: true, homeAddressJustification: justificativaContestacao.trim() }
+          : {}),
       });
 
       setProgress({ label: "Extraindo dados, calculando hashes e geolocalizando...", pct: 34 });
@@ -209,7 +224,7 @@ export default function Analyze() {
       setError(typeof apiError === "string" ? apiError : err.message || "Erro inesperado durante a análise.");
       setStage("error");
     }
-  }, [homeAddr, homeCoordInput, navigate]);
+  }, [homeAddr, homeCoordInput, enderecoContestado, justificativaContestacao, navigate]);
 
   const handleDrop = (e) => {
     e.preventDefault();
@@ -248,6 +263,22 @@ export default function Analyze() {
       {/* ─── IDLE ─────────────────────────────────────────────────────────── */}
       {stage === "idle" && (
         <div className="mx-auto w-full max-w-3xl space-y-6">
+          {!mostrarReferencia ? (
+            <div className="glass flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-surface-border p-5">
+              <p className="max-w-xl text-xs leading-relaxed text-zinc-500">
+                As distâncias do laudo usam o endereço do próprio contrato. Informe uma referência
+                manual só se o instrumento não trouxer cidade e CEP do contratante, ou se o endereço
+                do contrato for justamente o dado contestado.
+              </p>
+              <button
+                type="button"
+                onClick={() => setMostrarReferencia(true)}
+                className="rounded-lg border border-surface-border bg-secondary px-4 py-2 text-xs font-medium text-foreground hover:bg-secondary-hover"
+              >
+                Informar referência manual
+              </button>
+            </div>
+          ) : (
           <div className="glass space-y-5 rounded-2xl border border-surface-border p-6">
             <div>
               <label className="mb-1 block text-sm font-medium text-zinc-300">
@@ -261,9 +292,9 @@ export default function Analyze() {
                 className={inputBase}
               />
               <p className="mt-2 text-xs leading-relaxed text-zinc-500">
-                Ponto de referência de todas as comparações de distância: a geolocalização declarada
-                no contrato e cada IP serão confrontados com este endereço. Se ficar em branco, o
-                sistema usa o endereço extraído do próprio contrato.
+                Ponto de referência de todas as comparações de distância. Antes de usá-lo, o sistema
+                confere cidade, UF e CEP do instrumento: em outra UF, ou a mais de 100 km do município
+                do contrato, o confronto é recusado e o laudo registra o conflito.
               </p>
             </div>
 
@@ -286,7 +317,37 @@ export default function Analyze() {
                 depois, no laudo.
               </p>
             </div>
+
+            <div className="rounded-lg border border-amber-500/25 bg-amber-500/[0.04] p-4">
+              <label className="flex items-start gap-2.5 text-sm text-zinc-300">
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  checked={enderecoContestado}
+                  onChange={(e) => setEnderecoContestado(e.target.checked)}
+                />
+                <span>
+                  O endereço registrado no instrumento é contestado
+                  <span className="mt-1 block text-xs leading-relaxed text-zinc-500">
+                    Marque só quando o endereço do contrato for o dado impugnado. Com a marcação, uma
+                    referência em conflito com o instrumento é usada, e a justificativa sai impressa
+                    no laudo ao lado das distâncias.
+                  </span>
+                </span>
+              </label>
+              {enderecoContestado && (
+                <textarea
+                  value={justificativaContestacao}
+                  onChange={(e) => setJustificativaContestacao(e.target.value)}
+                  placeholder="Ex.: o cliente reside em Pedro II/PI desde 2019, conforme comprovante de residência juntado; o endereço do contrato foi preenchido pelo correspondente."
+                  rows={3}
+                  maxLength={500}
+                  className={`${inputBase} mt-3`}
+                />
+              )}
+            </div>
           </div>
+          )}
 
           <button
             type="button"

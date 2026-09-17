@@ -3,7 +3,12 @@
 // aferição matemática, achados de irregularidade e trilha de contratação.
 import { extractCoordinates } from "./geo.js";
 import { extractAuditTrail } from "./audit.js";
-import { stripPjeFooter } from "./pjeText.js";
+import { separarCarimboProcessual, paginaDoIndice } from "./carimboProcessual.js";
+import { extrairDataContrato } from "./dataContrato.js";
+import { extrairPlanilhaCalculo } from "./planilhaCalculo.js";
+import { taxaImplicita, valorPresente, vencimentosMensais, conferirAnualizacao, diasEntre } from "./matematicaFinanceira.js";
+import { classificarProduto, extrairEmpregador } from "./produto.js";
+import { avaliarQualificacao, ESTADO as ESTADO_CAMPO } from "./camposSuspeitos.js";
 import { moneyToCents, percentToNumber } from "./numberParsing.js";
 import { extractFactaCartaoConsignado } from "./factaCartao.js";
 import { resolveBankByCnpj } from "./bankRegistry.js";
@@ -93,35 +98,56 @@ function moneyStringToNumber(value) {
   return cents === null ? null : cents / 100;
 }
 
-function monthlyDueDates(firstDate, count) {
-  const first = parsePtDate(firstDate);
-  if (!first || !Number.isFinite(Number(count))) return [];
-  return Array.from({ length: Number(count) }, (_, index) => {
-    const date = new Date(first);
-    date.setMonth(first.getMonth() + index);
-    return date;
-  });
-}
+const pct = (valor, casas = 2) => `${(valor * 100).toFixed(casas).replace(".", ",")}%`;
+const moeda = (valor) => (valor === null || !Number.isFinite(valor) ? null : centsToMoney(Math.round(valor * 100)));
 
-function presentValueFlow(monthlyRate, dueDates, installmentValue, baseDate) {
-  if (!monthlyRate || !dueDates.length || !installmentValue || !baseDate) return null;
-  return dueDates.reduce((acc, dueDate) => {
-    const days = Math.floor((dueDate - baseDate) / 86400000);
-    return acc + installmentValue / Math.pow(1 + monthlyRate, days / 30);
-  }, 0);
-}
+// Tolerâncias da aferição. Abaixo delas a diferença é arredondamento, não achado.
+const TOLERANCIA_MOEDA = 0.05;
+const TOLERANCIA_TAXA_PP = 0.10;
+const TOLERANCIA_PRAZO = 0.15;
 
-function implicitMonthlyRate(targetValue, dueDates, installmentValue, baseDate) {
-  if (!targetValue || !dueDates.length || !installmentValue || !baseDate) return null;
-  let lo = 0.0001;
-  let hi = 0.2;
-  for (let i = 0; i < 200; i += 1) {
-    const mid = (lo + hi) / 2;
-    const pv = presentValueFlow(mid, dueDates, installmentValue, baseDate);
-    if (pv > targetValue) lo = mid;
-    else hi = mid;
+/**
+ * Composição do valor financiado pela soma de TODOS os componentes localizados.
+ *
+ * Sem planilha estruturada, só liberado e IOF são conhecidos. Se a soma deles
+ * não fecha, a diferença pode ser seguro, tarifa ou saldo refinanciado que o
+ * extrator não leu, e o laudo não pode afirmar divergência: fica não aferida,
+ * com o motivo.
+ */
+function composicaoDoFinanciado(contract, financiado) {
+  const planilha = contract.planilha_calculo?.componentes;
+  const componentes = planilha
+    ? Object.values(planilha).map((c) => ({ rotulo: c.rotulo, valor: c.valor, localizado: c.localizado }))
+    : [
+        { rotulo: "Valor liberado", valor: contract.valor_liberado, localizado: Boolean(contract.valor_liberado) },
+        { rotulo: "IOF financiado", valor: contract.iof_financiado, localizado: Boolean(contract.iof_financiado) },
+        { rotulo: "Seguros", valor: contract.seguros || null, localizado: Boolean(contract.seguros) },
+        { rotulo: "Tarifa de cadastro", valor: contract.tarifa_cadastro || null, localizado: Boolean(contract.tarifa_cadastro) },
+      ];
+  const liberadoOk = componentes.some((c) => /liberado/i.test(c.rotulo) && c.localizado);
+  if (!liberadoOk || financiado === null) {
+    return { calculada: null, confere: null, componentes, nota: null };
   }
-  return (lo + hi) / 2;
+  const soma = componentes.filter((c) => c.localizado).reduce((acc, c) => acc + (moneyStringToNumber(c.valor) || 0), 0);
+  const naoLocalizados = componentes.filter((c) => !c.localizado).map((c) => c.rotulo.toLowerCase());
+  const diferenca = Math.abs(financiado - soma);
+  if (diferenca <= TOLERANCIA_MOEDA) {
+    return { calculada: soma, confere: true, componentes, nota: null };
+  }
+  if (naoLocalizados.length) {
+    return {
+      calculada: soma,
+      confere: null,
+      componentes,
+      nota: `A soma dos componentes localizados (${moeda(soma)}) difere do total financiado (${moeda(financiado)}) em ${moeda(diferenca)}, mas não foram localizados no instrumento: ${naoLocalizados.join(", ")}. A composição fica não aferida.`,
+    };
+  }
+  return {
+    calculada: soma,
+    confere: false,
+    componentes,
+    nota: `A soma de todos os componentes da planilha (${moeda(soma)}) difere do total financiado declarado (${moeda(financiado)}) em ${moeda(diferenca)}.`,
+  };
 }
 
 export function buildMathAudit(contract) {
@@ -133,62 +159,139 @@ export function buildMathAudit(contract) {
   const somatorio = moneyStringToNumber(contract.valor_total_parcelas);
   const liberado = moneyStringToNumber(contract.valor_liberado);
   const financiado = moneyStringToNumber(contract.valor_contratado || contract.valor_novos_recursos || contract.valor_total_emprestimo);
-  const iof = moneyStringToNumber(contract.iof_financiado);
   const jurosMensal = percentStringToDecimal(contract.taxa_juros_mensal);
+  const jurosAnual = percentStringToDecimal(contract.taxa_juros_anual);
   const cetMensal = percentStringToDecimal(contract.cet_mensal);
   const cetAnual = percentStringToDecimal(contract.cet_anual);
   const dataBase = parsePtDate(dataContrato);
-  const dueDates = monthlyDueDates(primeiro, parcelas);
-  const prazoDeclarado = Number(contract.prazo_dias);
+  const primeiroData = parsePtDate(primeiro);
+  const fluxos = valorParcela && Number.isFinite(parcelas)
+    ? vencimentosMensais(primeiroData, parcelas).map((data) => ({ data, valor: valorParcela }))
+    : [];
+
+  // ── Prazo: declarado em dias (layouts antigos) ou em meses (planilha) ──────
+  // `Number(null)` é 0: sem este cuidado o laudo imprimia "0 declarados".
+  const prazoDiasDeclarado = contract.prazo_dias !== null && contract.prazo_dias !== undefined && contract.prazo_dias !== ""
+    ? Number(contract.prazo_dias)
+    : null;
+  const prazoTotal = contract.prazo_total_declarado || null;
   const prazoCalculado = dataContrato && ultimo ? daysBetweenPtDates(dataContrato, ultimo) : null;
+  const prazoEfetivoMeses = prazoCalculado !== null ? Number((prazoCalculado / 30).toFixed(1)) : null;
+  let prazoConfere = null;
+  let prazoDescricao = null;
+  if (prazoCalculado !== null && prazoCalculado >= 0) {
+    if (Number.isFinite(prazoDiasDeclarado) && prazoDiasDeclarado > 0) {
+      prazoConfere = prazoDiasDeclarado === prazoCalculado;
+      prazoDescricao = `declarado ${prazoDiasDeclarado} dias, efetivo ${prazoCalculado} dias`;
+    } else if (prazoTotal?.quantidade) {
+      const declaradoMeses = prazoTotal.unidade === "dias" ? prazoTotal.quantidade / 30 : prazoTotal.quantidade;
+      prazoConfere = Math.abs(prazoEfetivoMeses - declaradoMeses) / declaradoMeses <= TOLERANCIA_PRAZO;
+      prazoDescricao = `declarado ${prazoTotal.quantidade} ${prazoTotal.unidade}, efetivo ${prazoCalculado} dias (${nBRDecimal(prazoEfetivoMeses)} meses)`;
+    }
+  }
+  const prazoMesesAprox = Number.isFinite(prazoDiasDeclarado) && prazoDiasDeclarado > 0
+    ? Number((prazoDiasDeclarado / 30.4375).toFixed(1))
+    : null;
   const carenciaDias = dataContrato && primeiro ? daysBetweenPtDates(dataContrato, primeiro) : null;
-  const prazoMesesAprox = prazoDeclarado ? Number((prazoDeclarado / 30.4375).toFixed(1)) : null;
+
+  // Juros acumulados entre a emissão e o primeiro vencimento, sobre o financiado.
+  const jurosCarencia = carenciaDias > 0 && financiado !== null && jurosMensal !== null
+    ? financiado * (Math.pow(1 + jurosMensal, carenciaDias / 30) - 1)
+    : null;
+
+  // ── Somatório ──────────────────────────────────────────────────────────────
   const somatorioCalculado = parcelas && valorParcela ? parcelas * valorParcela : null;
-  const composicaoCalculada = liberado !== null && iof !== null ? liberado + iof : null;
-  const vpTaxaDeclarada = jurosMensal ? presentValueFlow(jurosMensal, dueDates, valorParcela, dataBase) : null;
-  const cetImplicito = liberado ? implicitMonthlyRate(liberado, dueDates, valorParcela, dataBase) : null;
-  const cetAnualCalculado = cetMensal ? Math.pow(1 + cetMensal, 12) - 1 : null;
-  const cetImplicitoAnualCalculado = cetImplicito ? Math.pow(1 + cetImplicito, 12) - 1 : null;
+  const somatorioConfere = somatorio !== null && somatorioCalculado !== null ? Math.abs(somatorio - somatorioCalculado) <= TOLERANCIA_MOEDA : null;
+  const custoTotal = somatorio !== null && liberado ? somatorio - liberado : null;
+
+  // ── Composição ─────────────────────────────────────────────────────────────
+  const composicao = composicaoDoFinanciado(contract, financiado);
+
+  // ── Valor presente pela taxa declarada ─────────────────────────────────────
+  const fluxoValido = dataBase && fluxos.length && fluxos.every(({ data }) => diasEntre(dataBase, data) >= 0);
+  const vpTaxaDeclarada = jurosMensal && fluxoValido ? valorPresente(jurosMensal, fluxos, dataBase) : null;
+
+  // ── CET implícito: só com raiz verificada ──────────────────────────────────
+  const tir = liberado && fluxos.length
+    ? taxaImplicita({ valorPresenteAlvo: liberado, fluxos, dataBase })
+    : { status: "NAO_AFERIDO", motivo: !liberado ? "valor liberado não localizado" : "vencimentos ou parcelas não localizados", memoria: null };
+  const cetImplicito = tir.status === "AFERIDO" ? tir.taxa : null;
   const cetDeltaPp = cetMensal !== null && cetImplicito !== null ? (cetMensal - cetImplicito) * 100 : null;
-  const cetImplicitoVeredito = cetDeltaPp !== null && cetDeltaPp < -0.10
-    ? "NÃO CONFERE"
-    : cetMensal !== null && jurosMensal !== null && cetMensal < jurosMensal
-      ? "NÃO CONFERE"
-      : cetDeltaPp !== null
-        ? "Confere"
-        : null;
-  const cetImplicitoNota = cetDeltaPp === null
+  const memoriaTexto = tir.memoria
+    ? `Fluxo: valor liberado ${moeda(tir.memoria.valor_presente)} em ${tir.memoria.data_base}; ${tir.memoria.fluxos.length} parcelas de ${moeda(valorParcela)} de ${tir.memoria.fluxos[0]?.data} a ${tir.memoria.fluxos.at(-1)?.data} (vencimentos mensais inferidos do primeiro vencimento); base de ${tir.memoria.base_dias} dias${Number.isFinite(tir.vplResidual) ? `; valor presente residual ${tir.vplResidual.toFixed(4)}` : ""}.`
+    : null;
+  const cetImplicitoVeredito = cetImplicito === null
     ? null
-    : cetImplicitoVeredito === "Confere"
-      ? `declarado ${contract.cet_mensal}; diferença de ${Math.abs(cetDeltaPp).toFixed(2).replace(".", ",")} ponto percentual para ${cetDeltaPp >= 0 ? "mais" : "menos"}, sem subdeclaração. A diferença pode decorrer do confronto entre períodos mensais uniformes e fluxo por dias corridos com carência.`
+    : cetDeltaPp !== null && cetDeltaPp < -TOLERANCIA_TAXA_PP
+      ? "NÃO CONFERE"
       : cetMensal !== null && jurosMensal !== null && cetMensal < jurosMensal
-        ? "CET declarado inferior à taxa de juros nominal; matematicamente impossível"
-        : "CET declarado inferior ao implícito no fluxo; indício de subdeclaração";
+        ? "NÃO CONFERE"
+        : cetDeltaPp !== null
+          ? "Confere"
+          : null;
+  const cetImplicitoNota = cetImplicito === null
+    ? (tir.motivo ? `CET implícito não aferido: ${tir.motivo}.` : null)
+    : cetDeltaPp === null
+      ? null
+      : cetImplicitoVeredito === "Confere"
+        ? `declarado ${contract.cet_mensal}; diferença de ${Math.abs(cetDeltaPp).toFixed(2).replace(".", ",")} ponto percentual para ${cetDeltaPp >= 0 ? "mais" : "menos"}, sem subdeclaração.`
+        : cetMensal !== null && jurosMensal !== null && cetMensal < jurosMensal
+          ? "CET declarado inferior à taxa de juros nominal; matematicamente impossível"
+          : `CET declarado inferior ao implícito no fluxo em ${Math.abs(cetDeltaPp).toFixed(2).replace(".", ",")} ponto percentual; indício de subdeclaração. ${memoriaTexto}`;
+
+  // ── Anualização pelas duas convenções ──────────────────────────────────────
+  const cetAnualizado = cetMensal !== null ? conferirAnualizacao(cetMensal, cetAnual) : null;
+  const jurosAnualizado = jurosMensal !== null ? conferirAnualizacao(jurosMensal, jurosAnual) : null;
+  const cetImplicitoAnual = cetImplicito !== null ? conferirAnualizacao(cetImplicito, null) : null;
+
   return {
-    prazo_declarado_dias: Number.isFinite(prazoDeclarado) ? prazoDeclarado : null,
+    prazo_declarado_dias: Number.isFinite(prazoDiasDeclarado) && prazoDiasDeclarado > 0 ? prazoDiasDeclarado : null,
+    prazo_declarado_meses: prazoTotal?.unidade === "meses" ? prazoTotal.quantidade : null,
     prazo_calculado_dias: prazoCalculado,
-    prazo_confere: prazoDeclarado && prazoCalculado !== null ? prazoDeclarado === prazoCalculado : null,
+    prazo_efetivo_meses: prazoEfetivoMeses,
+    prazo_confere: prazoConfere,
+    prazo_descricao: prazoDescricao,
     prazo_operacao_meses_aprox: prazoMesesAprox,
     carencia_dias: carenciaDias,
-    somatorio_calculado: somatorioCalculado === null ? null : centsToMoney(Math.round(somatorioCalculado * 100)),
-    somatorio_confere: somatorio !== null && somatorioCalculado !== null ? Math.abs(somatorio - somatorioCalculado) < 0.01 : null,
-    composicao_financiado_calculada: composicaoCalculada === null ? null : centsToMoney(Math.round(composicaoCalculada * 100)),
-    composicao_confere: financiado !== null && composicaoCalculada !== null ? Math.abs(financiado - composicaoCalculada) <= 0.02 : null,
-    vp_taxa_declarada: vpTaxaDeclarada === null ? null : centsToMoney(Math.round(vpTaxaDeclarada * 100)),
+    juros_carencia: moeda(jurosCarencia),
+    juros_carencia_numero: jurosCarencia,
+    custo_total: moeda(custoTotal),
+    custo_total_percentual: custoTotal !== null ? pct(custoTotal / liberado) : null,
+    somatorio_declarado: contract.valor_total_parcelas || null,
+    somatorio_calculado: moeda(somatorioCalculado),
+    somatorio_confere: somatorioConfere,
+    composicao_financiado_calculada: moeda(composicao.calculada),
+    composicao_confere: composicao.confere,
+    composicao_componentes: composicao.componentes,
+    composicao_nota: composicao.nota,
+    vp_taxa_declarada: moeda(vpTaxaDeclarada),
     vp_taxa_declarada_numero: vpTaxaDeclarada,
     vp_confere: financiado !== null && vpTaxaDeclarada !== null ? Math.abs(financiado - vpTaxaDeclarada) <= 2 : null,
-    cet_implicito_mensal: cetImplicito === null ? null : `${(cetImplicito * 100).toFixed(4).replace(".", ",")}%`,
-    cet_implicito_anual_calculado: cetImplicitoAnualCalculado === null ? null : `${(cetImplicitoAnualCalculado * 100).toFixed(2).replace(".", ",")}%`,
+    cet_implicito_status: tir.status,
+    cet_implicito_motivo: tir.status === "AFERIDO" ? null : tir.motivo,
+    cet_implicito_mensal: cetImplicito === null ? null : pct(cetImplicito, 4),
+    cet_implicito_anual_calculado: cetImplicitoAnual ? pct(cetImplicitoAnual.dias365) : null,
     cet_implicito_mensal_numero: cetImplicito,
     cet_implicito_veredito: cetImplicitoVeredito,
     cet_delta_pp: cetDeltaPp === null ? null : Number(cetDeltaPp.toFixed(4)),
     cet_implicito_nota: cetImplicitoNota,
-    cet_anual_calculado: cetAnualCalculado === null ? null : `${(cetAnualCalculado * 100).toFixed(2).replace(".", ",")}%`,
-    cet_anual_confere: cetAnual !== null && cetAnualCalculado !== null ? Math.abs(cetAnual - cetAnualCalculado) <= 0.001 : null,
+    memoria_calculo_cet: tir.memoria,
+    cet_anual_calculado: cetAnualizado ? pct(cetAnualizado.dias365) : null,
+    cet_anual_calculado_12m: cetAnualizado ? pct(cetAnualizado.meses12) : null,
+    cet_anual_convencao: cetAnualizado?.convencao || null,
+    cet_anual_confere: cetAnualizado?.confere ?? null,
+    juros_anual_calculado_365: jurosAnualizado ? pct(jurosAnualizado.dias365) : null,
+    juros_anual_calculado_12m: jurosAnualizado ? pct(jurosAnualizado.meses12) : null,
+    juros_anual_convencao: jurosAnualizado?.convencao || null,
+    juros_anual_confere: jurosAnualizado?.confere ?? null,
     cet_maior_que_juros: cetMensal !== null && jurosMensal !== null ? cetMensal > jurosMensal : null,
     somatorio_sobre_liberado_percentual: somatorio !== null && liberado ? `${((somatorio / liberado) * 100).toFixed(1).replace(".", ",")}%` : null,
     conclusao: null,
   };
+}
+
+function nBRDecimal(valor) {
+  return Number.isFinite(valor) ? valor.toFixed(1).replace(".", ",") : null;
 }
 
 function mergeDefined(...objects) {
@@ -384,8 +487,12 @@ function extractBradescoConsignado(text, flat) {
 }
 
 export function heuristicExtractionFromText(rawText) {
-  const footer = stripPjeFooter(String(rawText || "").replace(/\r/g, "\n"));
+  // Carimbos de PJe/PROJUDI saem antes de qualquer padrão: a data da juntada
+  // impressa em toda página já foi lida como data do contrato.
+  const footer = separarCarimboProcessual(String(rawText || "").replace(/\r/g, "\n"));
   const text = footer.text;
+  const metadadosProcessuais = footer.metadados;
+  const planilha = extrairPlanilhaCalculo(text);
   const flat = text.replace(/\s+/g, " ").trim();
   const upper = flat.toUpperCase();
   const blocks = extractBlocks(flat);
@@ -521,12 +628,19 @@ export function heuristicExtractionFromText(rawText) {
   const ipRecords = extrairIps(text);
   const ipValues = ipRecords.map((record) => record.endereco);
   const auditTrail = extractAuditTrail(text);
+  // Hash declarado só com rótulo de hash, ou em formato inequívoco de SHA-256.
+  // O padrão antigo aceitava qualquer UUID, e o laudo do dossiê C6 abriu com
+  // "hash informado não é criptográfico" sobre um número de protocolo que o
+  // banco nunca chamou de hash: achado que cai na primeira contestação.
   const hash = firstMatch(flat, [
+    /(?:\bhash\b|\bSHA-?(?:1|224|256|384|512)\b|\bMD5\b|resumo\s+criptogr[aá]fico|\bdigest\b|impress[aã]o\s+digital)[^:\n]{0,40}?[:\-]?\s*\b([a-f0-9]{32,128})\b/i,
     /\b([a-f0-9]{64})\b/i,
-    /\b([a-f0-9]{40})\b/i,
-    /\b([a-f0-9]{32})\b/i,
-    /\b([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\b/i,
   ]);
+  const codigoRotulado = text.match(
+    /(?:N[uú]mero\s+[uú]nico|C[oó]digo\s+de\s+(?:verifica[cç][aã]o|autentica[cç][aã]o|autenticidade)|Chave\s+de\s+valida[cç][aã]o|Protocolo\s+de\s+autenticidade(?:\s+n[ºo°.]*)?)\s*:?[ \t]*([A-Za-z0-9][A-Za-z0-9-]{7,79})\b/i
+  );
+  const codigoAutenticacaoRotulado = codigoRotulado && !/^\d{1,7}$/.test(codigoRotulado[1]) ? codigoRotulado[1] : null;
+  const urlVerificacao = firstMatch(flat, [/Verifique\s+a\s+autenticidade\s+em\s*:?\s*(https?:\/\/\S+?)[.,;]?(?:\s|$)/i]);
   // Coordenada: rótulo combinado explícito primeiro; depois o extrator do motor
   // (graus/minutos/segundos, hemisfério, URL de mapa); por fim o critério de
   // plausibilidade geográfica, que aceita três casas decimais.
@@ -550,8 +664,18 @@ export function heuristicExtractionFromText(rawText) {
   );
   const hasAudit = /auditoria|\blogs?\b|trilha|evid[eê]ncia\s+de\s+aceite|carimbo\s+de\s+tempo|data\s+e\s+hora\s+(?:UTC|GMT|da\s+assinatura)/i.test(flat);
   const hasGeo = Boolean(coordinates || declaredGeoAddress);
-  const declaredAuthHashState = classifyDeclaredHash(layout.codigoAutenticacao || hash);
-  const hasCheckableDeclaredHash = declaredAuthHashState === "DECLARADO_CONFERIVEL" || Boolean(hash && hash.length >= 32 && !/^[a-f0-9-]{36}$/i.test(hash));
+  // Hash e código de autenticação são campos distintos, com estados distintos.
+  // Derivar o estado de um a partir do outro produziu no mesmo § 4 "código:
+  // não identificado" e "estado do hash/código: declarado".
+  const codigoAutenticacao = layout.codigoAutenticacao || codigoAutenticacaoRotulado || null;
+  const codigoAutenticacaoOrigem = layout.codigoAutenticacao
+    ? "bloco de autenticação do rodapé"
+    : codigoRotulado
+      ? `rótulo "${codigoRotulado[0].split(/\s*:|\s{2,}/)[0].replace(/\s+/g, " ").trim()}"${paginaDoIndice(text, codigoRotulado.index) ? `, pág. ${paginaDoIndice(text, codigoRotulado.index)}` : ""}`
+      : null;
+  const declaredAuthHashState = hash ? classifyDeclaredHash(hash) : "AUSENTE";
+  const codigoAutenticacaoEstado = codigoAutenticacao ? classifyDeclaredHash(codigoAutenticacao) : "AUSENTE";
+  const hasCheckableDeclaredHash = declaredAuthHashState === "DECLARADO_CONFERIVEL" || codigoAutenticacaoEstado === "DECLARADO_CONFERIVEL";
   const hasOperationalAuthRecord = Boolean(
     structuredAcceptance
     || signatureDateTime
@@ -615,8 +739,19 @@ export function heuristicExtractionFromText(rawText) {
   const bbIssueDateFormatted = bbIssueMatch
     ? `${String(bbIssueMatch[1]).padStart(2, "0")}/${ptMonths[stripDiacritics(bbIssueMatch[2]).toLowerCase()] || bbIssueMatch[2]}/${bbIssueMatch[3]}`
     : null;
-  const dataContratoBruta = layout.dataContrato || bbIssueDateFormatted || agiContractStart || firstField(ccbBlock, [/\bData\s+(?:de\s+)?(?:emiss[aã]o|contrato)\s*[:\-]?\s*(\d{2}\/\d{2}\/\d{4})/i]) || ccbDates.find((date) => date !== issuerBirthDate && date !== agiDataNascimento) || dates.find((date) => date !== issuerBirthDate && date !== agiDataNascimento) || null;
   const dataNascimentoDetectada = layout.clienteDataNascimento || agiDataNascimento || issuerBirthDate || null;
+  const dataContratoEleita = extrairDataContrato(text, {
+    prioritarias: [
+      { valor: layout.dataContrato, rotulo: "layout dedicado do instrumento" },
+      { valor: bbIssueDateFormatted, rotulo: "local e data de emissão (Banco do Brasil)" },
+      { valor: agiContractStart, rotulo: "início da contratação (Agibank)" },
+      { valor: firstField(ccbBlock, [/\bData\s+(?:de\s+)?(?:emiss[aã]o|contrato)\s*[:\-]?\s*(\d{2}\/\d{2}\/\d{4})/i]), rotulo: "quadro I da CCB" },
+    ],
+    datasProcessuais: metadadosProcessuais?.datas_do_carimbo || [],
+    datasSemRotulo: [...ccbDates, ...dates],
+    datasExcluidas: [issuerBirthDate, agiDataNascimento, dataNascimentoDetectada],
+  });
+  const dataContratoBruta = dataContratoEleita.valor;
   // Nunca aceitar a data do contrato sem checar plausibilidade contra a data
   // de nascimento: um campo solto em formato dd/mm/aaaa pode ser lido como
   // data do contrato quando na verdade é a data de nascimento do cliente,
@@ -647,7 +782,18 @@ export function heuristicExtractionFromText(rawText) {
     achados.push({ codigo, gravidade, titulo, texto });
   };
   if (lowText) addIssue("OCR1", "MÉDIA", "PDF com pouco texto pesquisável", "O PDF possui pouco texto pesquisável/OCR extraível. Para resultado completo em documento escaneado, aplique OCR prévio ao arquivo.");
-  if (!hash && declaredAuthHashState === "AUSENTE") {
+  for (const alerta of dataContratoEleita.alertas) addIssue(alerta.codigo, alerta.gravidade, alerta.titulo, alerta.texto);
+  if (!hash && codigoAutenticacaoRotulado && !layout.codigoAutenticacao) {
+    // Protocolo interno conferível só no site do próprio emissor. O achado não é
+    // "hash inválido": é que não há hash nenhum, e a única verificação oferecida
+    // depende de quem tem interesse no resultado.
+    addIssue(
+      "INT1",
+      "ALTA",
+      "Ausência de resumo criptográfico do documento assinado",
+      `O dossiê não apresenta nenhum resumo criptográfico (hash) do documento assinado. Apresenta apenas número de protocolo interno (${codigoAutenticacaoRotulado}), verificável exclusivamente no sítio da própria instituição${urlVerificacao ? ` (${urlVerificacao})` : ""}. Isso configura autoverificação, e não cadeia de custódia: o protocolo não permite a terceiro conferir, de forma independente, que o arquivo apresentado é o mesmo que foi assinado.`
+    );
+  } else if (!hash && !codigoAutenticacao) {
     addIssue("INT1", "MÉDIA", "Hash conferível ausente", "Não há hash de integridade declarado pelo emissor no documento.");
   }
   const normalizedClientName = stripDiacritics(titleCaseName(agiClienteNome) || name || "").toLowerCase();
@@ -714,10 +860,23 @@ export function heuristicExtractionFromText(rawText) {
   // a outro quadro do contrato (ex.: o banco que recebe o benefício), não
   // ao credor. Ver item 4 do relatório técnico de 09/09/2026.
   const bankByCnpj = resolveBankByCnpj(layout.cnpjInstituicao);
+  // Produto antes de marco normativo: cartão consignado (RMC/RCC) é sempre de
+  // benefício; nos demais, os marcadores decidem entre CLT, INSS e servidor.
+  const produtoClassificado = isCartaoConsignado
+    ? { codigo: "CONSIGNADO_INSS", rotulo: "Cartão consignado de benefício", marcadores: ["modalidade RMC/RCC"], confianca: "ALTA" }
+    : classificarProduto(flat);
+  const empregador = produtoClassificado.codigo === "CONSIGNADO_CLT" ? extrairEmpregador(text) : null;
   const contratoExtraido = {
     numero: [layout.contratoNumero, contratoNumero].find(numeroContratoPlausivel) || null,
     banco: bankByCnpj?.nome || (layout.isBradesco ? "Banco Bradesco S.A." : (layout.banco || normalizedBank || firstField(creditorBlock, [/\b(Banco\s+[A-ZÁÀÂÃÉÊÍÓÔÕÚÇ0-9 .-]{3,80}?)(?=\s+(?:S\.?A\.?|CNPJ|Ag[êe]ncia|Endere[cç]o)\b)/i]))),
-    produto: finalModalidade === "Renegociação CDC" ? "Crédito Direto ao Consumidor / Renegociação" : isCartaoConsignado ? "Cartão consignado de benefício" : (finalModalidade ? "Crédito consignado" : null),
+    produto: finalModalidade === "Renegociação CDC"
+      ? "Crédito Direto ao Consumidor / Renegociação"
+      : isCartaoConsignado
+        ? "Cartão consignado de benefício"
+        : produtoClassificado.rotulo || (finalModalidade ? "Crédito consignado" : null),
+    produto_codigo: finalModalidade === "Renegociação CDC" ? "CDC" : produtoClassificado.codigo,
+    produto_marcadores: produtoClassificado.marcadores,
+    empregador,
     modalidade: finalModalidade,
     // Campos de empréstimo (valor contratado/parcela/número de parcelas) não
     // se aplicam a cartão consignado — ficam null com uma nota, em vez de
@@ -735,16 +894,31 @@ export function heuristicExtractionFromText(rawText) {
     parcelas_mensais: isCartaoConsignado ? null : (layout.numeroParcelas || bbPaymentValues?.[2] || numeroParcelas || firstMatch(flat, [/N[uú]mero\s+de\s+parcelas:\s*(\d{1,3})/i])),
     prazo_meses: layout.cartao?.prazoPrevistoLiquidacaoMeses ?? null,
     prazo_dias: layout.prazoDias || null,
+    prazo_total_declarado: isCartaoConsignado ? null : planilha?.prazo_total_declarado || null,
+    seguros: isCartaoConsignado ? null : planilha?.componentes.seguros.valor || null,
+    tarifa_cadastro: isCartaoConsignado ? null : planilha?.componentes.tarifa_cadastro.valor || null,
+    saldo_portado: isCartaoConsignado ? null : planilha?.componentes.saldo_portado.valor || null,
+    valor_total_ao_final: isCartaoConsignado ? null : planilha?.valor_total_ao_final || null,
+    planilha_calculo: isCartaoConsignado ? null : planilha,
     prazo_nao_se_aplica_nota: isCartaoConsignado ? "Cartão consignado de benefício: prazo é a estimativa de liquidação do saldo (ver prazo_meses), não um cronograma de parcelas fixas." : null,
     taxa_juros_mensal: taxaJurosMensalExtraida,
     taxa_juros_anual: taxaJurosAnualExtraida,
     taxa_juros_anual_calculada: taxaJurosAnualCalculada,
     cet_mensal: layout.cetMensal || cetMensal,
     cet_anual: layout.cetAnual || normalizePercent(bbRates?.[2]) || cetAnual || normalizePercent(firstMatch(flat, [/\bCET\s+a\.a:\s*([\d,.]+%?)/i])),
-    valor_total_parcelas: layout.valorTotalParcelas || normalizeMoney(bbTotals?.[2] || firstMatch(flat, [/(?:Somat[oó]rio\s+das\s+Parcelas|Valor\s+total\s+das\s+parcelas)\s*[:\-]?\s*(?:R\$\s*)?([\d.]+,\d{2})/i])),
+    // "Valor Total ao Final" da planilha é o somatório declarado das parcelas.
+    // Sem ele, o § 2 dizia "não identificado" e o § 2.1 calculava o mesmo valor.
+    valor_total_parcelas: layout.valorTotalParcelas || normalizeMoney(bbTotals?.[2] || firstMatch(flat, [/(?:Somat[oó]rio\s+das\s+Parcelas|Valor\s+total\s+das\s+parcelas)\s*[:\-]?\s*(?:R\$\s*)?([\d.]+,\d{2})/i])) || (isCartaoConsignado ? null : planilha?.valor_total_ao_final) || null,
     credor_original: layout.tipoOperacao === "NOVO" ? "não se aplica (operação declarada como NOVO no Quadro V-2)" : originalCreditor,
     data_contrato: dataContrato,
-    data_contrato_nota: dataContratoImplausivel ? `Data do contrato não determinada com segurança (valor extraído: ${dataContratoBruta}, incompatível com a data de nascimento do cliente ou fora do intervalo plausível).` : null,
+    data_contrato_origem: dataContrato ? dataContratoEleita.origem : null,
+    data_contrato_confianca: dataContrato ? dataContratoEleita.confianca : null,
+    data_contrato_candidatos: dataContratoEleita.candidatos,
+    data_contrato_nota: dataContratoImplausivel
+      ? `Data do contrato não determinada com segurança (valor extraído: ${dataContratoBruta}, incompatível com a data de nascimento do cliente ou fora do intervalo plausível).`
+      : dataContrato && dataContratoEleita.confianca === "BAIXA"
+        ? `Data do contrato lida sem rótulo de contratação no documento (${dataContratoEleita.origem}); confira no instrumento antes de usar prazos e taxas calculados a partir dela.`
+        : null,
     data_primeiro_vencimento: bbDueDates ? `${bbDueDates[2]}/${bbDueDates[3]}/${bbDueDates[4]}` : primeiroVencimento,
     data_ultimo_vencimento: bbDueDates ? `${bbDueDates[5]}/${bbDueDates[6]}/${bbDueDates[7]}` : ultimoVencimento,
     codigo_banco_bacen: bankByCnpj ? bankByCnpj.compe : (layout.codigoBancoBacen || firstField(releaseBlock || flat, [/\b(?:Banco|Institui[cç][aã]o|C[oó]digo)\s*[:\-]?\s*(\d{3})\b/i])),
@@ -770,8 +944,15 @@ export function heuristicExtractionFromText(rawText) {
     contratoExtraido.carencia_dias = null;
     contratoExtraido.datas_nota = `O primeiro vencimento extraído (${contratoExtraido.data_primeiro_vencimento}) é anterior à data do contrato extraída (${contratoExtraido.data_contrato}). Uma das datas foi lida de outro quadro do documento; confira ambas antes de usar a aferição matemática.`;
   }
-  if (mathAudit.carencia_dias > 60) {
-    addIssue("FIN3", "INFO", "Carência prolongada entre contratação e primeiro vencimento", `Decorreram ${plural(mathAudit.carencia_dias, "dia", "dias")} entre a data do contrato (${contratoExtraido.data_contrato}) e o primeiro vencimento (${contratoExtraido.data_primeiro_vencimento}). O somatório das parcelas (${contratoExtraido.valor_total_parcelas}) corresponde a ${mathAudit.somatorio_sobre_liberado_percentual} do valor liberado (${contratoExtraido.valor_liberado}). A carência não é ilícita por si e integra o placar apenas como elemento de contexto econômico.`);
+  contratoExtraido.juros_carencia = mathAudit.juros_carencia;
+  contratoExtraido.prazo_efetivo_dias = mathAudit.prazo_calculado_dias;
+  contratoExtraido.custo_total = mathAudit.custo_total;
+  contratoExtraido.custo_total_percentual = mathAudit.custo_total_percentual;
+  if (mathAudit.carencia_dias > 45) {
+    addIssue("FIN3", "INFO", "Carência prolongada entre contratação e primeiro vencimento", `Decorreram ${plural(mathAudit.carencia_dias, "dia", "dias")} entre a data do contrato (${contratoExtraido.data_contrato}) e o primeiro vencimento (${contratoExtraido.data_primeiro_vencimento}).${mathAudit.juros_carencia ? ` Nesse período, à taxa contratada, o saldo financiado acumula ${mathAudit.juros_carencia} de juros antes do primeiro pagamento.` : ""}${contratoExtraido.valor_total_parcelas && mathAudit.somatorio_sobre_liberado_percentual ? ` O somatório das parcelas (${contratoExtraido.valor_total_parcelas}) corresponde a ${mathAudit.somatorio_sobre_liberado_percentual} do valor liberado (${contratoExtraido.valor_liberado}).` : ""} A carência não é ilícita por si e integra o placar apenas como elemento de contexto econômico.`);
+  }
+  if (mathAudit.prazo_confere === false && mathAudit.prazo_declarado_meses) {
+    addIssue("PRZ1", "MÉDIA", "Prazo efetivo diverge do prazo total declarado", `O instrumento declara prazo total de ${mathAudit.prazo_declarado_meses} meses, mas da emissão (${contratoExtraido.data_contrato}) ao último vencimento (${contratoExtraido.data_ultimo_vencimento}) decorrem ${plural(mathAudit.prazo_calculado_dias, "dia", "dias")}, cerca de ${String(mathAudit.prazo_efetivo_meses).replace(".", ",")} meses. A diferença decorre da carência até o primeiro vencimento, durante a qual correm juros, e não está refletida no prazo informado ao consumidor.`);
   }
   if (contratoExtraido.agencia && !contratoExtraido.nome_agencia) {
     addIssue("CAD1", "MÉDIA", "Qualificação incompleta do contratante", "O instrumento informa agência e conta, mas deixa o nome da agência em branco. O dado deve ser conferido com o cadastro bancário e com a modalidade de desconto aplicável.");
@@ -781,8 +962,16 @@ export function heuristicExtractionFromText(rawText) {
     || firstMatch(flat, [/(?:benef[ií]cio\/matr[ií]cula|matr[ií]cula|n[ºo.]?\s+do\s+benef[ií]cio)\s*(?:n[ºo.]?)?\s*[:\-]?\s*([0-9.\-\/]{5,30})/i]);
   const numeroBeneficio = layout.numeroBeneficio || firstMatch(flat, [/(?:benef[ií]cio|NB)\s*[:\-]?\s*([0-9.\-\/]{5,30})/i]);
   const especieBeneficio = firstMatch(flat, [/(?:esp[eé]cie)\s*[:\-]?\s*([^,.;\n]{2,50})/i]);
-  if (/consignado|INSS|benef[ií]cio/i.test(flat) && !beneficioMatricula && !numeroBeneficio) {
-    addIssue("CAD2", "MÉDIA", "Benefício previdenciário não identificado", "O instrumento aparenta tratar de crédito consignado, mas não foi localizado número de benefício, matrícula ou espécie previdenciária. O dado deve ser confrontado com HISCON/INSS, autorização de averbação e cadastro da operação.");
+  // Só consignado de benefício tem número de benefício a exigir. No consignado
+  // CLT a ausência é esperada, e apontá-la trocaria o achado certo (empregador
+  // não identificado) por um que o banco derruba.
+  const exigeBeneficio = produtoClassificado.codigo === "CONSIGNADO_INSS"
+    || (produtoClassificado.codigo === "INDETERMINADO" && /\bINSS\b|benef[ií]cio\s+previdenci[aá]rio/i.test(flat));
+  if (exigeBeneficio && !beneficioMatricula && !numeroBeneficio) {
+    addIssue("CAD2", "MÉDIA", "Benefício previdenciário não identificado", "O instrumento aparenta tratar de crédito consignado em benefício, mas não foi localizado número de benefício, matrícula ou espécie previdenciária. O dado deve ser confrontado com HISCON/INSS, autorização de averbação e cadastro da operação.");
+  }
+  if (empregador && !empregador.identificado) {
+    addIssue("EMP1", "MÉDIA", "Empregador não identificado", `O instrumento de consignado do trabalhador registra o empregador apenas como "${empregador.literal}", sem razão social e sem CNPJ, embora seja o empregador quem realiza o desconto em folha. Sem essa identificação não é possível confirmar o vínculo que sustenta a consignação nem a averbação da margem.`);
   }
   // Campos repetidos (benefício, CPF, nome, proposta) devem coincidir em
   // todas as ocorrências do documento; quando um formulário interno (ex.:
@@ -896,6 +1085,10 @@ export function heuristicExtractionFromText(rawText) {
   // for true — senão o § 4 (checklist) mostra "SIM" enquanto o sumário diz
   // "nenhum método operacional registrado", a mesma contradição do item
   // 8.1 do relatório técnico de 09/09/2026, só que para outro campo.
+  // Etapa nominada do fluxo ("Coleta da Biometria Facial", seguida de carimbo de
+  // hora) ou declaração de que o instrumento foi assinado por biometria.
+  const biometriaRegistradaComoEvento = /coleta\s+da\s+biometria(?:\s+facial)?[^\n]{0,80}\n[^\n]{0,20}(?:hora|data)/i.test(text)
+    || /assinad[ao]\s+eletronicamente,?\s+por\s+meio\s+da\s+coleta\s+da\s+biometria/i.test(flat);
   const metodosDaTrilha = [
     layout.trilha?.acessoApp ? `Acesso à plataforma em ${layout.trilha.acessoApp}` : null,
     layout.trilha?.aceiteTermos ? `Aceite dos Termos e Condições em ${layout.trilha.aceiteTermos}` : null,
@@ -975,16 +1168,26 @@ export function heuristicExtractionFromText(rawText) {
       linha_do_tempo: acceptanceTimeline
         ? { ...acceptanceTimeline, duracao_total: formatDurationPt(acceptanceTimeline.totalSeconds), intervalo_primeiro_aceite: formatDurationPt(acceptanceTimeline.firstIntervalSeconds) }
         : null,
-      metodos_autenticacao: metodosRegistradosNaTrilha,
+      metodos_autenticacao: [
+        ...metodosRegistradosNaTrilha,
+        biometriaRegistradaComoEvento ? "Biometria facial registrada como etapa do fluxo de contratação" : null,
+      ].filter(Boolean),
+      biometria_registrada_como_evento: biometriaRegistradaComoEvento,
+      // "Apenas no clausulado" só é verdade quando a biometria não aparece como
+      // etapa registrada. O ajuste final, com o inventário de imagens, é feito
+      // em analisarDocumento.js.
       metodos_mencionados_clausulado: [
-        /biometr/i.test(flat) ? "Biometria mencionada apenas no clausulado/modelo contratual" : null,
+        /biometr/i.test(flat) && !biometriaRegistradaComoEvento ? "Biometria mencionada apenas no clausulado/modelo contratual" : null,
         /token|sms/i.test(flat) ? "SMS Token" : null,
         /email|e-mail/i.test(flat) ? "E-mail" : null,
         /selfie/i.test(flat) ? "Selfie" : null,
       ].filter(Boolean),
       mencao_textual: layout.assinaturaEletronicaTexto || signatureText,
       assinatura_manual_textual: manualSignatureName ? `Campo "Por:" preenchido com ${manualSignatureName}. Isso não é assinatura digital/criptográfica incorporada ao PDF.` : null,
-      codigo_autenticacao_declarado: layout.codigoAutenticacao,
+      codigo_autenticacao_declarado: codigoAutenticacao,
+      codigo_autenticacao_origem: codigoAutenticacaoOrigem,
+      codigo_autenticacao_estado: codigoAutenticacaoEstado,
+      codigo_autenticacao_url_verificacao: codigoAutenticacao ? urlVerificacao : null,
       assinatura_criptografica: {
         estado: "AUSENTE",
         motivo: "A presença criptográfica é determinada pelos metadados/AcroForm do PDF, não por menção textual.",
@@ -1059,6 +1262,7 @@ export function heuristicExtractionFromText(rawText) {
       : "Laudo gerado por extração textual local do PDF. A estrutura do relatório foi preservada, mas recomenda-se validação humana dos campos extraídos.",
   };
   extracted.rodape_pje = footer.removed;
+  extracted.metadados_processuais = metadadosProcessuais;
   // Tabela "Bairro  Cidade  Estado  CEP" em colunas: corrige rótulo lido como
   // valor e preenche o que o padrão por rótulo não alcançou.
   const tabelaEndereco = enderecoPorColunas(text);
@@ -1109,6 +1313,44 @@ export function heuristicExtractionFromText(rawText) {
   if (extracted.cliente?.nome && /\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}/.test(extracted.cliente.nome)) {
     extracted.cliente.nome = null;
     extracted.cliente.origens = { ...(extracted.cliente.origens || {}), nome: "DESCARTADO: possível contaminação por rodapé do PJe" };
+  }
+
+  // Estado de cada campo de qualificação: não localizado, vazio no documento ou
+  // suspeito. Os dois últimos são achados sobre o instrumento, não limites da
+  // extração, e o laudo precisa dizer isso.
+  if (extracted.cliente) {
+    const estados = avaliarQualificacao(text, extracted.cliente);
+    extracted.cliente.estados_campos = estados;
+    if (estados.endereco?.estado === ESTADO_CAMPO.LOCALIZADO_VAZIO) {
+      extracted.cliente.endereco = null;
+      extracted.cliente.endereco_literal = estados.endereco.valor;
+      extracted.cliente.origens = {
+        ...(extracted.cliente.origens || {}),
+        endereco: `LOCALIZADO E VAZIO: o instrumento registra "${estados.endereco.valor}"`,
+      };
+    }
+    const partes = [];
+    if (estados.rg?.estado === ESTADO_CAMPO.LOCALIZADO_SUSPEITO) {
+      partes.push(`o documento de identidade preenchido como ${estados.rg.valor} (${estados.rg.motivo})`);
+    }
+    if (estados.cpf?.estado === ESTADO_CAMPO.LOCALIZADO_SUSPEITO) {
+      partes.push(`o CPF preenchido como ${estados.cpf.valor} (${estados.cpf.motivo})`);
+    }
+    if (estados.endereco?.estado === ESTADO_CAMPO.LOCALIZADO_VAZIO) {
+      partes.push(`o endereço registrado como "${estados.endereco.valor}"`);
+    }
+    if (partes.length) {
+      const vazios = ["email", "ocupacao", "nome_social"]
+        .filter((campo) => estados[campo]?.estado === ESTADO_CAMPO.LOCALIZADO_VAZIO)
+        .map((campo) => ({ email: "e-mail", ocupacao: "ocupação", nome_social: "nome social" })[campo]);
+      addIssue(
+        "CAD4",
+        "MÉDIA",
+        "Qualificação do contratante com campos fictícios ou não informados",
+        `A instituição formalizou a operação com ${partes.join(" e ")}${vazios.length ? `, além de ${vazios.join(", ")} em branco na proposta` : ""}. O preenchimento indica cadastro feito por terceiro ou sem conferência documental, e falha de identificação do contratante.`
+      );
+      extracted.evidencias_irregularidade = achados.map((issue) => `${issue.titulo}. ${issue.texto}`);
+    }
   }
   return extracted;
 }

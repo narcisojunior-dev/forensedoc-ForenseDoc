@@ -68,7 +68,18 @@ export function montarRelatorio({ analysisId, result, createdAt }) {
     hashes: result?.hashes || { sha256: "", sha1: "" },
     metadata: result?.metadata || null,
     extracted,
-    home: { query: home.query || null, source: home.source || null, geo: home.geo || null, warning: null },
+    home: {
+      query: home.query || null,
+      source: home.source || null,
+      geo: home.geo || null,
+      warning: null,
+      // Estado da referência residencial (recusada por conflito, indisponível,
+      // liberada pelo operador) e o texto que o laudo imprime sobre ela.
+      estado_confronto: home.estado_confronto || null,
+      alerta: home.alerta || null,
+      conflito: home.conflito || null,
+      justificativa: home.justificativa || null,
+    },
     contractGeo: result?.contractGeo || null,
     geoDeclaredPresent: Boolean(result?.geoDeclaredPresent),
     ipAnalysis,
@@ -90,7 +101,7 @@ export function montarRelatorio({ analysisId, result, createdAt }) {
           porta: primeiroIp?.porta,
           gpsCoords: result?.contractGeo ? `${result.contractGeo.lat}, ${result.contractGeo.lon}` : null,
           cidadeIp: primeiroIp?.geo ? [primeiroIp.geo.city, primeiroIp.geo.region].filter(Boolean).join(" / ") : null,
-          cidadeDomicilio: home.geo?.display || home.query,
+          cidadeDomicilio: home.geo ? home.geo.display || home.query : null,
           distanciaKm: primeiroIp?.distance != null ? primeiroIp.distance.toFixed(1) : null,
           dataHora: primeiroIp?.data_hora || extracted.assinatura?.data_hora_assinatura,
         })

@@ -399,11 +399,17 @@ export default function LaudoForense({ report }) {
                     );
                   }
 
+                  const codigo = report.extracted.assinatura?.codigo_autenticacao_declarado;
                   return (
                     <>
                       <Row label="SHA-256 (fingerprint)" value={calc} mono />
+                      {/* Protocolo não é hash: campo próprio, sem painel de confronto. */}
+                      {codigo && <Row label="Código de autenticação declarado (não é hash)" value={codigo} mono />}
+                      {codigo && report.extracted.assinatura?.codigo_autenticacao_origem && (
+                        <Row label="Origem do código" value={report.extracted.assinatura.codigo_autenticacao_origem} />
+                      )}
                       <div className="note">
-                        {noteForDeclaredHashState(declaredState, calc)}
+                        {noteForDeclaredHashState(declaredState, calc, report.extracted.assinatura)}
                       </div>
                     </>
                   );
@@ -445,8 +451,11 @@ export default function LaudoForense({ report }) {
                     ["Idioma declarado", report.metadata.language],
                     ["Arquivo criptografado", report.metadata.encrypted ? "Sim" : "Não"],
                     ["PDF linearizado", report.metadata.linearized ? "Sim" : "Não"],
-                    ["Procedência do arquivo", labelProvenance(report.metadata.digitalSignature?.procedencia?.procedencia)],
-                    ["Indícios de re-renderização", report.metadata.digitalSignature?.procedencia?.indicios?.join(" · ")],
+                    ["Procedência do arquivo", labelProvenance(report.metadata.digitalSignature?.procedencia?.procedencia, report.metadata.digitalSignature?.procedencia)],
+                    ["Data da juntada nos autos", report.metadata.digitalSignature?.procedencia?.data_juntada],
+                    ["Movimento processual", report.metadata.digitalSignature?.procedencia?.movimento ? [report.metadata.digitalSignature.procedencia.movimento, report.metadata.digitalSignature.procedencia.descricao_movimento].filter(Boolean).join(" · ") : null],
+                    ["Juntado por (assinatura digital)", report.metadata.digitalSignature?.procedencia?.juntado_por],
+                    ["Indícios de procedência", report.metadata.digitalSignature?.procedencia?.indicios?.join(" · ")],
                     ["Formulário AcroForm", report.metadata.hasAcroForm ? "Presente" : "Ausente"],
                     ["AcroForm xref", report.metadata.digitalSignature?.catalog?.acroformXref],
                     ["SigFlags", report.metadata.digitalSignature?.catalog?.sigFlags],
@@ -483,29 +492,37 @@ export default function LaudoForense({ report }) {
                   ["Modalidade", report.extracted.contrato?.modalidade],
                   ["Tipo de operação", report.extracted.contrato?.tipo_operacao],
                   ["Operação portada", report.extracted.contrato?.operacao_portada === true ? "Sim" : report.extracted.contrato?.operacao_portada === false ? "Não há" : null],
+                  ["Empregador declarado", report.extracted.contrato?.empregador ? `${report.extracted.contrato.empregador.literal}${report.extracted.contrato.empregador.identificado ? "" : " (sem razão social e sem CNPJ)"}` : null],
                   ["Valor liberado/solicitado", report.extracted.contrato?.valor_liberado],
-                  ["Valor dos novos recursos (liberado + IOF + seguro)", report.extracted.contrato?.valor_novos_recursos],
+                  ["Saldo portado / refinanciado", report.extracted.contrato?.saldo_portado],
+                  ["Tarifa de cadastro", report.extracted.contrato?.tarifa_cadastro],
+                  ["Seguros", report.extracted.contrato?.seguros],
+                  ["Valor dos novos recursos / total financiado", report.extracted.contrato?.valor_novos_recursos],
                   ["Valor total do empréstimo", report.extracted.contrato?.valor_total_emprestimo],
                   ["IOF financiado", report.extracted.contrato?.iof_financiado],
                   ["Valor de entrada", report.extracted.contrato?.valor_entrada],
                   ["Valor da parcela", report.extracted.contrato?.valor_parcela],
                   ["Quantidade de parcelas mensais", report.extracted.contrato?.parcelas_mensais || report.extracted.contrato?.numero_parcelas],
                   ["Prazo da operação (dias)", report.extracted.contrato?.prazo_dias != null ? nBR(report.extracted.contrato.prazo_dias) : null],
+                  ["Prazo total declarado", report.extracted.contrato?.prazo_total_declarado ? `${report.extracted.contrato.prazo_total_declarado.quantidade} ${report.extracted.contrato.prazo_total_declarado.unidade}` : null],
+                  ["Prazo efetivo, da emissão ao último vencimento (dias)", report.extracted.contrato?.prazo_efetivo_dias != null ? nBR(report.extracted.contrato.prazo_efetivo_dias) : null],
                   ["Prazo da operação (meses, aprox.)", report.extracted.contrato?.prazo_operacao_meses_aprox != null ? nBR(report.extracted.contrato.prazo_operacao_meses_aprox, 1) : null],
                   ["Carência até o primeiro vencimento (dias)", report.extracted.contrato?.carencia_dias != null ? nBR(report.extracted.contrato.carencia_dias) : null],
+                  ["Juros acumulados na carência", report.extracted.contrato?.juros_carencia],
                   ["Taxa de juros mensal", report.extracted.contrato?.taxa_juros_mensal],
                   ["Taxa de juros anual", report.extracted.contrato?.taxa_juros_anual],
                   ["Taxa de juros anual calculada", report.extracted.contrato?.taxa_juros_anual_calculada],
                   ["CET mensal", report.extracted.contrato?.cet_mensal],
                   ["CET anual", report.extracted.contrato?.cet_anual],
                   ["Somatório das parcelas", report.extracted.contrato?.valor_total_parcelas],
+                  ["Custo total da operação (somatório menos liberado)", report.extracted.contrato?.custo_total ? `${report.extracted.contrato.custo_total} (${report.extracted.contrato.custo_total_percentual} do liberado)` : null],
                   ["Credor original / cedente", report.extracted.contrato?.credor_original],
                   ["Agência", report.extracted.contrato?.agencia],
                   ["Conta-corrente", report.extracted.contrato?.conta_corrente],
                   ["Nome da agência", report.extracted.contrato?.nome_agencia],
                   ["Banco de recebimento", report.extracted.contrato?.banco_recebimento],
                   ["Modalidade de desconto provável", report.extracted.contrato?.modalidade_desconto_provavel],
-                  ["Data do contrato", report.extracted.contrato?.data_contrato],
+                  ["Data do contrato", report.extracted.contrato?.data_contrato ? `${report.extracted.contrato.data_contrato}${report.extracted.contrato.data_contrato_origem ? ` (${report.extracted.contrato.data_contrato_origem}${report.extracted.contrato.data_contrato_confianca === "BAIXA" ? ", confiança baixa" : ""})` : ""}` : null],
                   ["Primeiro vencimento", report.extracted.contrato?.data_primeiro_vencimento],
                   ["Último vencimento", report.extracted.contrato?.data_ultimo_vencimento],
                 ].map(([lbl, val]) => <Row key={lbl} label={lbl} value={val} />)}
@@ -519,14 +536,20 @@ export default function LaudoForense({ report }) {
                     return (
                       <>
                         {[
-                          ["Prazo declarado", `${m.prazo_calculado_dias != null ? nBR(m.prazo_calculado_dias) : "n/i"} dias calculados contra ${m.prazo_declarado_dias != null ? nBR(m.prazo_declarado_dias) : "n/i"} declarados · ${ok(m.prazo_confere) || "não aferido"}`],
-                          ["Somatório das parcelas", `${m.somatorio_calculado || "n/i"} calculado · ${ok(m.somatorio_confere) || "não aferido"}`],
-                          ["Composição do financiado", `${m.composicao_financiado_calculada || "n/i"} calculado · ${ok(m.composicao_confere) || "não aferido"}`],
+                          ["Prazo declarado", m.prazo_descricao
+                            ? `${m.prazo_descricao} · ${ok(m.prazo_confere) || "não aferido"}`
+                            : `${m.prazo_calculado_dias != null ? nBR(m.prazo_calculado_dias) : "n/i"} dias calculados${m.prazo_declarado_dias != null ? ` contra ${nBR(m.prazo_declarado_dias)} declarados` : ", prazo declarado não localizado"} · ${ok(m.prazo_confere) || "não aferido"}`],
+                          ["Somatório das parcelas", `${m.somatorio_calculado || "n/i"} calculado${m.somatorio_declarado ? ` contra ${m.somatorio_declarado} declarado` : ""} · ${ok(m.somatorio_confere) || "não aferido"}`],
+                          ["Composição do financiado", `${m.composicao_financiado_calculada || "n/i"} calculado${m.composicao_componentes?.length ? ` (${m.composicao_componentes.map((c) => `${c.rotulo} ${c.localizado ? c.valor : "não localizado"}`).join(" + ")})` : ""} · ${ok(m.composicao_confere) || "não aferido"}`],
                           ["Valor presente pela taxa declarada", `${m.vp_taxa_declarada || "n/i"} · ${ok(m.vp_confere) || "não aferido"}`],
-                          ["CET implícito mensal", m.cet_implicito_mensal ? `${m.cet_implicito_mensal}${m.cet_implicito_anual_calculado ? ` (${m.cet_implicito_anual_calculado} a.a. pelo fluxo)` : ""}${m.cet_implicito_nota ? ` · ${m.cet_implicito_nota}` : ""} · ${m.cet_implicito_veredito || "não aferido"}` : null],
-                          ["Anualização do CET mensal declarado", `${m.cet_anual_calculado || "n/i"} · ${ok(m.cet_anual_confere) || "não aferido"}`],
+                          ["CET implícito mensal", m.cet_implicito_mensal
+                            ? `${m.cet_implicito_mensal}${m.cet_implicito_anual_calculado ? ` (${m.cet_implicito_anual_calculado} a.a. em 365 dias)` : ""}${m.cet_implicito_nota ? ` · ${m.cet_implicito_nota}` : ""} · ${m.cet_implicito_veredito || "não aferido"}`
+                            : m.cet_implicito_motivo ? `não aferido: ${m.cet_implicito_motivo}` : null],
+                          ["Anualização do CET mensal declarado", m.cet_anual_calculado ? `${m.cet_anual_calculado} em 365 dias · ${m.cet_anual_calculado_12m} em 12 meses${m.cet_anual_convencao ? ` · contrato usa ${m.cet_anual_convencao}` : ""} · ${ok(m.cet_anual_confere) || "não aferido"}` : null],
+                          ["Anualização da taxa de juros mensal", m.juros_anual_calculado_365 ? `${m.juros_anual_calculado_365} em 365 dias · ${m.juros_anual_calculado_12m} em 12 meses${m.juros_anual_convencao ? ` · contrato usa ${m.juros_anual_convencao}` : ""} · ${ok(m.juros_anual_confere) || "não aferido"}` : null],
                           ["CET maior que taxa de juros", ok(m.cet_maior_que_juros)],
                         ].map(([lbl, val]) => <Row key={lbl} label={lbl} value={val} />)}
+                        {m.composicao_nota && <div className="note">{m.composicao_nota}</div>}
                         {m.conclusao && <div className="note">{m.conclusao}</div>}
                       </>
                     );
@@ -540,18 +563,28 @@ export default function LaudoForense({ report }) {
                   const c = report.extracted.cliente || {};
                   const origem = c.origens || {};
                   const val = (campo, valor) => origem[campo]?.startsWith("INFERIDO") && valor ? `${valor} (inferido)` : valor;
+                  // Vazio no documento e suspeito são achados sobre o instrumento,
+                  // e não podem aparecer como "Não identificado".
+                  const estados = c.estados_campos || {};
+                  const comEstado = (campo, valor) => {
+                    const e = estados[campo];
+                    if (e?.estado === "LOCALIZADO_SUSPEITO") return `${valor || e.valor} (suspeito: ${e.motivo})`;
+                    if (e?.estado === "LOCALIZADO_VAZIO") return e.valor ? `Localizado e vazio no instrumento: "${e.valor}"` : "Localizado e vazio no instrumento";
+                    return valor;
+                  };
                   return [
                   ["Nome completo", report.extracted.cliente?.nome],
                   ["CPF", formatCpf(report.extracted.cliente?.cpf)],
-                  ["RG", report.extracted.cliente?.rg],
+                  ["RG", comEstado("rg", report.extracted.cliente?.rg)],
                   ["Data de nascimento", report.extracted.cliente?.data_nascimento],
-                  ["Endereço (extraído do contrato)", report.extracted.cliente?.endereco],
+                  ["Endereço (extraído do contrato)", comEstado("endereco", report.extracted.cliente?.endereco)],
                   ["Bairro", report.extracted.cliente?.bairro],
                   ["Cidade", val("cidade", report.extracted.cliente?.cidade)],
                   ["Estado", val("estado", report.extracted.cliente?.estado)],
                   ["CEP", report.extracted.cliente?.cep],
                   ["Telefone", report.extracted.cliente?.telefone],
-                  ["E-mail", report.extracted.cliente?.email],
+                  ["E-mail", comEstado("email", report.extracted.cliente?.email)],
+                  ["Ocupação", estados.ocupacao?.estado === "LOCALIZADO_VAZIO" ? comEstado("ocupacao", null) : null],
                   ["Matrícula INSS", report.extracted.cliente?.matricula_inss],
                   ["Número do benefício", report.extracted.cliente?.numero_beneficio],
                   ["Espécie do benefício", report.extracted.cliente?.especie_beneficio],
@@ -565,6 +598,11 @@ export default function LaudoForense({ report }) {
                 )}
 
                 <div className="sub-head">Endereço de referência (ponto de origem das distâncias)</div>
+                {report.home.alerta && (
+                  <div className="note" style={{ borderLeftColor: "var(--crit)", background: "rgba(240,99,99,0.07)" }}>
+                    {report.home.alerta}
+                  </div>
+                )}
                 <Row label="Endereço adotado" value={report.home.query} nullText="Nenhum endereço informado ou extraído" />
                 <Row label="Origem do endereço" value={report.home.source} />
                 {report.home.geo && (report.ipAnalysis.length > 0 || report.contractGeo) ? (
@@ -618,7 +656,9 @@ export default function LaudoForense({ report }) {
                         ["Menção textual de assinatura", a.mencao_textual],
                         ["Assinatura textual/manual no corpo", a.assinatura_manual_textual],
                         ["Código de autenticação declarado", a.codigo_autenticacao_declarado],
-                        ["Estado do hash/código declarado", labelHashState(a.hash_declarado_estado)],
+                        ["Origem do código de autenticação", a.codigo_autenticacao_origem],
+                        ["Estado do código de autenticação", a.codigo_autenticacao_declarado ? labelHashState(a.codigo_autenticacao_estado || "DECLARADO_NAO_CONFERIVEL") : null],
+                        ["Estado do hash declarado", labelHashState(a.hash_declarado_estado)],
                         ["Plataforma informada", a.plataforma],
                         ["Tipo declarado/extraído", a.tipo],
                         ["Titular indicado", a.titular_certificado],
@@ -741,7 +781,7 @@ export default function LaudoForense({ report }) {
                           ? "Os itens eliminatórios foram encontrados na extração automática. Ainda assim, os logs brutos e o certificado devem ser confrontados manualmente antes do uso processual."
                           : `Não foi aplicado percentual de completude porque faltam itens eliminatórios: ${missing.join(", ")}. Sem esses elementos, o relatório não afirma autenticidade, integridade ou validade jurídica da assinatura.`}
                       </div>
-                      {a.hash_declarado_estado === "DECLARADO_NAO_CONFERIVEL" && (
+                      {(a.hash_declarado_estado === "DECLARADO_NAO_CONFERIVEL" || a.codigo_autenticacao_estado === "DECLARADO_NAO_CONFERIVEL") && (
                         <div className="note" style={{ borderLeftColor: "var(--warn)", background: "rgba(242,176,61,0.07)" }}>
                           Existe código de autenticação declarado pelo emissor, mas ele não é conferível por método público. O item eliminatório permanece não satisfeito até que a instituição informe algoritmo, payload assinado e procedimento de verificação.
                         </div>
@@ -1000,7 +1040,7 @@ export default function LaudoForense({ report }) {
                       <div className="geo-card" style={{ borderTopColor: "var(--accent)" }}>
                         <div className="gtitle" style={{ color: "var(--accent)" }}>Residência do cliente (referência)</div>
                         <div className="gcoord" style={{ color: "var(--accent)" }}>
-                          {report.home.geo ? `${report.home.geo.lat.toFixed(6)}, ${report.home.geo.lon.toFixed(6)}` : "Não geocodificada"}
+                          {report.home.geo ? `${report.home.geo.lat.toFixed(6)}, ${report.home.geo.lon.toFixed(6)}` : report.home.alerta ? "Confronto não realizado" : "Não geocodificada"}
                         </div>
                         <div className="gmeta">
                           {report.home.query || "Endereço não informado"}<br />
@@ -1036,6 +1076,10 @@ export default function LaudoForense({ report }) {
                         <div className="note" style={{ borderLeftColor: "var(--label)", background: "rgba(133,149,168,0.07)" }}>
                           A distância isolada não determina fraude. Deslocamentos compatíveis com a rotina do cliente, como ir da zona rural à capital do estado, podem ser plenamente legítimos. Este resultado deve ser confrontado com a entrevista do cliente, com a data e hora da assinatura e com a localização do correspondente bancário antes de qualquer conclusão sobre irregularidade.
                         </div>
+                      </div>
+                    ) : report.home.alerta ? (
+                      <div className="note" style={{ borderLeftColor: "var(--crit)", background: "rgba(240,99,99,0.07)" }}>
+                        {report.home.alerta}
                       </div>
                     ) : (
                       <div className="note" style={{ borderLeftColor: "var(--warn)", background: "rgba(242,176,61,0.07)" }}>
@@ -1116,7 +1160,9 @@ export default function LaudoForense({ report }) {
                                 </>
                               ) : (
                                 <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 8 }}>
-                                  Endereço residencial não geocodificado. Distância indisponível para este IP.
+                                  {report.home.alerta
+                                    ? "Distância à residência não calculada: a referência residencial foi recusada ou está indisponível (ver § 3)."
+                                    : "Endereço residencial não geocodificado. Distância indisponível para este IP."}
                                 </div>
                               )}
                             </>
@@ -1269,11 +1315,15 @@ export default function LaudoForense({ report }) {
                       ["CDC, art. 51, IV e § 1º", "Nulidade de cláusulas que coloquem o consumidor em desvantagem exagerada ou incompatíveis com a boa-fé."],
                       ["Súmula 297 do STJ", "O Código de Defesa do Consumidor é aplicável às instituições financeiras."],
                     ]],
-                    ["Crédito consignado e benefício do INSS", [
+                    // Marco do consignado escolhido pelo produto (mesma regra de
+                    // backend/src/reports/laudoTexts.js). CLT não cita INSS.
+                    ...(ctr.produto_codigo === "CDC" ? [] : ctr.produto_codigo === "CONSIGNADO_CLT" ? [["Crédito consignado do trabalhador (CLT)", [
+                      ["Lei 10.820/2003", "Disciplina a autorização para desconto de prestações de empréstimos em folha de pagamento dos empregados regidos pela CLT, os limites da consignação e as obrigações do empregador na retenção e no repasse."],
+                    ]]] : [["Crédito consignado e benefício do INSS", [
                       ["Lei 10.820/2003 e Decreto 4.840/2003", "Disciplinam a autorização e os limites do desconto de prestações de empréstimo consignado em folha de pagamento e em benefício previdenciário."],
                       ["Lei 8.213/1991, art. 115", "Define as hipóteses e os limites de desconto sobre o valor do benefício previdenciário."],
                       ["Normas do INSS sobre consignações (Instrução Normativa vigente) e Resoluções do CNPS", "Regulam margem consignável, formalização e averbação. Número da IN vigente: verificar conforme a data do contrato."],
-                    ]],
+                    ]]]),
                     ["Custo Efetivo Total (CET)", [
                       ["Resolução CMN 4.881/2020, art. 2º", "Define o CET como a taxa que representa, de forma consolidada, todos os encargos e despesas da operação."],
                       ["Regulamentação do CMN sobre CET", "Exige informação prévia e clara do custo efetivo total e dos componentes que formam o fluxo financeiro da operação."],

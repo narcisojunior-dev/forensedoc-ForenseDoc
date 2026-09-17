@@ -27,6 +27,8 @@ export default function Laudo() {
   const [pdfDownload, setPdfDownload] = useState(null);
   const [coordenada, setCoordenada] = useState("");
   const [corrigindo, setCorrigindo] = useState(false);
+  const [conflitoCoordenada, setConflitoCoordenada] = useState(null);
+  const [justificativaCoordenada, setJustificativaCoordenada] = useState("");
 
   const carregar = useCallback(async () => {
     try {
@@ -64,11 +66,22 @@ export default function Laudo() {
     }
     setCorrigindo(true);
     try {
-      const { data } = await api.patch(`/analyses/${id}/geo`, coord);
+      const corpo = conflitoCoordenada
+        ? { ...coord, contestado: true, justificativa: justificativaCoordenada.trim() }
+        : coord;
+      const { data } = await api.patch(`/analyses/${id}/geo`, corpo);
       atualizarResultado(data.result);
       setCoordenada("");
+      setConflitoCoordenada(null);
+      setJustificativaCoordenada("");
       toast.success("Coordenada aplicada. Distâncias, classificações e sumário foram recalculados.");
     } catch (err) {
+      // Conflito com o instrumento: a coordenada só entra com o endereço do
+      // contrato declarado contestado e justificado.
+      if (err.response?.status === 409 && err.response?.data?.code === "CONFLITO_REFERENCIA") {
+        setConflitoCoordenada(err.response.data.error);
+        return;
+      }
       toast.error(err.response?.data?.error || "Não foi possível corrigir a coordenada.");
     } finally {
       setCorrigindo(false);
@@ -183,9 +196,22 @@ export default function Laudo() {
               />
               <button type="button" className={btnPrimary} onClick={aplicarCoordenada} disabled={corrigindo}>
                 {corrigindo && <Loader2 className="h-4 w-4 animate-spin" />}
-                {corrigindo ? "Aplicando..." : "Aplicar coordenada"}
+                {corrigindo ? "Aplicando..." : conflitoCoordenada ? "Aplicar como endereço contestado" : "Aplicar coordenada"}
               </button>
             </div>
+            {conflitoCoordenada && (
+              <div className="mt-3 rounded-lg border border-amber-500/25 bg-amber-500/[0.05] p-3">
+                <p className="text-[12.5px] leading-relaxed text-amber-200">{conflitoCoordenada}</p>
+                <textarea
+                  value={justificativaCoordenada}
+                  onChange={(e) => setJustificativaCoordenada(e.target.value)}
+                  placeholder="Justificativa impressa no laudo (por que o endereço do instrumento é contestado)."
+                  rows={3}
+                  maxLength={500}
+                  className="mt-2 block w-full rounded-lg border border-surface-border bg-surface px-3 py-2 text-sm text-foreground placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              </div>
+            )}
           </div>
         )}
 

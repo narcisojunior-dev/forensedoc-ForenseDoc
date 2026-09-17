@@ -24,17 +24,26 @@ export function generateJudicialQuesitos({
   const ipRef = ip ? `endereço IP ${ip}${porta ? ` (porta lógica: ${porta})` : ""}` : "endereço IP";
   const dataRef = dataHora || "na data e hora registradas no dossiê";
 
-  return [
+  /*
+   * O Quesito 2 afirma ao juízo onde fica o domicílio e a que distância o ato
+   * ocorreu. Sem domicílio confirmado e distância medida, ele não é montado: o
+   * texto padrão ("milhares de quilômetros", "outro estado/município") afirmava
+   * incompatibilidade que ninguém mediu. No dossiê C6 isso levou ao juízo um
+   * domicílio no Piauí digitado por engano.
+   */
+  const temConfrontoGeografico = Boolean(cidadeDomicilio && distanciaKm);
+
+  const quesitos = [
     {
       numero: 1,
       titulo: "Identificação e Registro Integral da Conexão (Marco Civil da Internet)",
       quesito: `Queira o Sr. Perito ou ${bancoRef} apresentar o relatório de conexão integral referente à operação ${contratoRef}, informando detalhadamente o endereço IP completo, a porta lógica de origem, o fuso horário (com indicação UTC) e os registros de cabeçalho da sessão, nos termos do art. 10 e art. 15 da Lei nº 12.965/2014 (Marco Civil da Internet).`,
       finalidade: "Exigir a cadeia técnica sem omissão de porta lógica ou masquerading.",
     },
-    {
+    temConfrontoGeografico && {
       numero: 2,
       titulo: "Esclarecimento sobre a Divergência Geográfica",
-      quesito: `Considerando que o dossiê acostado aos autos aponta conexão realizada a partir de ${cidadeIp || "região remota"} (${ipRef}) e coordenadas de GPS em ${gpsCoords || "localidade diversa"}, enquanto o domicílio de ${nomeRef} situa-se em ${cidadeDomicilio || "outro estado/município"} — distando aproximadamente ${distanciaKm ? `${distanciaKm} km` : "milhares de quilômetros"} —, queira esclarecer se há elementos técnicos que justifiquem ou comprovem a presença física do titular no local registrado no instante da assinatura (${dataRef}).`,
+      quesito: `Considerando que o dossiê acostado aos autos aponta conexão realizada a partir de ${cidadeIp || "localidade informada pelo provedor"} (${ipRef})${gpsCoords ? ` e coordenadas de GPS em ${gpsCoords}` : ""}, enquanto o domicílio de ${nomeRef} situa-se em ${cidadeDomicilio}, distando aproximadamente ${distanciaKm} km, queira esclarecer se há elementos técnicos que justifiquem ou comprovem a presença física do titular no local registrado no instante da assinatura (${dataRef}).`,
       finalidade: "Consolidar a incompatibilidade espacial e o afastamento da tese de contratação presencial/regular.",
     },
     {
@@ -56,4 +65,6 @@ export function generateJudicialQuesitos({
       finalidade: "Fixar a incumbência probatória sobre a instituição financeira requerida.",
     },
   ];
+
+  return quesitos.filter(Boolean).map((q, i) => ({ ...q, numero: i + 1 }));
 }

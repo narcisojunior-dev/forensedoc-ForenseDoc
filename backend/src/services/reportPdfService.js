@@ -6,7 +6,7 @@ import {
   NOTA_ASSINATURA,
   NOTA_HASH_SISTEMA,
   NOTA_DISTANCIA,
-  FUNDAMENTACAO,
+  fundamentacaoPara,
   NOTA_FUNDAMENTACAO_RESSALVA,
   avisoLegal,
 } from "../reports/laudoTexts.js";
@@ -78,7 +78,7 @@ export async function buildReportPdf(analysis, result) {
   sectionProcessComparison(ctx, result.processComparison);
   sectionRemarks(ctx, extracted);
   sectionQuesitos(ctx, extracted, result);
-  sectionLegal(ctx);
+  sectionLegal(ctx, extracted);
   sectionExecutiveSummary(ctx, result.sumarioIrregularidades, result.reportId);
   legalNotice(ctx, timestamp);
 
@@ -320,6 +320,13 @@ function sectionIdentity(ctx, result, extracted) {
   }
   const declared = extracted.assinatura?.hash_documento_assinado;
   if (declared) field(ctx, "Hash declarado no documento", declared, { mono: true });
+  const codigo = extracted.assinatura?.codigo_autenticacao_declarado;
+  if (codigo) {
+    // Protocolo não é hash: sai em campo próprio, sem painel de confronto.
+    field(ctx, "Código de autenticação declarado", codigo, { mono: true });
+    field(ctx, "   Origem", extracted.assinatura.codigo_autenticacao_origem);
+    field(ctx, "   Verificação oferecida", extracted.assinatura.codigo_autenticacao_url_verificacao);
+  }
   field(ctx, "Tipo de documento", extracted.tipo_documento);
   field(ctx, "Qualidade de leitura/OCR", extracted.qualidade_ocr);
   paragraph(ctx, NOTA_HASH_SISTEMA, { color: MUTED, size: 8.5 });
@@ -344,7 +351,9 @@ function sectionContract(ctx, extracted) {
   heading(ctx, "§ 2 · Dados do instrumento contratual");
   field(ctx, "Número do contrato", c.numero);
   field(ctx, "Banco / instituição", c.banco);
+  field(ctx, "Produto", c.produto);
   field(ctx, "Modalidade", c.modalidade);
+  if (c.empregador) field(ctx, "Empregador declarado", `${c.empregador.literal}${c.empregador.identificado ? "" : " (sem razão social e sem CNPJ)"}`);
   field(ctx, "Valor contratado", c.valor_contratado);
   field(ctx, "Valor da parcela", c.valor_parcela);
   field(ctx, "Número de parcelas", c.numero_parcelas);
@@ -353,6 +362,8 @@ function sectionContract(ctx, extracted) {
   field(ctx, "CET mensal", c.cet_mensal);
   field(ctx, "CET anual", c.cet_anual);
   field(ctx, "Data do contrato", c.data_contrato);
+  if (c.data_contrato_origem) field(ctx, "   Origem da data", `${c.data_contrato_origem}${c.data_contrato_confianca === "BAIXA" ? " · confiança baixa" : ""}`);
+  if (c.data_contrato_nota) paragraph(ctx, c.data_contrato_nota, { color: DANGER, size: 8.5 });
 }
 
 function sectionClient(ctx, extracted) {
@@ -360,9 +371,14 @@ function sectionClient(ctx, extracted) {
   heading(ctx, "§ 3 · Qualificação do contratante");
   field(ctx, "Nome completo", c.nome);
   field(ctx, "CPF", c.cpf);
-  field(ctx, "RG", c.rg);
+  const estados = c.estados_campos || {};
+  field(ctx, "RG", estados.rg?.estado === "LOCALIZADO_SUSPEITO" ? `${c.rg || estados.rg.valor} (suspeito: ${estados.rg.motivo})` : c.rg);
   field(ctx, "Data de nascimento", c.data_nascimento);
-  field(ctx, "Endereço", c.endereco);
+  field(
+    ctx,
+    "Endereço",
+    estados.endereco?.estado === "LOCALIZADO_VAZIO" ? `localizado e vazio no instrumento: "${estados.endereco.valor}"` : c.endereco
+  );
   field(ctx, "Cidade / Estado", [c.cidade, c.estado].filter(Boolean).join(" / "));
   field(ctx, "CEP", c.cep);
   field(ctx, "Telefone", c.telefone);
@@ -380,6 +396,11 @@ function sectionSignature(ctx, extracted, result = {}) {
   field(ctx, "Data / hora da assinatura", a.data_hora_assinatura);
   field(ctx, "Algoritmo de hash", a.algoritmo_hash);
   if (a.metodos_autenticacao?.length) field(ctx, "Métodos de autenticação", a.metodos_autenticacao.join(" · "));
+  if (a.metodos_mencionados_clausulado?.length) field(ctx, "Métodos apenas mencionados no clausulado", a.metodos_mencionados_clausulado.join(" · "));
+  if (a.codigo_autenticacao_declarado) {
+    field(ctx, "Hash declarado", a.hash_documento_assinado ? "Declarado" : "Ausente");
+    field(ctx, "Código de autenticação", `Declarado, conferível apenas pelo emissor (${a.codigo_autenticacao_origem || "origem não identificada"})`);
+  }
 
   sectionCustodyChain(ctx, extracted, result.ipAnalysis || [], !!result.geoDeclaredPresent, result.cadeiaCustodia);
 }
@@ -525,6 +546,9 @@ function sectionGeo(ctx, result, mapas = {}) {
   );
 
   subheading(ctx, "Ponto de referência · residência do contratante");
+  if (result.home?.alerta) {
+    paragraph(ctx, result.home.alerta, { color: DANGER, size: 9 });
+  }
   if (result.home?.query) field(ctx, `Endereço (${result.home.source || "referência"})`, result.home.query);
   if (home && Number.isFinite(home.lat) && Number.isFinite(home.lon)) {
     // A coordenada NUMÉRICA é obrigatória: todas as distâncias abaixo derivam
@@ -545,7 +569,7 @@ function sectionGeo(ctx, result, mapas = {}) {
       { color: DANGER, size: 8.5 }
     );
   }
-  if (!home) {
+  if (!home && !result.home?.alerta) {
     paragraph(
       ctx,
       "Não foi possível estabelecer a coordenada de referência da residência. Sem ela, nenhum dos dois confrontos abaixo pode ser calculado.",
@@ -869,6 +893,7 @@ function sectionIrregularities(ctx, extracted) {
 // ─────────────────────────────────────────────────────────────
 
 const PROCEDENCIA_PDF = {
+  EXPORTACAO_SISTEMA_PROCESSUAL: "exportação de sistema processual",
   NATIVO_PROVAVEL: "arquivo nativo provável",
   RE_RENDERIZACAO_JUDICIAL: "re-renderizado por sistema processual",
   REIMPRESSAO_POSTERIOR_PROVAVEL: "reimpressão posterior provável",
@@ -886,7 +911,16 @@ function sectionDigitalSignature(ctx, metadata, extracted) {
     badge(ctx, "Assinatura criptográfica incorporada", ds.estado || "INDETERMINADO", ds.estado === "PRESENTE");
     if (ds.motivo) paragraph(ctx, ds.motivo, { color: MUTED, size: 8.5 });
     if (ds.procedencia?.procedencia) {
-      field(ctx, "Proveniência do arquivo", PROCEDENCIA_PDF[ds.procedencia.procedencia] || ds.procedencia.procedencia);
+      const p = ds.procedencia;
+      field(
+        ctx,
+        "Proveniência do arquivo",
+        `${PROCEDENCIA_PDF[p.procedencia] || p.procedencia}${p.sistema ? ` (${[p.sistema, p.tribunal].filter(Boolean).join("/")})` : ""}`
+      );
+      if (p.data_juntada) field(ctx, "   Data da juntada", p.data_juntada);
+      if (p.movimento) field(ctx, "   Movimento", `${p.movimento}${p.descricao_movimento ? ` · ${p.descricao_movimento}` : ""}`);
+      if (p.juntado_por) field(ctx, "   Juntado por (assinatura digital)", p.juntado_por);
+      if (p.identificador_validacao) field(ctx, "   Identificador de validação", p.identificador_validacao, { mono: true });
       if (ds.procedencia.indicios?.length) field(ctx, "Indícios", ds.procedencia.indicios.join(" · "));
       if (ds.procedencia.mensagem) paragraph(ctx, ds.procedencia.mensagem, { size: 8.5 });
     }
@@ -936,10 +970,17 @@ function sectionEconomics(ctx, extracted) {
   const cartao = c.cartao;
   const linhas = [
     ["Valor liberado", c.valor_liberado],
+    ["Saldo portado / refinanciado", c.saldo_portado],
+    ["Tarifa de cadastro", c.tarifa_cadastro],
+    ["Seguros", c.seguros],
     ["IOF financiado", c.iof_financiado],
     ["Somatório das parcelas", c.valor_total_parcelas],
     ["Prazo declarado (dias)", c.prazo_dias],
+    ["Prazo total declarado", c.prazo_total_declarado ? `${c.prazo_total_declarado.quantidade} ${c.prazo_total_declarado.unidade}` : null],
+    ["Prazo efetivo, da emissão ao último vencimento (dias)", c.prazo_efetivo_dias],
     ["Carência até o 1º vencimento (dias)", c.carencia_dias],
+    ["Juros acumulados na carência", c.juros_carencia],
+    ["Custo total (somatório − liberado)", c.custo_total ? `${c.custo_total} (${c.custo_total_percentual} do liberado)` : null],
     ["Taxa anual calculada", c.taxa_juros_anual_calculada],
     ["Tipo de operação", c.tipo_operacao],
     ["CNPJ da instituição", c.cnpj_instituicao],
@@ -965,13 +1006,26 @@ function sectionEconomics(ctx, extracted) {
       if (valor === null || valor === undefined) return;
       badge(ctx, `${rotulo}${detalhe ? ` (${detalhe})` : ""}`, valor ? "CONFERE" : "NÃO CONFERE", valor);
     };
-    confere("Prazo declarado × datas", m.prazo_confere, m.prazo_calculado_dias != null ? `${m.prazo_calculado_dias} dias` : null);
+    confere("Prazo declarado × datas", m.prazo_confere, m.prazo_descricao || (m.prazo_calculado_dias != null ? `${m.prazo_calculado_dias} dias` : null));
     confere("Somatório das parcelas", m.somatorio_confere, m.somatorio_calculado);
     confere("Composição do financiado", m.composicao_confere, m.composicao_financiado_calculada);
+    if (m.composicao_nota) paragraph(ctx, m.composicao_nota, { color: MUTED, size: 8.5 });
     confere("Valor presente pela taxa declarada", m.vp_confere, m.vp_taxa_declarada);
-    confere("CET anual × CET mensal", m.cet_anual_confere, m.cet_anual_calculado);
+    // As duas convenções lado a lado: a diferença entre elas não é divergência.
+    confere(
+      "CET anual × CET mensal",
+      m.cet_anual_confere,
+      m.cet_anual_calculado ? `365 dias ${m.cet_anual_calculado} · 12 meses ${m.cet_anual_calculado_12m}${m.cet_anual_convencao ? ` · contrato usa ${m.cet_anual_convencao}` : ""}` : null
+    );
+    confere(
+      "Juros anual × juros mensal",
+      m.juros_anual_confere,
+      m.juros_anual_calculado_365 ? `365 dias ${m.juros_anual_calculado_365} · 12 meses ${m.juros_anual_calculado_12m}${m.juros_anual_convencao ? ` · contrato usa ${m.juros_anual_convencao}` : ""}` : null
+    );
     if (m.cet_implicito_mensal) {
       field(ctx, "CET implícito no fluxo", `${m.cet_implicito_mensal} a.m.${m.cet_implicito_veredito ? ` · ${m.cet_implicito_veredito}` : ""}`);
+    } else if (m.cet_implicito_status === "NAO_AFERIDO" && m.cet_implicito_motivo) {
+      field(ctx, "CET implícito no fluxo", `não aferido: ${m.cet_implicito_motivo}`);
     }
     if (m.cet_implicito_nota) paragraph(ctx, m.cet_implicito_nota, { color: MUTED, size: 8.5 });
     if (m.conclusao) paragraph(ctx, m.conclusao, { size: 9 });
@@ -1141,7 +1195,7 @@ function sectionQuesitos(ctx, extracted, result) {
     porta: ipItem?.porta,
     gpsCoords: result.contractGeo ? `${result.contractGeo.lat}, ${result.contractGeo.lon}` : null,
     cidadeIp: ipItem?.geo?.city ? `${ipItem.geo.city}/${ipItem.geo.region || ""}` : null,
-    cidadeDomicilio: result.home?.geo?.display || result.home?.query,
+    cidadeDomicilio: result.home?.geo ? result.home.geo.display || result.home.query : null,
     distanciaKm: result.contractGeo?.distance != null ? result.contractGeo.distance.toFixed(1) : null,
     dataHora: ipItem?.data_hora || extracted.assinatura?.data_hora_assinatura,
   });
@@ -1157,9 +1211,9 @@ function sectionQuesitos(ctx, extracted, result) {
   }
 }
 
-function sectionLegal(ctx) {
+function sectionLegal(ctx, extracted = {}) {
   heading(ctx, "§ 9 · Fundamentação normativa aplicável");
-  for (const { grupo, itens } of FUNDAMENTACAO) {
+  for (const { grupo, itens } of fundamentacaoPara(extracted.contrato?.produto_codigo)) {
     const { doc, contentWidth } = ctx;
     if (doc.y > doc.page.height - 130) doc.addPage();
     doc.moveDown(0.3);

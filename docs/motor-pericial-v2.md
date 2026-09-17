@@ -61,9 +61,9 @@ Confere, com o selo CONFERE / NÃO CONFERE:
 
 - prazo declarado contra as datas do contrato e do último vencimento;
 - somatório das parcelas contra número × valor da parcela;
-- composição do financiado (liberado + IOF);
+- composição do financiado pela soma de todos os componentes da planilha (liberado, saldo portado, tarifa, seguros, IOF), com componente não localizado marcado como tal e nunca somado como zero;
 - valor presente das parcelas pela taxa declarada;
-- CET anual contra o CET mensal capitalizado;
+- CET anual e taxa de juros anual contra as duas anualizações (365 dias e 12 meses), com a convenção usada pelo contrato registrada;
 - CET implícito no fluxo de pagamentos, com indicação de subdeclaração quando o CET declarado é menor que o implícito ou que a taxa nominal.
 
 ### 2.4 Assinatura digital, proveniência e imagens (§ 1.2)

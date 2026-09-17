@@ -254,8 +254,16 @@ export function buildIrregularitySummary(report = {}) {
   const hashMismatch = declaredKind === "SHA-256" && calculatedHash
     && declaredHash.toUpperCase() !== calculatedHash.toUpperCase();
   const hashMalformed = declaredKind === "INVALIDO";
-  const declaredHashState = signature.hash_declarado_estado || (signature.codigo_autenticacao_declarado ? "DECLARADO_NAO_CONFERIVEL" : null);
-  const hashMissing = !declaredHash && declaredHashState !== "DECLARADO_NAO_CONFERIVEL";
+  // Hash e código de autenticação têm estados próprios desde a separação dos
+  // dois campos; análises antigas guardavam o estado do código no do hash.
+  const codigoNaoConferivel = !declaredHash && (
+    signature.codigo_autenticacao_estado === "DECLARADO_NAO_CONFERIVEL"
+    || signature.hash_declarado_estado === "DECLARADO_NAO_CONFERIVEL"
+    || (!signature.codigo_autenticacao_estado && !signature.hash_declarado_estado && hasValue(signature.codigo_autenticacao_declarado))
+  );
+  const declaredHashState = codigoNaoConferivel ? "DECLARADO_NAO_CONFERIVEL" : signature.hash_declarado_estado || null;
+  const hashMissing = !declaredHash && !codigoNaoConferivel;
+  const achadoInt1DaExtracao = (extracted.achados_irregularidade || []).find((issue) => issue?.codigo === "INT1");
   const embeddedMissing = metadata?.hasEmbeddedSignatures === false;
   const producerModified = /(modified using|modificado por|itext)/i.test(metadata?.producer || "");
 
@@ -268,6 +276,10 @@ export function buildIrregularitySummary(report = {}) {
   } else if (hashMismatch) {
     addFinding("MÉDIA", "hash-mismatch", "Integridade em aberto.", `O hash declarado (${shortHash(declaredHash)}) diverge do SHA-256 recalculado (${shortHash(calculatedHash)}).${embeddedMissing ? " Não foi detectada assinatura PAdES incorporada." : ""}${producerModified ? ` O produtor (${metadata.producer}) indica pós-processamento do PDF.` : ""} A divergência exige o payload original e a metodologia de cálculo; não comprova adulteração isoladamente.`);
     addCheck("A", "hash", "ALERTA", "Hash declarado diverge do recalculado.");
+  } else if (declaredHashState === "DECLARADO_NAO_CONFERIVEL" && achadoInt1DaExtracao) {
+    // A extração já redigiu o achado com o fundamento certo (autoverificação,
+    // gravidade própria); aqui fica só o registro no quadro de verificação.
+    addCheck("A", "hash", "ALERTA", "Sem hash declarado; apenas código de autenticação conferível no próprio emissor.");
   } else if (declaredHashState === "DECLARADO_NAO_CONFERIVEL") {
     addFinding("MÉDIA", "INT1", "Código de autenticação declarado e inverificável.", "Há código de autenticação declarado no documento, porém sem algoritmo, payload de referência e procedimento público de conferência. Caracteres fora dos alfabetos usuais podem decorrer de fonte embutida sem mapa ToUnicode; por isso, o bloco deve ser confrontado com a renderização visual antes de conclusão sobre seu alfabeto.");
     addCheck("A", "hash", "ALERTA", "Código declarado, mas inverificável.");
@@ -399,6 +411,10 @@ export function buildIrregularitySummary(report = {}) {
       addFinding("ALTA", "gps-home-distance", "GPS da assinatura distante da residência.", `A coordenada declarada fica a ${formatKm(gpsDistance)} da referência residencial. A distância não prova fraude sozinha, mas exige explicação e logs de localização.`);
       addCheck("F", "gps-residencia", "ALERTA", formatKm(gpsDistance));
     }
+  } else if (report.home?.estado_confronto === "RECUSADO_CONFLITO") {
+    addCheck("F", "gps-residencia", "INDETERMINADO", "Confronto recusado: endereço informado conflita com o do instrumento.");
+  } else if (report.home?.estado_confronto === "INDISPONIVEL_NAO_INFORMADO") {
+    addCheck("F", "gps-residencia", "INDETERMINADO", "Confronto indisponível: instrumento registra o endereço como não informado.");
   } else {
     addCheck("F", "gps-residencia", "INDETERMINADO", "Distância residencial indisponível.");
   }
@@ -413,7 +429,12 @@ export function buildIrregularitySummary(report = {}) {
   // pelo operador) quando o município dela é conhecido; a cidade do cadastro no
   // contrato fica como reserva. É a mesma referência das distâncias do § 5, e
   // o cadastro do contrato pode ser justamente o dado contestado.
-  const referenciaMunicipio = report.home?.geo?.matchedCity || null;
+  // Referência recusada por conflito com o instrumento não é domicílio: nesse
+  // caso vale o município do cadastro. Foi assim que o sumário do dossiê C6
+  // afirmou domicílio em Pedro II/PI três seções depois de o § 3 registrar
+  // Manaquiri/AM.
+  const referenciaUtilizavel = !["RECUSADO_CONFLITO", "INDISPONIVEL_NAO_INFORMADO"].includes(report.home?.estado_confronto);
+  const referenciaMunicipio = referenciaUtilizavel ? report.home?.geo?.matchedCity || null : null;
   const domicilioCidade = referenciaMunicipio || client.cidade;
   const domicilioUf = referenciaMunicipio ? report.home?.geo?.matchedUf : client.estado;
   const gpsMunicipio = normalizeText(report.contractGeo?.municipio);

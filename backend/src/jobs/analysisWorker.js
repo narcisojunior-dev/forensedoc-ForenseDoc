@@ -10,6 +10,7 @@ import { cleanPdfBase64 } from "../utils/stringUtils.js";
 import { buildCustodyChain } from "../reports/custodyChain.js";
 import { getPdf } from "../services/objectStorageService.js";
 import { analisarDocumento } from "../engine/analisarDocumento.js";
+import { verificarCoerencia } from "../engine/coerenciaLaudo.js";
 import { buildSummaryForResult } from "../services/analysisRecompute.js";
 
 function fileHashes(buffer) {
@@ -20,7 +21,7 @@ function fileHashes(buffer) {
 }
 
 export async function processAnalysis(job) {
-  const { analysisId, pdfKey, pdfBase64, tenantId, userId, lockToken, homeAddress, homeCoord, filename, creditoIsento } =
+  const { analysisId, pdfKey, pdfBase64, tenantId, userId, lockToken, homeAddress, homeCoord, homeContestacao, filename, creditoIsento } =
     job.data;
 
   try {
@@ -62,7 +63,7 @@ export async function processAnalysis(job) {
     // punindo o cliente por uma extração que deu certo.
     let geo = { home: null, contractGeo: null, geoDeclaredPresent: false, ipAnalysis: [] };
     try {
-      geo = await enrichGeography(fallback, homeAddress, homeCoord);
+      geo = await enrichGeography(fallback, homeAddress, homeCoord, homeContestacao || null);
     } catch (geoError) {
       console.error(`[AnalysisWorker] Enriquecimento geográfico falhou para ${analysisId}:`, geoError.message);
     }
@@ -98,6 +99,11 @@ export async function processAnalysis(job) {
       generatedAt,
     };
     result.sumarioIrregularidades = buildSummaryForResult(result, fallback);
+    // Modo alerta: registra contradições entre seções sem bloquear a emissão.
+    result.coerencia = verificarCoerencia(result, fallback);
+    if (result.coerencia.length) {
+      console.warn(`[AnalysisWorker] ${result.coerencia.length} contradição(ões) no laudo ${analysisId}:`, result.coerencia.map((c) => c.regra).join(", "));
+    }
 
     await prisma.analysis.update({
       where: { id: analysisId },

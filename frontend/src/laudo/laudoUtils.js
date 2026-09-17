@@ -46,16 +46,24 @@ export function labelHashState(value) {
   return labels[value] || value;
 }
 
-export function labelProvenance(value) {
+export function labelProvenance(value, procedencia = null) {
   const labels = {
+    EXPORTACAO_SISTEMA_PROCESSUAL: "Exportação de sistema processual",
     REIMPRESSAO_POSTERIOR_PROVAVEL: "Reimpressão posterior provável",
     NATIVO_PROVAVEL: "Nativo provável",
     RE_RENDERIZACAO_JUDICIAL: "Re-renderização judicial",
+    ARQUIVO_DERIVADO: "Arquivo derivado",
   };
-  return labels[value] || value;
+  const sistema = [procedencia?.sistema, procedencia?.tribunal].filter(Boolean).join("/");
+  return labels[value] ? `${labels[value]}${sistema ? ` (${sistema})` : ""}` : value;
 }
 
-export function noteForDeclaredHashState(state, calc) {
+export function noteForDeclaredHashState(state, calc, assinatura = null) {
+  // Código de autenticação rotulado (protocolo, número único), sem hash: o texto
+  // não pode chamar o protocolo de hash nem situá-lo no "rodapé".
+  if (assinatura?.codigo_autenticacao_declarado && !assinatura?.hash_documento_assinado && assinatura?.codigo_autenticacao_origem && !/rodap/i.test(assinatura.codigo_autenticacao_origem)) {
+    return `O documento não apresenta hash criptográfico declarado. Apresenta apenas código de autenticação (${assinatura.codigo_autenticacao_declarado}, ${assinatura.codigo_autenticacao_origem}) conferível exclusivamente pelo próprio emissor${assinatura.codigo_autenticacao_url_verificacao ? `, em ${assinatura.codigo_autenticacao_url_verificacao}` : ""}. O hash SHA-256 calculado por este sistema sobre o arquivo original é o indicado acima e passa a servir como impressão digital de referência do documento para fins de cadeia de custódia.`;
+  }
   if (state === "DECLARADO_NAO_CONFERIVEL") {
     return `O contrato não traz hash criptográfico conferível. Há, no rodapé do instrumento, código de autenticação declarado pelo emissor, examinado no § 4, que não é redutível a hexadecimal, Base64 ou Base32 e não é conferível por método público. O hash SHA-256 calculado por este sistema sobre o arquivo original é o indicado acima e passa a servir como impressão digital de referência do documento para fins de cadeia de custódia.`;
   }
