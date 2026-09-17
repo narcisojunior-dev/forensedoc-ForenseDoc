@@ -11,9 +11,9 @@ import { fileURLToPath } from "node:url";
  * do caso anonimizado do corpus; o geocodificador é simulado, com Pedro II/PI e
  * Manaquiri/AM nas coordenadas reais dos municípios.
  *
- * O negativo 8 do relatório ("CCB sem bloco de assinatura") NÃO entra: a
- * conferência do PDF mostrou bloco de assinatura no fim da pág. 6 da CCB. O
- * achado seria falso. Ver seção 11 do plano de implementação.
+ * O negativo 8 do relatório ("CCB sem bloco de assinatura") foi invertido: a
+ * conferência do PDF mostrou bloco de assinatura no fim da pág. 6 da CCB, e o
+ * teste garante que o achado falso NÃO sai. Ver seção 11 do plano.
  */
 
 const geocodeAddress = vi.fn();
@@ -137,11 +137,53 @@ describe("dossiê C6: testes negativos do relatório de homologação", () => {
     expect(verificarCoerencia({ ...geo }, extraido)).toEqual([]);
   });
 
-  it.todo("8. achado de ausência de bloco de assinatura na CCB (errata: a CCB tem bloco na pág. 6; reavaliar na Fase 4)");
-  it.fails("9. emite achado de ausência de comprovante de transferência (Fase 4)", () => {
-    expect(extraido.achados_irregularidade.map((a) => a.codigo)).toContain("LIB1");
+  it("8. (errata) não afirma ausência de assinatura na CCB, que tem bloco na pág. 6", () => {
+    expect(extraido.achados_irregularidade.map((a) => a.codigo)).not.toContain("ASS1");
+    const ccb = extraido.documentos_logicos.documentos.find((d) => d.tipo === "INSTRUMENTO_PRINCIPAL");
+    expect(ccb).toMatchObject({ paginaInicial: 3, paginaFinal: 7 });
+    expect(ccb.blocosAssinatura.map((b) => b.pagina)).toEqual([6]);
+    expect(extraido.assinatura.mencao_textual_documento).toMatch(/Cédula.*pág\. 6/);
   });
-  it.fails("10. emite o bloco de seguro prestamista (Fase 4)", () => {
-    expect(extraido.seguro_prestamista).toBeTruthy();
+
+  it("segmenta o dossiê nos cinco documentos lógicos", () => {
+    expect(extraido.documentos_logicos.documentos.map((d) => [d.tipo, d.paginaInicial, d.paginaFinal])).toEqual([
+      ["DOSSIE", 1, 2],
+      ["INSTRUMENTO_PRINCIPAL", 3, 7],
+      ["CONDICOES_GERAIS", 8, 14],
+      ["SEGURO", 15, 17],
+      ["TERMOS", 18, 27],
+    ]);
+  });
+
+  it("9. emite achado de ausência de comprovante de transferência", () => {
+    const lib1 = extraido.achados_irregularidade.find((a) => a.codigo === "LIB1");
+    expect(lib1.gravidade).toBe("ALTA");
+    expect(lib1.texto).toMatch(/Banco 237, agência 1234, conta 005555-1\), no valor de R\$ 1\.779,15/);
+  });
+
+  it("10. emite o bloco de seguro prestamista com os seis achados", () => {
+    const s = extraido.seguro_prestamista;
+    expect(s).toMatchObject({ proposta: "900112233", premio: "R$ 218,64", iof: "R$ 0,83", pro_labore: "R$ 98,02", beneficiario: "Estipulante" });
+    expect(s.coberturas.map((c) => [c.nome, c.premio, c.carencia_dias, c.franquia_dias, c.teto_parcelas])).toEqual([
+      ["Morte", "R$ 11,46", 0, 0, null],
+      ["Invalidez Permanente Total por Acidente", "R$ 2,67", 0, 0, null],
+      ["Desemprego Involuntario (DI)", "R$ 204,52", 90, 31, 4],
+    ]);
+    expect(s.seguradora.cnpj).toBe("02.102.498/0001-29");
+    expect(s.corretora).toEqual({ nome: "Nova Casa do Corretor", cnpj: "07.340.832/0001-04", susep: "202037842" });
+    expect(s.achados.map((a) => a.codigo)).toEqual(["SEG1", "SEG2", "SEG3", "SEG4", "SEG5", "SEG6"]);
+    expect(s.achados[0].gravidade).toBe("ALTA");
+  });
+
+  it("reconstrói a trilha: 6 eventos, 204 s, aceites rápidos, ausências e fuso", () => {
+    const t = extraido.trilha_eventos;
+    expect(t.eventos).toHaveLength(6);
+    expect(t.duracao_total_s).toBe(204);
+    expect(t.eventos.filter((e) => !e.ip)).toHaveLength(2);
+    expect(t.eventos.filter((e) => e.lat === null)).toHaveLength(3);
+    expect(t.eventos[2]).toMatchObject({ porta: "56256" });
+    const codigos = extraido.achados_irregularidade.map((a) => a.codigo);
+    expect(codigos).toEqual(expect.arrayContaining(["TRL1-TERMOS", "TRL1-CCB", "TRL1-SEGURO", "TRL3", "TZ1"]));
+    expect(extraido.achados_irregularidade.find((a) => a.codigo === "TZ1").texto).toMatch(/06:45:03 no horário de Manaus/);
   });
 });

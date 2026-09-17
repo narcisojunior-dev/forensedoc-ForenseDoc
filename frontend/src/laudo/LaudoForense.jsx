@@ -557,6 +557,76 @@ export default function LaudoForense({ report }) {
                 </Section>
               )}
 
+              {/* §2.2 Liberação do crédito */}
+              {report.extracted.liberacao_credito?.declarada && (
+                <Section title="§ 2.2 · Liberação do crédito e comprovante" danger={!report.extracted.liberacao_credito.comprovante}>
+                  {(() => {
+                    const l = report.extracted.liberacao_credito;
+                    return (
+                      <>
+                        <Row label="Forma de liberação declarada" value={l.declarada.forma} />
+                        <Row label="Banco / agência / conta de crédito" value={[l.declarada.banco && `Banco ${l.declarada.banco}`, l.declarada.agencia && `agência ${l.declarada.agencia}`, l.declarada.conta && `conta ${l.declarada.conta}`].filter(Boolean).join(" · ")} />
+                        <Row label="Valor que deveria ter sido creditado" value={report.extracted.contrato?.valor_liberado} />
+                        <div className="row">
+                          <span className="row-label">Comprovante de transferência no arquivo</span>
+                          <Badge label={l.comprovante ? "LOCALIZADO" : "AUSENTE"} color={l.comprovante ? "#3ddc97" : "#f06363"} />
+                        </div>
+                        {l.comprovante && (
+                          <Row label="Comprovante localizado" value={[l.comprovante.pagina && `pág. ${l.comprovante.pagina}`, l.comprovante.valor, l.comprovante.data].filter(Boolean).join(" · ")} />
+                        )}
+                      </>
+                    );
+                  })()}
+                </Section>
+              )}
+
+              {/* §2.3 Seguro prestamista */}
+              {report.extracted.seguro_prestamista && (
+                <Section title="§ 2.3 · Seguro prestamista vinculado à operação" danger={(report.extracted.seguro_prestamista.achados || []).some((a) => a.gravidade === "ALTA")}>
+                  {(() => {
+                    const sg = report.extracted.seguro_prestamista;
+                    const pctBR = (v, casas = 1) => (v == null ? null : `${(v * 100).toFixed(casas).replace(".", ",")}%`);
+                    return (
+                      <>
+                        {[
+                          ["Proposta", sg.proposta ? `nº ${sg.proposta}${sg.documento ? ` (págs. ${sg.documento.paginaInicial} a ${sg.documento.paginaFinal})` : ""}` : null],
+                          ["Prêmio", sg.premio ? `${sg.premio}${sg.premio_sobre_liberado != null ? ` (${pctBR(sg.premio_sobre_liberado, 2)} do valor liberado)` : ""}` : null],
+                          ["IOF do seguro", sg.iof],
+                          ["Periodicidade / forma de pagamento", [sg.periodicidade, sg.forma_pagamento].filter(Boolean).join(" · ")],
+                          ["Pró-labore", sg.pro_labore ? `${sg.pro_labore}${sg.pro_labore_sobre_premio != null ? ` (${pctBR(sg.pro_labore_sobre_premio)} do prêmio)` : ""}` : null],
+                          ["Seguradora", sg.seguradora ? `${sg.seguradora.nome}${sg.seguradora.cnpj ? `, CNPJ ${sg.seguradora.cnpj}` : ""}` : null],
+                          ["Corretora", sg.corretora ? `${sg.corretora.nome}, CNPJ ${sg.corretora.cnpj}, SUSEP ${sg.corretora.susep}` : null],
+                          ["Estipulante", sg.estipulante ? `${sg.estipulante.nome}, CNPJ ${sg.estipulante.cnpj}` : null],
+                          ["Beneficiário", sg.beneficiario],
+                        ].map(([lbl, val]) => <Row key={lbl} label={lbl} value={val} />)}
+                        {sg.coberturas?.length > 0 && (
+                          <>
+                            <div className="sub-head">Coberturas</div>
+                            <div className="audit-table-wrap">
+                              <table className="audit-table">
+                                <thead><tr><th>Cobertura</th><th>Prêmio</th><th>Parte do prêmio</th><th>Carência</th><th>Franquia</th><th>Teto</th></tr></thead>
+                                <tbody>
+                                  {sg.coberturas.map((c) => (
+                                    <tr key={c.nome}>
+                                      <td>{c.nome}</td>
+                                      <td className="mono-cell">{c.premio || "-"}</td>
+                                      <td className="mono-cell">{pctBR(c.participacao_premio) || "-"}</td>
+                                      <td>{c.carencia_dias ? `${c.carencia_dias} dias` : "não há"}</td>
+                                      <td>{c.franquia_dias ? `${c.franquia_dias} dias` : "não há"}</td>
+                                      <td>{c.teto_parcelas ? `${c.teto_parcelas} parcelas` : "-"}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </>
+                        )}
+                      </>
+                    );
+                  })()}
+                </Section>
+              )}
+
               {/* §3 */}
               <Section title="§ 3 · Qualificação do contratante">
                 {(() => {
@@ -653,7 +723,8 @@ export default function LaudoForense({ report }) {
                         ["Quantidade de assinaturas/campos assinados", cryptoSig.quantidade],
                         ["Forma de aceite registrada", a.forma_aceite],
                         ["Telefone/celular do aceite", a.telefone_aceite],
-                        ["Menção textual de assinatura", a.mencao_textual],
+                        ["Menção textual de assinatura", a.mencao_textual ? `${a.mencao_textual}${a.mencao_textual_documento ? ` (${a.mencao_textual_documento})` : ""}` : null],
+                        ["Blocos de assinatura por documento", a.blocos_por_documento],
                         ["Assinatura textual/manual no corpo", a.assinatura_manual_textual],
                         ["Código de autenticação declarado", a.codigo_autenticacao_declarado],
                         ["Origem do código de autenticação", a.codigo_autenticacao_origem],
@@ -939,6 +1010,33 @@ export default function LaudoForense({ report }) {
                       ))}
                     </div>
 
+                    {report.extracted.imagem_biometrica && (() => {
+                      const b = report.extracted.imagem_biometrica;
+                      return (
+                        <div className="ip-block" style={{ border: "1px solid rgba(240,99,99,0.35)", background: "rgba(240,99,99,0.06)" }}>
+                          <div className="ip-head">
+                            <div className="ip-id" style={{ color: "#f06363" }}>Artefato biométrico · pág. {b.pagina}</div>
+                            <Badge label={b.exif === false ? "SEM EXIF" : b.exif ? "COM EXIF" : "EXIF N/D"} color={b.exif ? "#3ddc97" : "#f06363"} />
+                          </div>
+                          <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
+                            {b.miniatura && (
+                              <img src={b.miniatura} alt="Fotografia biométrica extraída do arquivo" style={{ width: 120, height: "auto", borderRadius: 6, border: "1px solid #52616c" }} />
+                            )}
+                            <div style={{ flex: 1, minWidth: 220 }}>
+                              {[
+                                ["Dimensões", `${b.largura} x ${b.altura} pixels (${String(b.megapixels).replace(".", ",")} megapixel)`],
+                                ["Formato e tamanho", [b.formato, b.bytes ? `${b.bytes.toLocaleString("pt-BR")} bytes` : null].filter(Boolean).join(" · ")],
+                                ["SHA-256 da imagem", b.sha256 ? shortHash(b.sha256, 18, 10) : null],
+                                ["Imagens faciais no arquivo", b.contagem_faciais],
+                                ["Não apresentado pelo dossiê", b.dados_do_processo_ausentes?.join(", ")],
+                              ].map(([lbl, val]) => <Row key={lbl} label={lbl} value={val} mono={lbl === "SHA-256 da imagem"} />)}
+                            </div>
+                          </div>
+                          {b.achado && <div className="note" style={{ borderLeftColor: "var(--crit)" }}>{b.achado.texto}</div>}
+                        </div>
+                      );
+                    })()}
+
                     {img.achados?.length > 0 && (
                       <>
                         <div className="sub-head">Achados de imagem</div>
@@ -1022,6 +1120,39 @@ export default function LaudoForense({ report }) {
                   </Section>
                 );
               })()}
+
+              {/* §4.3 Trilha de eventos (formato dossiê de contratação) */}
+              {report.extracted.trilha_eventos?.eventos?.length > 0 && (
+                <Section title="§ 4.3 · Trilha de eventos da contratação" danger={reportIssues(report.extracted).some((i) => /^TRL1|^TRL5/.test(i.codigo) && i.gravidade === "ALTA")}>
+                  {(() => {
+                    const t = report.extracted.trilha_eventos;
+                    return (
+                      <>
+                        <Row label="Duração total da jornada" value={`${t.duracao_total} (${t.duracao_total_s} segundos)`} />
+                        {t.fuso && <Row label="Fuso declarado na trilha" value={`${t.fuso.trilha}; leitura local em ${t.fuso.local}${t.fuso.assinatura_sem_fuso ? "; bloco de assinatura sem fuso" : ""}`} />}
+                        <div className="audit-table-wrap">
+                          <table className="audit-table">
+                            <thead><tr><th>Evento</th><th>Data/hora ({t.fuso?.trilha || "declarada"})</th><th>Hora local</th><th>Intervalo</th><th>s/página</th><th>IP : porta</th><th>Geolocalização</th></tr></thead>
+                            <tbody>
+                              {t.eventos.map((ev, i) => (
+                                <tr key={`${ev.nome}-${i}`} className={ev.segundos_por_pagina != null && ev.segundos_por_pagina < 5 ? "audit-key-row" : ""}>
+                                  <td>{ev.nome}</td>
+                                  <td className="mono-cell">{ev.data_hora}</td>
+                                  <td className="mono-cell">{ev.hora_local ? ev.hora_local.split(" ")[1] : "-"}</td>
+                                  <td className="mono-cell">{ev.intervalo_s == null ? "referência" : `+${ev.intervalo_s} s`}</td>
+                                  <td className="mono-cell">{ev.segundos_por_pagina != null ? `${String(ev.segundos_por_pagina).replace(".", ",")} (${ev.documento_aceito.paginas} págs.)` : "-"}</td>
+                                  <td className="mono-cell">{ev.ip ? `${ev.ip}${ev.porta ? `:${ev.porta}` : ""}` : "ausente"}</td>
+                                  <td className="mono-cell">{ev.lat != null ? `${ev.lat}, ${ev.lon}` : "ausente"}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </>
+                    );
+                  })()}
+                </Section>
+              )}
 
               {report.ipAnalysis.length === 0 && !report.contractGeo ? (
                 <Section title="§ 5-6 · Rastros de rede e geolocalização">

@@ -285,6 +285,10 @@ function classifyEmbeddedImage(image) {
   if (image.type === "smask") return "máscara alfa";
   if (image.height <= 45 && image.width >= 180) return "linha gráfica/separador do template";
   if (image.width <= 220 && image.height <= 80) return "logotipo/template";
+  // Faixa larga e baixa (logotipo em banner, cabeçalho). No dossiê C6 eram
+  // banners de 242x64 e 350x93 repetidos em todas as folhas, lidos como
+  // "imagem documental" e disparando IMG4 sem nenhuma relevância.
+  if (ratio >= 3 && image.height <= 120) return "logotipo/template";
   if (bytes !== null && bytes < 1000 && image.height <= 80) return "elemento gráfico do template";
   if (isLikelyFaceOrBiometricImage(image)) return "fotografia/biometria provável";
   if (ratio > 4 || ratio < 0.25) return "elemento gráfico/template";
@@ -294,6 +298,19 @@ function classifyEmbeddedImage(image) {
 function isTemplateGraphic(image) {
   const kind = classifyEmbeddedImage(image);
   return /template|logotipo|c[oó]digo|linha gr[aá]fica|m[aá]scara/.test(kind);
+}
+
+/** Segmento APP1 "Exif" num JPEG, percorrendo os marcadores até o início dos dados. */
+function temExif(data) {
+  let i = 2;
+  while (i + 4 < data.length && data[i] === 0xff) {
+    const marker = data[i + 1];
+    if (marker === 0xda || marker === 0xd9) break;
+    const length = data.readUInt16BE(i + 2);
+    if (marker === 0xe1 && data.slice(i + 4, i + 10).toString("latin1") === "Exif\0\0") return true;
+    i += 2 + length;
+  }
+  return false;
 }
 
 function buildImageFindings(images, repeatedGroups, extractedCount, available, options = {}) {
@@ -424,6 +441,24 @@ export async function inspectPdfImages(pdfBuffer, rawText = "") {
         image.extractedBytes = match.bytes;
       }
     });
+    // Metadados da fotografia provável: formato, megapixels, EXIF e miniatura.
+    // A ausência de EXIF numa selfie reembutida indica que os metadados de
+    // captura foram removidos; a miniatura entra no laudo por decisão do
+    // escritório (dado biométrico, LGPD art. 11).
+    for (const image of images) {
+      if (!image.biometricaProvavel || !image.extractedFile) continue;
+      const data = await readFile(join(tempDir, image.extractedFile)).catch(() => null);
+      if (!data) continue;
+      const jpeg = data[0] === 0xff && data[1] === 0xd8;
+      const png = data.slice(1, 4).toString("latin1") === "PNG";
+      image.formato = jpeg ? "JPEG" : png ? "PNG" : String(image.enc || "").toUpperCase() || null;
+      image.megapixels = Number(((image.width * image.height) / 1_000_000).toFixed(2));
+      image.exif = jpeg ? temExif(data) : false;
+      image.jfif = jpeg ? data.includes(Buffer.from("JFIF\0", "latin1")) : false;
+      if ((jpeg || png) && data.length <= 400 * 1024) {
+        image.miniatura = `data:image/${jpeg ? "jpeg" : "png"};base64,${data.toString("base64")}`;
+      }
+    }
     const groups = new Map();
     for (const image of images) {
       if (!image.sha256) continue;

@@ -2,6 +2,7 @@ import { heuristicExtractionFromText } from "./extraction.js";
 import { inspectPdfImages } from "./pdfForensics.js";
 import { applySourceProvenance, inspectDocumentEligibility } from "./documentEligibility.js";
 import { separarCarimboProcessual } from "./carimboProcessual.js";
+import { analisarBiometria } from "./biometria.js";
 import {
   humanYearsMonthsFromDays, parseFormattedPdfDate, parsePtDate, parsePtDateTime, plural, stripDiacritics,
 } from "./format.js";
@@ -59,6 +60,27 @@ export async function analisarDocumento({
       .filter((metodo) => !/biometr/i.test(metodo));
     const metodo = `Artefato biométrico no arquivo: ${imagensBiometricas.length} imagem(ns) classificada(s) como fotografia/biometria provável`;
     fallback.assinatura.metodos_autenticacao = [...(fallback.assinatura.metodos_autenticacao || []), metodo];
+  }
+
+  // FEAT-05: a fotografia biométrica sai do inventário e vira bloco próprio.
+  // A busca por dados do processo biométrico (vivacidade, score, fornecedor)
+  // olha só o dossiê e o instrumento: termos de uso falam de "score" de crédito.
+  const segmentacao = fallback.documentos_logicos;
+  const paginas = String(extraction.text || "").split("\f");
+  const textoDoProcesso = segmentacao
+    ? segmentacao.documentos
+        .filter((d) => ["DOSSIE", "INSTRUMENTO_PRINCIPAL", "OUTRO"].includes(d.tipo))
+        .map((d) => paginas.slice(d.paginaInicial - 1, d.paginaFinal).join(" "))
+        .join(" ")
+    : cleanedExtraction.text;
+  const biometria = analisarBiometria({
+    imagens: imageAnalysis,
+    flat: textoDoProcesso.replace(/\s+/g, " "),
+    alegaBiometria: Boolean(fallback.assinatura?.biometria_registrada_como_evento) || /biometria\s+facial/i.test(textoDoProcesso),
+  });
+  fallback.imagem_biometrica = biometria;
+  if (biometria?.achado && !fallback.achados_irregularidade.some((issue) => issue.codigo === biometria.achado.codigo)) {
+    fallback.achados_irregularidade.push(biometria.achado);
   }
 
   // Achados de imagem com peso probatório entram no placar de irregularidades.

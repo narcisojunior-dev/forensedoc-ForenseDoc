@@ -9,6 +9,10 @@ import { extrairPlanilhaCalculo } from "./planilhaCalculo.js";
 import { taxaImplicita, valorPresente, vencimentosMensais, conferirAnualizacao, diasEntre } from "./matematicaFinanceira.js";
 import { classificarProduto, extrairEmpregador } from "./produto.js";
 import { avaliarQualificacao, ESTADO as ESTADO_CAMPO } from "./camposSuspeitos.js";
+import { segmentarDocumentos, avaliarAssinaturaPorDocumento, documentoDaPagina } from "./documentosLogicos.js";
+import { avaliarComprovanteCredito } from "./comprovanteCredito.js";
+import { extrairSeguroPrestamista } from "./seguroPrestamista.js";
+import { analisarTrilhaEventos } from "./trilhaEventos.js";
 import { moneyToCents, percentToNumber } from "./numberParsing.js";
 import { extractFactaCartaoConsignado } from "./factaCartao.js";
 import { resolveBankByCnpj } from "./bankRegistry.js";
@@ -493,6 +497,7 @@ export function heuristicExtractionFromText(rawText) {
   const text = footer.text;
   const metadadosProcessuais = footer.metadados;
   const planilha = extrairPlanilhaCalculo(text);
+  const segmentacao = segmentarDocumentos(text);
   const flat = text.replace(/\s+/g, " ").trim();
   const upper = flat.toUpperCase();
   const blocks = extractBlocks(flat);
@@ -1349,8 +1354,44 @@ export function heuristicExtractionFromText(rawText) {
         "Qualificação do contratante com campos fictícios ou não informados",
         `A instituição formalizou a operação com ${partes.join(" e ")}${vazios.length ? `, além de ${vazios.join(", ")} em branco na proposta` : ""}. O preenchimento indica cadastro feito por terceiro ou sem conferência documental, e falha de identificação do contratante.`
       );
-      extracted.evidencias_irregularidade = achados.map((issue) => `${issue.titulo}. ${issue.texto}`);
     }
   }
+
+  // ── Fase 4: documentos lógicos, comprovante, seguro e trilha ──────────────
+  const assinaturaPorDocumento = avaliarAssinaturaPorDocumento(segmentacao);
+  extracted.documentos_logicos = segmentacao;
+  if (extracted.assinatura) {
+    extracted.assinatura.blocos_por_documento = assinaturaPorDocumento.resumo;
+    // A menção textual sempre com o documento de origem: a legenda de uma
+    // proposta de seguro não é assinatura da cédula.
+    const mencao = extracted.assinatura.mencao_textual;
+    if (mencao && segmentacao) {
+      const bruto = text.search(new RegExp(mencao.slice(0, 30).replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+")));
+      const doc = bruto >= 0 ? documentoDaPagina(segmentacao, paginaDoIndice(text, bruto)) : null;
+      extracted.assinatura.mencao_textual_documento = doc ? `${doc.titulo}, pág. ${paginaDoIndice(text, bruto)}` : null;
+    }
+  }
+  if (assinaturaPorDocumento.achado) addIssue(assinaturaPorDocumento.achado.codigo, assinaturaPorDocumento.achado.gravidade, assinaturaPorDocumento.achado.titulo, assinaturaPorDocumento.achado.texto);
+
+  const provaDoCredito = avaliarComprovanteCredito({ texto: text, flat, segmentacao, contrato: contratoExtraido, cliente: extracted.cliente || {} });
+  extracted.liberacao_credito = { declarada: provaDoCredito.liberacao, comprovante: provaDoCredito.comprovante };
+  for (const a of provaDoCredito.achados) addIssue(a.codigo, a.gravidade, a.titulo, a.texto);
+
+  const seguro = isCartaoConsignado ? null : extrairSeguroPrestamista({ texto: text, segmentacao, contrato: contratoExtraido });
+  extracted.seguro_prestamista = seguro;
+  for (const a of seguro?.achados || []) addIssue(a.codigo, a.gravidade, a.titulo, a.texto);
+
+  const ufEmissao = firstMatch(flat, [/LOCAL\s+E\s+DATA\s+DE\s+EMISS[ÃA]O\s*:?\s*[^\n]{2,60}?\s-\s([A-Z]{2})\s-\s\d{2}\/\d{2}\/\d{4}/i]) || extracted.cliente?.estado || null;
+  const trilhaEventos = analisarTrilhaEventos({
+    texto: text,
+    segmentacao,
+    ufEmissao,
+    dataHoraAssinatura: extracted.assinatura?.data_hora_assinatura || null,
+    flat,
+  });
+  extracted.trilha_eventos = trilhaEventos ? { ...trilhaEventos, achados: undefined } : null;
+  for (const a of trilhaEventos?.achados || []) addIssue(a.codigo, a.gravidade, a.titulo, a.texto);
+
+  extracted.evidencias_irregularidade = achados.map((issue) => `${issue.titulo}. ${issue.texto}`);
   return extracted;
 }

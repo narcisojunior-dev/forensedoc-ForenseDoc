@@ -70,9 +70,13 @@ export async function buildReportPdf(analysis, result) {
   sectionDigitalSignature(ctx, result.metadata, extracted);
   sectionContract(ctx, extracted);
   sectionEconomics(ctx, extracted);
+  sectionCreditRelease(ctx, extracted);
+  sectionInsurance(ctx, extracted);
   sectionClient(ctx, extracted);
   sectionSignature(ctx, extracted, result);
   sectionContractingTrail(ctx, extracted);
+  sectionEventTrail(ctx, extracted);
+  sectionBiometricArtifact(ctx, extracted);
   sectionGeo(ctx, result, { mapaIpResidencia, mapaResidenciaDeclarado });
   sectionIrregularities(ctx, extracted);
   sectionProcessComparison(ctx, result.processComparison);
@@ -397,6 +401,8 @@ function sectionSignature(ctx, extracted, result = {}) {
   field(ctx, "Algoritmo de hash", a.algoritmo_hash);
   if (a.metodos_autenticacao?.length) field(ctx, "Métodos de autenticação", a.metodos_autenticacao.join(" · "));
   if (a.metodos_mencionados_clausulado?.length) field(ctx, "Métodos apenas mencionados no clausulado", a.metodos_mencionados_clausulado.join(" · "));
+  if (a.mencao_textual) field(ctx, "Menção textual de assinatura", `${a.mencao_textual}${a.mencao_textual_documento ? ` (${a.mencao_textual_documento})` : ""}`);
+  if (a.blocos_por_documento) paragraph(ctx, `Blocos de assinatura por documento: ${a.blocos_por_documento}.`, { size: 8.5 });
   if (a.codigo_autenticacao_declarado) {
     field(ctx, "Hash declarado", a.hash_documento_assinado ? "Declarado" : "Ausente");
     field(ctx, "Código de autenticação", `Declarado, conferível apenas pelo emissor (${a.codigo_autenticacao_origem || "origem não identificada"})`);
@@ -961,6 +967,90 @@ function sectionDigitalSignature(ctx, metadata, extracted) {
       }
     }
   }
+}
+
+const pctBR = (v, casas = 1) => (v == null ? null : `${(v * 100).toFixed(casas).replace(".", ",")}%`);
+
+/** § 2.2: forma de liberação declarada e comprovante do crédito. */
+function sectionCreditRelease(ctx, extracted) {
+  const l = extracted.liberacao_credito;
+  if (!l?.declarada) return;
+  heading(ctx, "§ 2.2 · Liberação do crédito e comprovante", { danger: !l.comprovante });
+  field(ctx, "Forma de liberação declarada", l.declarada.forma);
+  field(ctx, "Banco / agência / conta", [l.declarada.banco && `Banco ${l.declarada.banco}`, l.declarada.agencia && `agência ${l.declarada.agencia}`, l.declarada.conta && `conta ${l.declarada.conta}`].filter(Boolean).join(" · "));
+  field(ctx, "Valor a ser creditado", extracted.contrato?.valor_liberado);
+  badge(ctx, "Comprovante de transferência no arquivo", l.comprovante ? "LOCALIZADO" : "AUSENTE", Boolean(l.comprovante));
+  if (l.comprovante) field(ctx, "   Comprovante", [l.comprovante.pagina && `pág. ${l.comprovante.pagina}`, l.comprovante.valor, l.comprovante.data].filter(Boolean).join(" · "));
+}
+
+/** § 2.3: seguro prestamista vinculado. */
+function sectionInsurance(ctx, extracted) {
+  const sg = extracted.seguro_prestamista;
+  if (!sg) return;
+  heading(ctx, "§ 2.3 · Seguro prestamista vinculado à operação", { danger: (sg.achados || []).some((a) => a.gravidade === "ALTA") });
+  field(ctx, "Proposta", sg.proposta);
+  field(ctx, "Prêmio", sg.premio ? `${sg.premio}${sg.premio_sobre_liberado != null ? ` (${pctBR(sg.premio_sobre_liberado, 2)} do valor liberado)` : ""}` : null);
+  field(ctx, "IOF do seguro", sg.iof);
+  field(ctx, "Pró-labore", sg.pro_labore ? `${sg.pro_labore}${sg.pro_labore_sobre_premio != null ? ` (${pctBR(sg.pro_labore_sobre_premio)} do prêmio)` : ""}` : null);
+  field(ctx, "Seguradora", sg.seguradora ? `${sg.seguradora.nome}${sg.seguradora.cnpj ? `, CNPJ ${sg.seguradora.cnpj}` : ""}` : null);
+  field(ctx, "Corretora", sg.corretora ? `${sg.corretora.nome}, CNPJ ${sg.corretora.cnpj}, SUSEP ${sg.corretora.susep}` : null);
+  field(ctx, "Estipulante", sg.estipulante ? `${sg.estipulante.nome}, CNPJ ${sg.estipulante.cnpj}` : null);
+  field(ctx, "Beneficiário", sg.beneficiario);
+  for (const c of sg.coberturas || []) {
+    field(
+      ctx,
+      `   ${c.nome}`,
+      [c.premio, c.participacao_premio != null ? `${pctBR(c.participacao_premio)} do prêmio` : null, `carência ${c.carencia_dias ? `${c.carencia_dias} dias` : "não há"}`, `franquia ${c.franquia_dias ? `${c.franquia_dias} dias` : "não há"}`, c.teto_parcelas ? `até ${c.teto_parcelas} parcelas` : null].filter(Boolean).join(" · ")
+    );
+  }
+}
+
+/** § 4.3: trilha de eventos com intervalos, segundos por página e fuso. */
+function sectionEventTrail(ctx, extracted) {
+  const t = extracted.trilha_eventos;
+  if (!t?.eventos?.length) return;
+  heading(ctx, "§ 4.3 · Trilha de eventos da contratação");
+  field(ctx, "Duração total da jornada", `${t.duracao_total} (${t.duracao_total_s} segundos)`);
+  if (t.fuso) field(ctx, "Fuso declarado na trilha", `${t.fuso.trilha}; leitura local em ${t.fuso.local}${t.fuso.assinatura_sem_fuso ? "; bloco de assinatura sem fuso" : ""}`);
+  for (const ev of t.eventos) {
+    reserve(ctx, 40);
+    field(
+      ctx,
+      `   ${ev.nome}`,
+      [
+        `${ev.data_hora}${ev.hora_local ? ` (local ${ev.hora_local.split(" ")[1]})` : ""}`,
+        ev.intervalo_s == null ? "referência" : `+${ev.intervalo_s} s`,
+        ev.segundos_por_pagina != null ? `${String(ev.segundos_por_pagina).replace(".", ",")} s/pág. em ${ev.documento_aceito.paginas} págs.` : null,
+        ev.ip ? `IP ${ev.ip}${ev.porta ? `:${ev.porta}` : ""}` : "sem IP",
+        ev.lat != null ? `${ev.lat}, ${ev.lon}` : "sem geolocalização",
+      ].filter(Boolean).join(" · ")
+    );
+  }
+}
+
+/** Bloco do artefato biométrico, com miniatura. */
+function sectionBiometricArtifact(ctx, extracted) {
+  const b = extracted.imagem_biometrica;
+  if (!b) return;
+  heading(ctx, "§ 4.4 · Artefato biométrico", { danger: Boolean(b.achado) });
+  if (b.miniatura && /^data:image\/(jpeg|png);base64,/.test(b.miniatura)) {
+    reserve(ctx, 190);
+    try {
+      const buffer = Buffer.from(b.miniatura.split(",")[1], "base64");
+      const y = ctx.doc.y;
+      ctx.doc.image(buffer, MARGIN, y, { fit: [96, 170] });
+      ctx.doc.y = y + 176;
+    } catch {
+      // Imagem ilegível para o PDFKit: seguem os metadados.
+    }
+  }
+  field(ctx, "Página / dimensões", `pág. ${b.pagina} · ${b.largura} x ${b.altura} pixels (${String(b.megapixels).replace(".", ",")} megapixel)`);
+  field(ctx, "Formato e tamanho", [b.formato, b.bytes ? `${b.bytes.toLocaleString("pt-BR")} bytes` : null].filter(Boolean).join(" · "));
+  field(ctx, "SHA-256 da imagem", b.sha256, { mono: true });
+  field(ctx, "EXIF", b.exif === false ? "ausente" : b.exif ? "presente" : "não aferido");
+  field(ctx, "Imagens faciais no arquivo", b.contagem_faciais);
+  if (b.dados_do_processo_ausentes?.length) field(ctx, "Não apresentado pelo dossiê", b.dados_do_processo_ausentes.join(", "));
+  if (b.achado) paragraph(ctx, b.achado.texto, { color: DANGER, size: 9 });
 }
 
 /** § 2.1 — dados econômicos complementares e aferição matemática. */
