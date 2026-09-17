@@ -11,6 +11,7 @@ import { buildCustodyChain } from "../reports/custodyChain.js";
 import { getPdf } from "../services/objectStorageService.js";
 import { analisarDocumento } from "../engine/analisarDocumento.js";
 import { verificarCoerencia, coerenciaBloqueante } from "../engine/coerenciaLaudo.js";
+import { montarConfrontoGeografico } from "../utils/distancia.js";
 import { buildSummaryForResult } from "../services/analysisRecompute.js";
 
 function fileHashes(buffer) {
@@ -98,6 +99,7 @@ export async function processAnalysis(job) {
       cadeiaCustodia: buildCustodyChain(fallback, geo.ipAnalysis, geo.geoDeclaredPresent),
       generatedAt,
     };
+    result.confronto_geografico = montarConfrontoGeografico(result);
     result.sumarioIrregularidades = buildSummaryForResult(result, fallback);
     // Modo alerta: registra contradições entre seções sem bloquear a emissão.
     result.coerencia = verificarCoerencia(result, fallback);

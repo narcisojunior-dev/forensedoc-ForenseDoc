@@ -4,9 +4,24 @@
  * entre o domicílio comprovado, a origem do tráfego IP e o GPS do ato.
  */
 
+import { distanciaKm } from "./distancia.js";
+
 export function calculateForensicScore({ distKmIp, distKmGps, distKmIpVsGps }) {
+  // Sem nenhuma distância à residência não há índice: o antigo `|| 0` produzia
+  // "compatível com o domicílio" justamente quando o confronto foi recusado.
+  const ip = distanciaKm(distKmIp);
+  const gps = distanciaKm(distKmGps);
+  if (ip === null && gps === null) {
+    return {
+      score: null,
+      nivel: "NÃO AFERIDO",
+      tom: "neutral",
+      rotulo: "CONFRONTO COM A RESIDÊNCIA NÃO AFERIDO",
+      conclusao: "Não há distância válida até a residência do contratante; o índice de incompatibilidade geográfica não é calculado.",
+    };
+  }
   let score = 0;
-  const distRef = Math.max(distKmIp || 0, distKmGps || 0);
+  const distRef = Math.max(ip ?? 0, gps ?? 0);
 
   if (distRef >= 1000) {
     score = 95 + Math.min(5, Math.floor((distRef - 1000) / 500));
@@ -22,7 +37,7 @@ export function calculateForensicScore({ distKmIp, distKmGps, distKmIpVsGps }) {
 
   // Se IP e GPS estão coerentes entre si (< 50 km) mas a milhares de km do domicílio,
   // a probabilidade de fraude deliberada por terceiro é máxima.
-  if (distRef >= 500 && distKmIpVsGps != null && distKmIpVsGps <= 50) {
+  if (distRef >= 500 && distanciaKm(distKmIpVsGps) !== null && distanciaKm(distKmIpVsGps) <= 50) {
     score = Math.max(score, 98);
   }
 

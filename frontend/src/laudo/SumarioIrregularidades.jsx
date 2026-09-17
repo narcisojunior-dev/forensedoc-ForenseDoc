@@ -1,4 +1,5 @@
 import React from "react";
+import { distanciaKm, distanciaSuspeita, formatarDistancia } from "./distancia.js";
 
 /**
  * Sumário executivo de irregularidades em duas páginas, portado do motor de
@@ -6,12 +7,8 @@ import React from "react";
  * (`result.sumarioIrregularidades`), recalculado a cada correção do operador.
  */
 
-function formatKm(value) {
-  if (!Number.isFinite(Number(value))) return null;
-  const km = Number(value);
-  if (km < 1) return `${km.toFixed(2).replace(".", ",")} km`;
-  return `${km.toLocaleString("pt-BR", { maximumFractionDigits: km < 100 ? 1 : 0 })} km`;
-}
+// Nulo é ausência, nunca "0,00 km" (CRIT-01 da rodada 2).
+const formatKm = formatarDistancia;
 
 function SummaryHeader({ summary, pageLabel }) {
   return (
@@ -40,7 +37,7 @@ function SeverityRow({ finding }) {
 }
 
 function GeoScale({ geo }) {
-  const items = geo.items || [];
+  const items = (geo.items || []).filter((item) => distanciaKm(item.distance) !== null && !distanciaSuspeita(item.distance));
   if (!items.length) return <div className="summary-empty-geo">{geo.description}</div>;
   const minLog = -1;
   const maxLog = 4;
@@ -96,7 +93,7 @@ export default function SumarioIrregularidades({ summary }) {
           {summary.findings.map((finding) => <SeverityRow key={finding.key} finding={finding} />)}
         </div>
 
-        {summary.geo.items.length > 0 && (
+        {(summary.geo.items || []).some((item) => distanciaKm(item.distance) !== null && !distanciaSuspeita(item.distance)) && (
           <>
             <div className="summary-section-title summary-section-title-line">GPS CONTRA IP: O CONFRONTO QUE IMPORTA</div>
             <div className="summary-geo-box">

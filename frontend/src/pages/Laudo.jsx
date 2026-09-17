@@ -8,7 +8,7 @@ import RevisaoCampos from "../components/report/RevisaoCampos.jsx";
 import ConfrontoProcesso from "../components/report/ConfrontoProcesso.jsx";
 import LaudoForense from "../laudo/LaudoForense.jsx";
 import { montarRelatorio } from "../laudo/montarRelatorio.js";
-import { exportarLaudoPdf } from "../laudo/exportarLaudoPdf.js";
+import { exportarLaudoPdf, verificarCoerenciaRenderizada } from "../laudo/exportarLaudoPdf.js";
 import { parseLatLon } from "./Analyze.jsx";
 
 /**
@@ -95,6 +95,13 @@ export default function Laudo() {
     if (exportacaoBloqueada) {
       toast.error("O laudo tem contradição entre seções. Revise os campos indicados antes de gerar o PDF.");
       return;
+    }
+    const renderizado = verificarCoerenciaRenderizada(document.getElementById("fd-report"), {
+      referenciaRecusada: ["RECUSADO_CONFLITO", "INDISPONIVEL_NAO_INFORMADO"].includes(analise?.result?.home?.estado_confronto),
+    });
+    if (renderizado.length) {
+      // Modo alerta: avisa e segue. O bloqueio depende de decisão do escritório.
+      toast.error(`Atenção antes de protocolar: ${renderizado.join("; ")}.`, { duration: 9000 });
     }
     try {
       await exportarLaudoPdf(setPdfBusy, setPdfDownload);
@@ -185,6 +192,7 @@ export default function Laudo() {
             <ul className="list-disc space-y-1 pl-5 text-[12.5px] leading-relaxed text-zinc-300">
               {contradicoes.map((c) => (
                 <li key={c.regra}>
+                  {c.nivel === "CRITICA" && <span className="mr-1 font-bold text-red-400">[crítica]</span>}
                   <span className="font-medium text-zinc-200">{c.descricao}.</span> {c.detalhe}
                 </li>
               ))}

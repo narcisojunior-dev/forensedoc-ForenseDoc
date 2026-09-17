@@ -1,4 +1,37 @@
 import { generateJudicialQuesitos } from "./quesitos.js";
+import { distanciaKm, distanciaSuspeita } from "./distancia.js";
+
+// Achados e itens do sumário que dependem de distância à residência.
+const CHAVES_DISTANCIA_RESIDENCIA = new Set(["gps-near-home", "gps-home-distance"]);
+
+/**
+ * Sumário persistido por versões anteriores do motor pode trazer distância à
+ * residência calculada a partir de nulo ("0,00 km" em selo favorável). Sem
+ * confronto válido, a tela retira esses itens em vez de exibi-los.
+ */
+function sanearSumario(sumario, home, ipAnalysis, contractGeo) {
+  if (!sumario) return sumario;
+  const recusado = ["RECUSADO_CONFLITO", "INDISPONIVEL_NAO_INFORMADO"].includes(home?.estado_confronto);
+  const semDistancia = distanciaKm(contractGeo?.distance) === null && ipAnalysis.every((ip) => distanciaKm(ip.distance) === null);
+  const valida = (km) => distanciaKm(km) !== null && !distanciaSuspeita(km);
+  if (!recusado && !semDistancia) {
+    return { ...sumario, geo: sumario.geo ? { ...sumario.geo, items: (sumario.geo.items || []).filter((i) => valida(i.distance)) } : sumario.geo };
+  }
+  const semResidencia = (lista = []) => lista.filter((f) => !CHAVES_DISTANCIA_RESIDENCIA.has(f.key));
+  return {
+    ...sumario,
+    findings: semResidencia(sumario.findings),
+    allFindings: semResidencia(sumario.allFindings),
+    favorable: semResidencia(sumario.favorable),
+    checks: (sumario.checks || []).map((c) => (c.key === "gps-residencia" ? { ...c, status: "INDETERMINADO", detail: "Distância à residência não calculada." } : c)),
+    geo: sumario.geo ? { ...sumario.geo, items: [], description: home?.alerta || "Distâncias à residência não calculadas." } : sumario.geo,
+    ipCards: (sumario.ipCards || []).map((card) => ({
+      ...card,
+      distance: null,
+      text: String(card.text || "").replace(/, [\d.,]+ km da referência residencial/, ""),
+    })),
+  };
+}
 
 /**
  * Converte o resultado persistido de uma análise no formato de relatório que o
@@ -90,7 +123,7 @@ export function montarRelatorio({ analysisId, result, createdAt }) {
       : "A extração automática não retornou dados estruturados válidos. O laudo foi gerado com os dados disponíveis.",
     // Acréscimos do SaaS.
     camposRevisados: result?.camposRevisados || null,
-    sumarioIrregularidades: result?.sumarioIrregularidades || null,
+    sumarioIrregularidades: sanearSumario(result?.sumarioIrregularidades || null, home, ipAnalysis, result?.contractGeo),
     quesitos: extraido
       ? generateJudicialQuesitos({
           clienteNome: cliente.nome,
@@ -102,7 +135,7 @@ export function montarRelatorio({ analysisId, result, createdAt }) {
           gpsCoords: result?.contractGeo ? `${result.contractGeo.lat}, ${result.contractGeo.lon}` : null,
           cidadeIp: primeiroIp?.geo ? [primeiroIp.geo.city, primeiroIp.geo.region].filter(Boolean).join(" / ") : null,
           cidadeDomicilio: home.geo ? home.geo.display || home.query : null,
-          distanciaKm: primeiroIp?.distance != null ? primeiroIp.distance.toFixed(1) : null,
+          distanciaKm: distanciaKm(primeiroIp?.distance) !== null ? distanciaKm(primeiroIp.distance).toFixed(1) : null,
           dataHora: primeiroIp?.data_hora || extracted.assinatura?.data_hora_assinatura,
         })
       : [],

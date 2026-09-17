@@ -13,6 +13,7 @@ import {
 import { buildCustodyChain } from "../reports/custodyChain.js";
 import { calculateForensicScore } from "../utils/forensicScore.js";
 import { generateJudicialQuesitos } from "../reports/quesitosTemplate.js";
+import { montarConfrontoGeografico } from "../utils/distancia.js";
 
 // Paleta sóbria para peça processual (impressão em preto e branco continua legível).
 const INK = "#1a1a1a";
@@ -217,9 +218,11 @@ function cover(ctx, analysis, result, timestamp) {
   if (result.usedOcr) field(ctx, "OCR", `Aplicado em ${result.ocrPages} página(s)`);
 
   // ─── Visual Law: Resumo Executivo para o Magistrado / Perito ────────────────
-  const distKmIp = result.ipAnalysis?.[0]?.distance;
-  const distKmGps = result.contractGeo?.distance;
-  const distKmIpVsGps = result.ipAnalysis?.[0]?.distanceToSignature;
+  // Distâncias do confronto canônico: recusado o confronto, não há índice.
+  const confrontoCapa = result.confronto_geografico || montarConfrontoGeografico(result);
+  const distKmIp = confrontoCapa.distancias.ips_residencia[0]?.km ?? null;
+  const distKmGps = confrontoCapa.distancias.gps_residencia;
+  const distKmIpVsGps = confrontoCapa.gps_ip;
   const scoreObj = calculateForensicScore({ distKmIp, distKmGps, distKmIpVsGps });
 
   doc.moveDown(0.6);
@@ -245,7 +248,7 @@ function cover(ctx, analysis, result, timestamp) {
     .fontSize(15)
     .font("Helvetica-Bold")
     .fillColor(scoreObj.score >= 80 ? DANGER : INK)
-    .text(`${scoreObj.score}/100 — ${scoreObj.rotulo}`, boxX + 12, boxY + 26);
+    .text(scoreObj.score === null ? scoreObj.rotulo : `${scoreObj.score}/100 · ${scoreObj.rotulo}`, boxX + 12, boxY + 26);
 
   const ipLoc = result.ipAnalysis?.[0]?.geo?.city
     ? `${result.ipAnalysis[0].geo.city}/${result.ipAnalysis[0].geo.region || ""}`

@@ -3,6 +3,7 @@ import { describeIpDivergence, classifyDeclaredDivergence, aplicarHistoricoDoIp 
 import { buildCustodyChain } from "../reports/custodyChain.js";
 import { buildIrregularitySummary } from "../engine/irregularitySummary.js";
 import { verificarCoerencia, coerenciaBloqueante } from "../engine/coerenciaLaudo.js";
+import { montarConfrontoGeografico } from "../utils/distancia.js";
 
 /**
  * Sumário executivo do motor pericial (placar de gravidade, GPS x IP,
@@ -23,6 +24,7 @@ export function buildSummaryForResult(result, extracted) {
       metadata: result.metadata,
       extracted,
       home: result.home,
+      confronto_geografico: result.confronto_geografico || montarConfrontoGeografico(result),
       contractGeo: result.contractGeo,
       geoDeclaredPresent: result.geoDeclaredPresent,
       ipAnalysis: result.ipAnalysis || [],
@@ -113,6 +115,7 @@ export function recomputeDerived(result, extracted) {
   });
 
   const recalculado = { ...result, contractGeo, ipAnalysis };
+  recalculado.confronto_geografico = montarConfrontoGeografico(recalculado);
   const sumarioIrregularidades = buildSummaryForResult(recalculado, extracted);
   return {
     ...recalculado,

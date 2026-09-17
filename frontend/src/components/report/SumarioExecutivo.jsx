@@ -1,5 +1,6 @@
 import React from "react";
 import { Badge, SubHead, Note } from "../UiComponents.jsx";
+import { distanciaKm, distanciaSuspeita, formatarDistancia } from "../../laudo/distancia.js";
 
 /**
  * Sumário executivo de irregularidades (motor pericial v2): placar de
@@ -13,21 +14,22 @@ import { Badge, SubHead, Note } from "../UiComponents.jsx";
 const TOM_DA_SEVERIDADE = { ALTA: "danger", "MÉDIA": "warn", INFO: "neutral", "FAVORÁVEL": "ok" };
 const TOM_DO_GRAU = { "CRÍTICA": "danger", ALTA: "danger", MODERADA: "warn", BAIXA: "ok" };
 
-function formatKm(km) {
-  const n = Number(km);
-  if (!Number.isFinite(n)) return "—";
-  if (n < 1) return `${n.toFixed(2).replace(".", ",")} km`;
-  return `${n.toLocaleString("pt-BR", { maximumFractionDigits: n < 100 ? 1 : 0 })} km`;
-}
+// Nulo é ausência: "não calculada", nunca "0,00 km".
+const formatKm = (km) => formatarDistancia(km) || "não calculada";
 
 /** Escala logarítmica de 0,1 a 10.000 km: GPS e IP cabem na mesma régua. */
 function posicaoNaEscala(km) {
-  const v = Math.log10(Math.max(0.1, Math.min(10000, Number(km) || 0.1)));
+  const v = Math.log10(Math.max(0.1, Math.min(10000, distanciaKm(km) ?? 0.1)));
   return ((v + 1) / 5) * 100;
 }
 
-export default function SumarioExecutivo({ sumario }) {
-  if (!sumario) return null;
+export default function SumarioExecutivo({ sumario: bruto }) {
+  if (!bruto) return null;
+  // Sumários gravados por versões anteriores podem trazer ponto sem distância
+  // válida (nulo convertido em zero). Esses pontos não são desenhados.
+  const sumario = bruto.geo
+    ? { ...bruto, geo: { ...bruto.geo, items: (bruto.geo.items || []).filter((i) => distanciaKm(i.distance) !== null && !distanciaSuspeita(i.distance)) } }
+    : bruto;
   const grau = sumario.suspicionGrade;
 
   return (

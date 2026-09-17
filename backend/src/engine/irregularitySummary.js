@@ -1,4 +1,5 @@
 import { ordenarAchados } from "./eixosAchado.js";
+import { distanciaKm, distanciaSuspeita, formatarDistancia, montarConfrontoGeografico, STATUS_CONFRONTO } from "../utils/distancia.js";
 // Sumário executivo de irregularidades (placar de gravidade, confronto GPS x IP,
 // triagem de IPs e diligências). Portado do motor de geração, onde era calculado
 // no navegador; no SaaS é calculado no servidor e persistido com o laudo.
@@ -74,12 +75,8 @@ function dateIdentity(value) {
   return `${year}-${String(b).padStart(2, "0")}-${String(a).padStart(2, "0")}`;
 }
 
-function formatKm(value) {
-  if (!Number.isFinite(Number(value))) return null;
-  const km = Number(value);
-  if (km < 1) return `${km.toFixed(2).replace(".", ",")} km`;
-  return `${km.toLocaleString("pt-BR", { maximumFractionDigits: km < 100 ? 1 : 0 })} km`;
-}
+// Nulo é ausência: devolve null, e quem chama suprime o trecho (ver utils/distancia.js).
+const formatKm = formatarDistancia;
 
 function locationLabel(geo) {
   const city = hasValue(geo?.city) ? geo.city : null;
@@ -125,7 +122,7 @@ export function classifyIpRole(ip, report = {}) {
 function buildIpCard(ip, role, bank) {
   const provider = hasValue(ip?.geo?.isp) ? ip.geo.isp : "provedor não identificado";
   const place = locationLabel(ip?.geo);
-  const distance = formatKm(ip?.distance);
+  const distance = formatKm(ip?.distancia_residencia ?? null);
   const common = `${provider}, ${place}${distance ? `, ${distance} da referência residencial` : ""}.`;
   if (role === "access") {
     return {
@@ -400,8 +397,15 @@ export function buildIrregularitySummary(report = {}) {
     addCheck("E", "dispositivo", "ALERTA", "Hardware não individualizado.");
   }
 
-  const gpsDistance = Number(report.contractGeo?.distance);
-  if (Number.isFinite(gpsDistance)) {
+  // Todas as distâncias à residência saem do confronto canônico. Com o confronto
+  // recusado ou indisponível, nenhuma delas existe: sem achado, sem selo, sem
+  // ponto no gráfico. Ver CRIT-01 da rodada 2.
+  const confronto = report.confronto_geografico || montarConfrontoGeografico(report);
+  const residenciaCalculada = confronto.status === STATUS_CONFRONTO.CALCULADO;
+  const gpsDistance = residenciaCalculada ? distanciaKm(confronto.distancias.gps_residencia) : null;
+  if (gpsDistance !== null && distanciaSuspeita(gpsDistance)) {
+    addCheck("F", "gps-residencia", "ALERTA", "Distância exatamente igual a zero entre fontes independentes: dado suspeito, sem valor de coerência espacial.");
+  } else if (gpsDistance !== null) {
     if (gpsDistance < 50) {
       addFinding("FAVORÁVEL", "gps-near-home", "GPS da assinatura próximo à referência residencial.", `A coordenada da assinatura fica a ${formatKm(gpsDistance)} do endereço de referência. Isoladamente, o dado favorece coerência espacial, mas não comprova autoria.`);
       addCheck("F", "gps-residencia", "PRÓ-BANCO", formatKm(gpsDistance));
@@ -412,9 +416,9 @@ export function buildIrregularitySummary(report = {}) {
       addFinding("ALTA", "gps-home-distance", "GPS da assinatura distante da residência.", `A coordenada declarada fica a ${formatKm(gpsDistance)} da referência residencial. A distância não prova fraude sozinha, mas exige explicação e logs de localização.`);
       addCheck("F", "gps-residencia", "ALERTA", formatKm(gpsDistance));
     }
-  } else if (report.home?.estado_confronto === "RECUSADO_CONFLITO") {
+  } else if (confronto.status === STATUS_CONFRONTO.RECUSADO_CONFLITO) {
     addCheck("F", "gps-residencia", "INDETERMINADO", "Confronto recusado: endereço informado conflita com o do instrumento.");
-  } else if (report.home?.estado_confronto === "INDISPONIVEL_NAO_INFORMADO") {
+  } else if (confronto.status === STATUS_CONFRONTO.INDISPONIVEL_NAO_INFORMADO) {
     addCheck("F", "gps-residencia", "INDETERMINADO", "Confronto indisponível: instrumento registra o endereço como não informado.");
   } else {
     addCheck("F", "gps-residencia", "INDETERMINADO", "Distância residencial indisponível.");
@@ -442,7 +446,7 @@ export function buildIrregularitySummary(report = {}) {
   const residenciaMunicipio = normalizeText(domicilioCidade);
   const ufsDiferentes = Boolean(report.contractGeo?.uf && domicilioUf && normalizeText(report.contractGeo.uf) !== normalizeText(domicilioUf));
   if (gpsMunicipio && residenciaMunicipio && (gpsMunicipio !== residenciaMunicipio || ufsDiferentes)) {
-    addFinding("MÉDIA", "gps-outro-municipio", "Ato praticado em município diverso do domicílio.", `A coordenada declarada no dossiê de contratação cai em ${report.contractGeo.municipio}${report.contractGeo.uf ? `/${report.contractGeo.uf}` : ""}, município diferente do domicílio do cliente (${domicilioCidade}${domicilioUf ? `/${domicilioUf}` : ""}${referenciaMunicipio ? ", residência de referência" : ""})${Number.isFinite(gpsDistance) ? `, a ${formatKm(gpsDistance)}` : ""}. Verifique se a contratação ocorreu em loja de correspondente bancário ou por dispositivo de terceiro.`);
+    addFinding("MÉDIA", "gps-outro-municipio", "Ato praticado em município diverso do domicílio.", `A coordenada declarada no dossiê de contratação cai em ${report.contractGeo.municipio}${report.contractGeo.uf ? `/${report.contractGeo.uf}` : ""}, município diferente do domicílio do cliente (${domicilioCidade}${domicilioUf ? `/${domicilioUf}` : ""}${referenciaMunicipio ? ", residência de referência" : ""})${gpsDistance !== null && !distanciaSuspeita(gpsDistance) ? `, a ${formatKm(gpsDistance)}` : ""}. Verifique se a contratação ocorreu em loja de correspondente bancário ou por dispositivo de terceiro.`);
     addCheck("F", "gps-municipio", "ALERTA", `${report.contractGeo.municipio} ≠ ${domicilioCidade}`);
     // Município do GPS diverso do domicílio + correspondente identificado
     // no instrumento: a diligência natural é perguntar ao banco quem
@@ -455,9 +459,13 @@ export function buildIrregularitySummary(report = {}) {
     addCheck("F", "gps-municipio", "PRÓ-BANCO", "Mesmo município do domicílio.");
   }
 
-  const ipCards = (report.ipAnalysis || []).map((ip) => {
+  const ipCards = (report.ipAnalysis || []).map((ip, indice) => {
     const role = classifyIpRole(ip, report);
-    return buildIpCard(ip, role, bank);
+    const km = residenciaCalculada ? distanciaKm(confronto.distancias.ips_residencia[indice]?.km) : null;
+    const valida = km !== null && !distanciaSuspeita(km) ? km : null;
+    // `distance` do card também é sobrescrito: quem renderiza o card não pode
+    // encontrar a distância bruta do enriquecimento.
+    return buildIpCard({ ...ip, distance: valida, distancia_residencia: valida }, role, bank);
   });
   const accessIp = ipCards.find((ip) => ip.role === "access");
   const infrastructureIps = ipCards.filter((ip) => ["bank", "cdn", "infrastructure"].includes(ip.role));
@@ -539,7 +547,7 @@ export function buildIrregularitySummary(report = {}) {
   }
 
   const geoItems = [];
-  if (Number.isFinite(gpsDistance)) {
+  if (gpsDistance !== null && !distanciaSuspeita(gpsDistance)) {
     geoItems.push({ label: "GPS · assinatura", distance: gpsDistance, role: "gps", location: report.contractGeo?.endereco || "coordenada do log" });
   }
   const selectedIps = [
@@ -550,10 +558,10 @@ export function buildIrregularitySummary(report = {}) {
     ipCards.find((ip) => ip.role === "unknown"),
   ].filter((ip, index, list) => ip && list.indexOf(ip) === index).slice(0, 3);
   for (const ip of selectedIps) {
-    if (Number.isFinite(Number(ip.distance))) {
+    if (ip.distancia_residencia !== null && ip.distancia_residencia !== undefined) {
       geoItems.push({
         label: ip.role === "access" ? `${ip.geo?.isp || "IP"} · acesso` : ip.role === "bank" ? `${bank} · servidor` : ip.role === "cdn" ? `${ip.geo?.isp || "CDN"} · CDN` : `${ip.geo?.isp || "IP"} · rede`,
-        distance: Number(ip.distance),
+        distance: ip.distancia_residencia,
         role: ip.role,
         location: locationLabel(ip.geo),
       });
@@ -603,9 +611,12 @@ export function buildIrregularitySummary(report = {}) {
     favorable,
     geo: {
       items: geoItems.slice(0, 4),
+      status: confronto.status,
       description: geoItems.length
         ? "Distâncias aproximadas até a referência residencial. O GPS representa o ponto declarado no ato; os IPs foram separados entre acesso provável e infraestrutura."
-        : "Não houve coordenadas suficientes para construir o confronto geográfico.",
+        : residenciaCalculada
+          ? "Não houve coordenadas suficientes para construir o confronto geográfico."
+          : `Distâncias à residência não calculadas (${confronto.motivo}).`,
     },
     ipCards: ipCards.slice(0, 3),
     synthesis,

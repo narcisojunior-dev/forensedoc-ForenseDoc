@@ -34,6 +34,17 @@ describe("varredura retroativa de laudos", () => {
     expect(avaliarAnaliseAfetada(result)).toEqual([]);
   });
 
+  it("reconhece o laudo da rodada 2 com 0,00 km em selo favorável", () => {
+    const result = {
+      text: JSON.stringify({ contrato: { produto_codigo: "CONSIGNADO_CLT" }, afericao_matematica: { composicao_componentes: [], cet_anual_convencao: "365 dias" } }),
+      home: { estado_confronto: "RECUSADO_CONFLITO", geo: null },
+      contractGeo: { distance: null },
+      ipAnalysis: [{ distance: null }],
+      sumarioIrregularidades: { favorable: [{ key: "gps-near-home", text: "a 0,00 km do endereço de referência" }] },
+    };
+    expect(avaliarAnaliseAfetada(result).map((c) => c.id)).toEqual(["distancia-zero-sem-confronto"]);
+  });
+
   it("resultado ilegível não quebra a varredura", () => {
     expect(avaliarAnaliseAfetada({ text: "{quebrado" })).toEqual([]);
     expect(avaliarAnaliseAfetada(null)).toEqual([]);

@@ -28,6 +28,21 @@ const CRITERIOS = [
     },
   },
   {
+    id: "distancia-zero-sem-confronto",
+    descricao: "Sumário com distância à residência ou selo de proximidade sem confronto calculado (0,00 km em selo favorável)",
+    gravidade: "ALTA",
+    testar: (r) => {
+      const s = r.sumarioIrregularidades;
+      if (!s) return false;
+      const semDistancia = (r.contractGeo?.distance === null || r.contractGeo?.distance === undefined)
+        && (r.ipAnalysis || []).every((ip) => ip.distance === null || ip.distance === undefined);
+      const recusado = ["RECUSADO_CONFLITO", "INDISPONIVEL_NAO_INFORMADO"].includes(r.home?.estado_confronto) || semDistancia;
+      const proximidade = [...(s.allFindings || s.findings || []), ...(s.favorable || [])].some((f) => f.key === "gps-near-home" || f.key === "gps-home-distance");
+      const zero = /(^|[^\d,])0,00 km/.test(JSON.stringify(s));
+      return recusado && (proximidade || zero);
+    },
+  },
+  {
     id: "data-contrato-suspeita",
     descricao: "Primeiro vencimento anterior à data do contrato: data do contrato provavelmente lida de outro quadro (carimbo do tribunal)",
     gravidade: "ALTA",

@@ -38,6 +38,23 @@ export function validateRenderableReport(el) {
   if (failed) throw new Error(`Higiene do render bloqueou a geração do PDF: ${failed[1]}. Revise o laudo antes de emitir.`);
 }
 
+/**
+ * Última barreira antes do PDF, sobre o texto que vai de fato para a folha:
+ * contradições críticas que o validador do servidor não enxerga, porque nascem
+ * na renderização ou em sumário persistido por versão anterior do motor.
+ * Devolve a lista; quem chama decide (hoje só alerta, por decisão do escritório).
+ */
+export function verificarCoerenciaRenderizada(el, { referenciaRecusada = false } = {}) {
+  const text = (el?.innerText ?? el?.textContent ?? "").replace(/\s+/g, " ");
+  const problemas = [];
+  const zero = text.match(/(^|[^\d,])0,00 km/);
+  if (zero) problemas.push(`o laudo imprime "0,00 km": ${text.slice(Math.max(0, zero.index - 80), zero.index + 20).trim()}`);
+  if (referenciaRecusada && /GPS da assinatura (próximo à|distante da) referência residencial|km da referência residencial/i.test(text)) {
+    problemas.push("a referência residencial foi recusada, mas o laudo cita distância até ela");
+  }
+  return problemas;
+}
+
 export async function exportarLaudoPdf(setBusy, setPdfDownload) {
   const el = document.getElementById("fd-report");
   if (!el) return;

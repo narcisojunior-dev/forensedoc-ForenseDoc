@@ -6,6 +6,7 @@ import {
   comparisonStatusColor, severityColor, haversineKm, riskFromDistance, riskFromDistanceWithHistory, semPontoFinal,
 } from "./laudoUtils.js";
 import SumarioIrregularidades from "./SumarioIrregularidades.jsx";
+import { distanciaKm } from "./distancia.js";
 
 /**
  * Laudo técnico pericial, portado do motor de geração.
@@ -1210,7 +1211,7 @@ export default function LaudoForense({ report }) {
 
                     {report.contractGeo.dataHora && <Row label="Data / hora da geolocalização" value={report.contractGeo.dataHora} />}
 
-                    {report.contractGeo.distance !== null && report.contractGeo.distance !== undefined ? (
+                    {distanciaKm(report.contractGeo.distance) !== null ? (
                       <div className="geo-visual-block">
                         <DistanceBanner label="Distância: residência do cliente → local declarado da assinatura" km={report.contractGeo.distance} />
                         <GeoMap
@@ -1289,7 +1290,7 @@ export default function LaudoForense({ report }) {
                                 ["Fonte da geolocalização", ip.geo.source],
                               ].map(([lbl, val]) => <Row key={lbl} label={lbl} value={val} />)}
                               {hasIpGeoCoords && <Row label="Coordenadas do IP (registro atual)" value={`${ip.geo.lat.toFixed(7)}, ${ip.geo.lon.toFixed(7)}`} mono />}
-                              {ip.distance !== null && hasIpGeoCoords && !risk.suppressed ? (
+                              {distanciaKm(ip.distance) !== null && hasIpGeoCoords && !risk.suppressed ? (
                                 <>
                                   <div className="row">
                                     <span className="row-label">Distância à residência do cliente</span>

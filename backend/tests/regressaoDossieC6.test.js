@@ -19,7 +19,10 @@ import { fileURLToPath } from "node:url";
 const geocodeAddress = vi.fn();
 const reverseGeocode = vi.fn();
 vi.mock("../src/services/geocodingService.js", () => ({ geocodeAddress, reverseGeocode }));
-vi.mock("../src/services/apiService.js", () => ({ getIpInfo: vi.fn(async () => null) }));
+// IP da trilha geolocalizado em Manacapuru/AM, como no laudo da rodada 2.
+vi.mock("../src/services/apiService.js", () => ({
+  getIpInfo: vi.fn(async () => ({ lat: -3.2999, lon: -60.6206, city: "Manacapuru", region: "Amazonas", country: "Brasil", isp: "TELEFÔNICA BRASIL S.A", source: "teste" })),
+}));
 vi.mock("../src/services/rdapService.js", () => ({ lookupRdapIp: vi.fn(async () => null) }));
 vi.mock("../src/services/ipHistoryService.js", () => ({ lookupIpHistory: vi.fn(async () => null) }));
 
@@ -27,6 +30,9 @@ const { heuristicExtractionFromText } = await import("../src/services/extraction
 const { enrichGeography } = await import("../src/services/geoEnrichmentService.js");
 const { fundamentacaoPara } = await import("../src/reports/laudoTexts.js");
 const { verificarCoerencia } = await import("../src/engine/coerenciaLaudo.js");
+const { buildSummaryForResult } = await import("../src/services/analysisRecompute.js");
+const { montarConfrontoGeografico } = await import("../src/utils/distancia.js");
+const { calculateForensicScore } = await import("../src/utils/forensicScore.js");
 
 const CASO = path.join(path.dirname(fileURLToPath(import.meta.url)), "corpus/casos/c6-consig-clt-dossie.json");
 const { texto } = JSON.parse(await readFile(CASO, "utf8"));
@@ -130,6 +136,67 @@ describe("dossiê C6: testes negativos do relatório de homologação", () => {
     expect(e.rg).toMatchObject({ estado: "LOCALIZADO_SUSPEITO", valor: "111111111111", motivo: "dígitos repetidos" });
     expect(e.endereco).toMatchObject({ estado: "LOCALIZADO_VAZIO", valor: "Nao Informado, SD" });
     expect(extraido.achados_irregularidade.map((a) => a.codigo)).toContain("CAD4");
+  });
+
+  describe("rodada 2: CRIT-01 e CRIT-02 com o endereço manual conflitante", () => {
+    const montarResultado = async () => {
+      const geo = await enrichGeography(extraido, "Rua Alcides Araújo Mourão, 945, Santa fé - Pedro II - PI, 64255-000", null);
+      const result = { ...geo, reportId: "FD-TESTE", hashes: {}, file: { name: "dossie.pdf", sizeBytes: 1 } };
+      result.confronto_geografico = montarConfrontoGeografico(result);
+      result.sumarioIrregularidades = buildSummaryForResult(result, extraido);
+      return result;
+    };
+
+    it("negativo 1: nenhuma seção do sumário contém 0,00 km", async () => {
+      const r = await montarResultado();
+      expect(r.confronto_geografico.status).toBe("RECUSADO_CONFLITO");
+      expect(JSON.stringify(r.sumarioIrregularidades)).not.toMatch(/0,00 km/);
+    });
+
+    it("negativo 2: sem achado de proximidade nem selo derivado de distância à residência", async () => {
+      const r = await montarResultado();
+      const s = r.sumarioIrregularidades;
+      const chaves = [...s.allFindings, ...s.favorable].map((f) => f.key);
+      expect(chaves).not.toContain("gps-near-home");
+      expect(chaves).not.toContain("gps-home-distance");
+      expect(s.ipCards.map((c) => c.text).join(" ")).not.toMatch(/km da referência residencial/);
+      expect(s.checks.find((c) => c.key === "gps-residencia")).toMatchObject({ status: "INDETERMINADO" });
+    });
+
+    it("negativo 3: o gráfico de distâncias à residência não tem pontos", async () => {
+      const r = await montarResultado();
+      expect(r.sumarioIrregularidades.geo.items).toEqual([]);
+      expect(r.sumarioIrregularidades.geo.description).toMatch(/não calculadas/);
+    });
+
+    it("a distância entre GPS e IP, independente da residência, continua disponível", async () => {
+      const r = await montarResultado();
+      expect(r.confronto_geografico.gps_ip).toBeGreaterThan(0);
+      expect(r.confronto_geografico.distancias.gps_residencia).toBeNull();
+    });
+
+    it("a capa do PDF não afirma compatibilidade com o domicílio", async () => {
+      const r = await montarResultado();
+      const c = r.confronto_geografico;
+      const score = calculateForensicScore({ distKmIp: c.distancias.ips_residencia[0]?.km ?? null, distKmGps: c.distancias.gps_residencia, distKmIpVsGps: c.gps_ip });
+      expect(score).toMatchObject({ score: null, nivel: "NÃO AFERIDO" });
+    });
+
+    it("sem contradição crítica no resultado corrigido", async () => {
+      const r = await montarResultado();
+      expect(verificarCoerencia(r, extraido).filter((v) => v.nivel === "CRITICA")).toEqual([]);
+    });
+
+    it("o validador acusa o sumário do laudo da rodada 2 (0,00 km em selo favorável)", async () => {
+      const r = await montarResultado();
+      r.sumarioIrregularidades = {
+        ...r.sumarioIrregularidades,
+        favorable: [{ severity: "FAVORÁVEL", key: "gps-near-home", title: "GPS da assinatura próximo à referência residencial.", text: "A coordenada da assinatura fica a 0,00 km do endereço de referência." }],
+        geo: { ...r.sumarioIrregularidades.geo, items: [{ label: "GPS · assinatura", distance: 0, role: "gps" }] },
+      };
+      const regras = verificarCoerencia(r, extraido).filter((v) => v.nivel === "CRITICA").map((v) => v.regra);
+      expect(regras).toEqual(expect.arrayContaining(["distancia-no-sumario-sem-confronto", "zero-km-no-sumario"]));
+    });
   });
 
   it("o resultado montado para o fixture não traz contradição entre seções", async () => {

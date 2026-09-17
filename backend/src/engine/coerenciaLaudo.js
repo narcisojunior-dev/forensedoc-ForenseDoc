@@ -34,7 +34,91 @@ const normalizar = (valor) =>
     .toUpperCase()
     .trim();
 
+// Texto que o sumário executivo efetivamente imprime.
+function textosDoSumario(sumario) {
+  if (!sumario) return [];
+  return [
+    ...(sumario.allFindings || sumario.findings || []).map((f) => `${f.title || ""} ${f.text || ""}`),
+    ...(sumario.favorable || []).map((f) => `${f.title || ""} ${f.text || ""}`),
+    ...(sumario.checks || []).map((c) => String(c.detail || "")),
+    ...(sumario.ipCards || []).map((c) => String(c.text || "")),
+    ...(sumario.geo?.items || []).map((i) => `${i.label || ""} ${i.distance ?? ""}`),
+    String(sumario.geo?.description || ""),
+    String(sumario.synthesis || ""),
+  ];
+}
+
+const CHAVES_DISTANCIA_RESIDENCIA = new Set(["gps-near-home", "gps-home-distance"]);
+
 const REGRAS = [
+  {
+    id: "distancia-no-sumario-sem-confronto",
+    nivel: "CRITICA",
+    descricao: "Sumário executivo com distância, selo ou ponto de gráfico à residência sem confronto calculado",
+    verificar(result) {
+      const status = result.confronto_geografico?.status;
+      const recusado = status ? status !== "CALCULADO" : ["RECUSADO_CONFLITO", "INDISPONIVEL_NAO_INFORMADO"].includes(result.home?.estado_confronto);
+      if (!recusado) return null;
+      const sumario = result.sumarioIrregularidades;
+      if (!sumario) return null;
+      const achados = [...(sumario.allFindings || sumario.findings || []), ...(sumario.favorable || [])].filter((f) => CHAVES_DISTANCIA_RESIDENCIA.has(f.key));
+      const pontos = (sumario.geo?.items || []).length;
+      const cards = (sumario.ipCards || []).filter((c) => /km da refer[êe]ncia residencial/i.test(c.text || "")).length;
+      const partes = [
+        achados.length ? `achado(s) ${achados.map((f) => f.key).join(", ")}` : null,
+        pontos ? `${pontos} ponto(s) no gráfico` : null,
+        cards ? `${cards} card(s) de IP com distância à residência` : null,
+      ].filter(Boolean);
+      return partes.length ? `confronto ${status || result.home?.estado_confronto} e sumário com ${partes.join("; ")}` : null;
+    },
+  },
+  {
+    id: "zero-km-no-sumario",
+    nivel: "CRITICA",
+    descricao: "Sumário executivo imprime distância de 0,00 km",
+    verificar(result) {
+      const trecho = textosDoSumario(result.sumarioIrregularidades).find((t) => /(^|[^\d,])0,00 km/.test(t));
+      const pontoZero = (result.sumarioIrregularidades?.geo?.items || []).some((i) => i.distance === 0);
+      return trecho || pontoZero ? `"0,00 km" no sumário${trecho ? `: ${trecho.slice(0, 120)}` : " (ponto do gráfico)"}` : null;
+    },
+  },
+  {
+    id: "bloco-assinatura-x-afirmacao",
+    nivel: "CRITICA",
+    descricao: "Documento com bloco de assinatura dado como sem assinatura, ou o inverso",
+    verificar(result, extracted) {
+      const docs = extracted.documentos_logicos?.documentos || [];
+      const principal = docs.find((d) => d.tipo === "INSTRUMENTO_PRINCIPAL");
+      if (!principal) return null;
+      const textos = [
+        ...(extracted.achados_irregularidade || []).map((a) => `${a.titulo || ""} ${a.texto || ""}`),
+        ...textosDoSumario(result.sumarioIrregularidades),
+      ];
+      const negaAssinatura = textos.find((t) => /sem bloco de assinatura|n[ãa]o exibe bloco de assinatura/i.test(t) && /c[ée]dula|instrumento principal/i.test(t));
+      if (principal.blocosAssinatura?.length && negaAssinatura) {
+        return `a ${principal.titulo} tem bloco na pág. ${principal.blocosAssinatura[0].pagina}, e o laudo afirma: ${negaAssinatura.slice(0, 120)}`;
+      }
+      const resumo = extracted.assinatura?.blocos_por_documento || "";
+      const afirmaBloco = new RegExp(`${principal.titulo.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[^;]*bloco de assinatura na p[áa]g`, "i").test(resumo);
+      if (!principal.blocosAssinatura?.length && afirmaBloco) return `resumo de blocos afirma assinatura na ${principal.titulo}, que não tem bloco`;
+      return null;
+    },
+  },
+  {
+    id: "booleano-x-texto",
+    nivel: "ALERTA",
+    descricao: "Veredito da aferição e texto derivado saem de fontes diferentes",
+    verificar(_result, extracted) {
+      const m = extracted.afericao_matematica || {};
+      const problemas = [];
+      if (m.composicao_confere === true && /difere/i.test(m.composicao_nota || "")) problemas.push("composição confere e a nota diz que difere");
+      if (m.composicao_confere === false && !m.composicao_nota) problemas.push("composição diverge sem nota");
+      if (m.cet_anual_confere === true && m.cet_anual_calculado && !m.cet_anual_convencao) problemas.push("CET anual confere sem convenção identificada");
+      const algumDiverge = [m.prazo_confere, m.somatorio_confere, m.composicao_confere, m.vp_confere, m.cet_anual_confere].some((v) => v === false);
+      if (algumDiverge && /N[ãa]o se identificou inconsist[êe]ncia aritm[ée]tica/i.test(m.conclusao || "")) problemas.push("conclusão afirma consistência com item divergente");
+      return problemas.length ? problemas.join("; ") : null;
+    },
+  },
   {
     id: "domicilio-sumario-x-qualificacao",
     descricao: "Município do domicílio citado no sumário difere do § 3 sem referência manual válida",
@@ -150,6 +234,14 @@ const REGRAS = [
   },
 ];
 
+// Regras anteriores à rodada 2 que também produzem afirmação falsa em juízo.
+const NIVEL_PADRAO = {
+  "data-contrato-x-juntada": "CRITICA",
+  "distancia-com-referencia-recusada": "CRITICA",
+  "cet-implicito-no-extremo": "CRITICA",
+  "ass1-x-bloco-no-instrumento": "CRITICA",
+};
+
 /**
  * @param {object} result resultado da análise (home, contractGeo, ipAnalysis, sumário)
  * @param {object} extracted extração estruturada
@@ -164,9 +256,9 @@ export function verificarCoerencia(result = {}, extracted = {}) {
     } catch (erro) {
       detalhe = `regra falhou ao executar: ${erro.message}`;
     }
-    if (detalhe) violacoes.push({ regra: regra.id, descricao: regra.descricao, detalhe });
+    if (detalhe) violacoes.push({ regra: regra.id, nivel: regra.nivel || NIVEL_PADRAO[regra.id] || "ALERTA", descricao: regra.descricao, detalhe });
   }
   return violacoes;
 }
 
-export const REGRAS_COERENCIA = REGRAS.map(({ id, descricao }) => ({ id, descricao }));
+export const REGRAS_COERENCIA = REGRAS.map(({ id, descricao, nivel }) => ({ id, descricao, nivel: nivel || NIVEL_PADRAO[id] || "ALERTA" }));
