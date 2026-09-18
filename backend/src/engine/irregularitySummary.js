@@ -1,3 +1,4 @@
+import { buildCustodyChain } from "../reports/custodyChain.js";
 import { ordenarAchados } from "./eixosAchado.js";
 import { distanciaKm, distanciaSuspeita, formatarDistancia, montarConfrontoGeografico, STATUS_CONFRONTO } from "../utils/distancia.js";
 import { descreverIndisponibilidade } from "../utils/confrontoEnderecos.js";
@@ -166,28 +167,8 @@ function buildIpCard(ip, role, bank) {
 }
 
 function chainScore(report) {
-  const extracted = report?.extracted || {};
-  const signature = extracted.assinatura || {};
-  const chain = extracted.cadeia_custodia || {};
-  if (chain.placar) {
-    return {
-      present: Number(chain.placar.auxiliares_presentes || 0),
-      total: Number(chain.placar.auxiliares_total || 7),
-      eliminatoriosPresent: Number(chain.placar.eliminatorios_presentes || 0),
-      eliminatoriosTotal: Number(chain.placar.eliminatorios_total || 4),
-    };
-  }
-  const items = [
-    chain.identificacao_signatario || signature.titular_certificado || signature.cpf_titular || extracted.cliente?.nome,
-    chain.registro_ip || (report.ipAnalysis || []).length > 0,
-    chain.carimbo_tempo || signature.data_hora_assinatura,
-    chain.geolocalizacao || report.geoDeclaredPresent || report.contractGeo,
-    chain.metodo_autenticacao || signature.metodos_autenticacao?.length,
-    chain.hash_integridade || signature.hash_documento_assinado,
-    chain.trilha_auditoria,
-    chain.evidencia_aceite,
-  ];
-  return { present: items.filter(Boolean).length, total: items.length };
+  const c = buildCustodyChain(report.extracted || {}, report.ipAnalysis || [], Boolean(report.geoDeclaredPresent || report.contractGeo));
+  return { present: c.presentes, total: c.total, missing: c.faltantes.map(e => e.nome) };
 }
 
 function evidenceSeverity(text) {
@@ -386,12 +367,10 @@ export function buildIrregularitySummary(report = {}) {
   if (signature.presente && embeddedMissing && (!hasValue(signature.tipo) || /simples|indeterminado/i.test(signature.tipo || ""))) {
     addFinding("MÉDIA", "simple-signature", "Assinatura eletrônica depende da cadeia de custódia.", "Não foi detectada certificação PAdES incorporada e o nível da assinatura é simples ou indeterminado. Isso não a invalida por si; impugnada a autoria, cabe ao banco comprovar autenticidade (STJ, Tema 1.061, CPC arts. 6º, 369 e 429, II)." );
   }
-  if (chain.eliminatoriosPresent === chain.eliminatoriosTotal && chain.eliminatoriosTotal) {
-    addFinding("FAVORÁVEL", "chain-complete", "Cadeia de custódia com boa completude.", `O laudo registra ${chain.present}/${chain.total} elementos técnicos. O número mede presença de campos, não a coerência entre eles, e deve ser enfrentado na análise.`);
-  } else {
-    addFinding("MÉDIA", "CUS1", "Cadeia de custódia incompleta.", `Itens eliminatórios satisfeitos: ${chain.eliminatoriosPresent ?? 0} de ${chain.eliminatoriosTotal ?? 4}. Elementos auxiliares localizados: ${chain.present} de ${chain.total}. A instituição deve suprir os registros ausentes com os logs brutos da plataforma.`);
+  if (chain.present < chain.total) {
+    addFinding("INFO", "CUS1", "Referências documentais de rastreabilidade: limitações.", `Referências localizadas neste checklist: ${chain.present} de ${chain.total}. Não localizadas: ${chain.missing.join("; ")}. Essa contagem mede referências no material examinado, não valida autoria, integridade ou completude dos registros originais. Solicitar os registros de origem necessários à verificação.`);
   }
-  addCheck("E", "cadeia-custodia", chain.eliminatoriosPresent === chain.eliminatoriosTotal ? "PRÓ-BANCO" : "ALERTA", `${chain.eliminatoriosPresent ?? 0}/${chain.eliminatoriosTotal ?? 4} eliminatórios; ${chain.present}/${chain.total} auxiliares.`);
+  addCheck("E", "cadeia-custodia", "INFORMATIVO", `${chain.present}/${chain.total} referências documentais; presença não equivale a validação.`);
 
   if (audit.chronologyInconsistent) {
     addFinding("ALTA", "chronology", "Carimbos de tempo não conciliados.", `A trilha registra eventos entre ${audit.firstTime || "horário não identificado"} e ${audit.lastTime || "horário não identificado"}, enquanto o campo da assinatura usa outro horário ou fuso. Os logs brutos devem esclarecer o fuso efetivamente aplicado.`);
@@ -710,6 +689,7 @@ export function buildIrregularitySummary(report = {}) {
 
   return {
     reportId: report.reportId || "Laudo sem protocolo",
+    custodyChecklist: { present: chain.present, total: chain.total },
     bank,
     contractNumber,
     cpf,

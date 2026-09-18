@@ -880,74 +880,13 @@ export default function LaudoForense({ report }) {
                   <div className="note">{report.extracted.assinatura.observacoes}</div>
                 )}
 
-                {(() => {
-                  const a = report.extracted.assinatura || {};
-                  const cc = report.extracted.cadeia_custodia || {};
-                  const eliminatorios = [
-                    ["Hash conferível declarado", !!(cc.eliminatorios?.hash_declarado_emissor || cc.hash_integridade)],
-                    ["Provedor de assinatura identificado", !!cc.eliminatorios?.provedor_assinatura_identificado],
-                    ["Carimbo de tempo independente", !!cc.eliminatorios?.carimbo_tempo_independente],
-                    ["Registro de coleta e preservação", !!cc.eliminatorios?.registro_coleta_preservacao],
-                  ];
-                  const apoio = [
-                    ["Identificação do signatário", !!(cc.identificacao_signatario || a.titular_certificado || a.cpf_titular || report.extracted.cliente?.nome)],
-                    ["Registro de IP", !!(cc.registro_ip || report.ipAnalysis.length > 0)],
-                    ["Data/hora indicada", !!(cc.carimbo_tempo || a.data_hora_assinatura)],
-                    ["Geolocalização tecnicamente válida", !!(cc.geolocalizacao && report.contractGeo)],
-                    ["Método de autenticação operacional registrado", !!(cc.metodo_autenticacao || (a.metodos_autenticacao && a.metodos_autenticacao.length > 0))],
-                    ["Trilha de auditoria", !!cc.trilha_auditoria],
-                    ["Menção de aceite no documento", !!cc.mencao_aceite],
-                  ];
-                  const missing = eliminatorios.filter((it) => !it[1]).map((it) => it[0].toLowerCase());
-                  const demonstrada = missing.length === 0;
-                  const vcolor = demonstrada ? "#3ddc97" : "#f06363";
-                  const result = cc.resultado || (demonstrada ? "CADEIA DE CUSTÓDIA DEMONSTRADA" : "CADEIA DE CUSTÓDIA NÃO DEMONSTRADA");
+                <div className="sub-head">Checklist de referências documentais</div>
+                {report.cadeiaCustodia ? <>
+                  <Row label="Referências localizadas" value={`${report.cadeiaCustodia.presentes}/${report.cadeiaCustodia.total}`} />
+                  <div className="note">Presença documental não valida autoria, integridade ou completude dos registros originais.</div>
+                  {(report.cadeiaCustodia.elementos || []).map(e => <Row key={e.chave} label={e.nome} value={e.presente ? "REFERÊNCIA LOCALIZADA" : "NÃO LOCALIZADA"} />)}
+                </> : <div className="note">Checklist consolidado indisponível nesta análise. Reprocesse o documento para obter a contagem atual; não é possível inferir validade desta ausência.</div>}
 
-                  return (
-                    <>
-                      <div className="sub-head">Cadeia de custódia da assinatura</div>
-                      <div className="dist-banner" style={{ borderColor: `${vcolor}55`, background: `${vcolor}14`, marginTop: 16 }}>
-                        <div>
-                          <div className="dl">Resultado técnico por itens eliminatórios</div>
-                          <div className="dv" style={{ color: vcolor }}>{result}</div>
-                        </div>
-                        <Badge label={demonstrada ? "DEMONSTRADA" : "NÃO DEMONSTRADA"} color={vcolor} />
-                      </div>
-                      <div className="note" style={{ borderLeftColor: vcolor, background: `${vcolor}12` }}>
-                        {demonstrada
-                          ? "Os itens eliminatórios foram encontrados na extração automática. Ainda assim, os logs brutos e o certificado devem ser confrontados manualmente antes do uso processual."
-                          : `Não foi aplicado percentual de completude porque faltam itens eliminatórios: ${missing.join(", ")}. Sem esses elementos, o relatório não afirma autenticidade, integridade ou validade jurídica da assinatura.`}
-                      </div>
-                      {(a.hash_declarado_estado === "DECLARADO_NAO_CONFERIVEL" || a.codigo_autenticacao_estado === "DECLARADO_NAO_CONFERIVEL") && (
-                        <div className="note" style={{ borderLeftColor: "var(--warn)", background: "rgba(242,176,61,0.07)" }}>
-                          Existe código de autenticação declarado pelo emissor, mas ele não é conferível por método público. O item eliminatório permanece não satisfeito até que a instituição informe algoritmo, payload assinado e procedimento de verificação.
-                        </div>
-                      )}
-                      {cc.placar && (
-                        <div className="dist-banner" style={{ borderColor: "rgba(133,149,168,0.35)", background: "rgba(133,149,168,0.08)", marginTop: 12 }}>
-                          <div>
-                            <div className="dl">Placar técnico da cadeia</div>
-                            <div className="dv">Itens eliminatórios satisfeitos: {cc.placar.eliminatorios_presentes} de {cc.placar.eliminatorios_total}. Elementos auxiliares localizados: {cc.placar.auxiliares_presentes} de {cc.placar.auxiliares_total}.</div>
-                          </div>
-                        </div>
-                      )}
-                      <div className="sub-head">Itens eliminatórios</div>
-                      {eliminatorios.map(([lbl, ok]) => (
-                        <div className="row" key={lbl}>
-                          <span className="row-label">{lbl}</span>
-                          <Badge label={ok ? "PRESENTE" : "AUSENTE"} color={ok ? "#3ddc97" : "#f06363"} />
-                        </div>
-                      ))}
-                      <div className="sub-head">Elementos auxiliares encontrados</div>
-                      {apoio.map(([lbl, ok]) => (
-                        <div className="row" key={lbl}>
-                          <span className="row-label">{lbl}</span>
-                          <Badge label={ok ? "SIM" : "NÃO"} color={ok ? "#f2b03d" : "#8595a8"} />
-                        </div>
-                      ))}
-                    </>
-                  );
-                })()}
               </Section>
 
               {/* §4.1 Auditoria detalhada do trilho */}

@@ -147,7 +147,7 @@ export function recomputeDerived(result, extracted) {
     cadeiaCustodia: buildCustodyChain(
       extracted,
       ipAnalysis,
-      Boolean(result.geoDeclaredPresent)
+      Boolean(result.geoDeclaredPresent || contractGeo)
     ),
   };
 }

@@ -1123,7 +1123,7 @@ export function heuristicExtractionFromText(rawText) {
   if (layout.numeroBeneficio && layout.beneficioNoTermoConsentimento && layout.beneficioNoTermoConsentimento !== layout.numeroBeneficio) {
     addIssue("CAD3", "MÉDIA", "Termo de Consentimento com número de benefício divergente", `O Termo de Consentimento Esclarecido identifica o benefício com o número ${layout.beneficioNoTermoConsentimento}, que corresponde ao número da proposta/contrato, não ao número do benefício (${layout.numeroBeneficio}) informado no quadro de qualificação do cliente. O documento destinado a esclarecer o consumidor está preenchido com o dado errado.`);
   }
-  addIssue("CUS1", "MÉDIA", "Itens eliminatórios da cadeia de custódia não satisfeitos", "A extração não localizou hash conferível declarado pelo emissor, provedor verificável, carimbo de tempo independente nem registro de preservação do arquivo original. Em PDF reimpresso, a ausência de selfie e logs no próprio arquivo é esperada; a diligência recai sobre a exibição dos artefatos originais da plataforma.");
+  // CUS1 é produzido pelo sumário a partir dos estados efetivamente extraídos.
 
   // Linha do tempo do fluxo de aceite (dossiê de contratação): um fluxo
   // inteiro em poucos minutos, ou um aceite dos termos poucos segundos

@@ -160,6 +160,7 @@ export function montarRelatorio({ analysisId, result, createdAt }) {
     hashes: result?.hashes || { sha256: "", sha1: "" },
     metadata: result?.metadata || null,
     extracted,
+    cadeiaCustodia: result?.cadeiaCustodia || null,
     home: {
       query: home.query || null,
       source: home.source || null,
@@ -199,6 +200,7 @@ export function montarRelatorio({ analysisId, result, createdAt }) {
           dataHora: primeiroIp?.data_hora || extracted.assinatura?.data_hora_assinatura,
           achados: extracted.achados_irregularidade || [],
           extracted,
+    cadeiaCustodia: result?.cadeiaCustodia || null,
         })
       : [],
   };

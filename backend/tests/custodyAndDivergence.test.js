@@ -48,8 +48,9 @@ describe("buildCustodyChain", () => {
     expect(c.presentes).toBe(0);
     expect(c.avaliacao.rotulo).toBe("INCOMPLETA");
     expect(c.avaliacao.tom).toBe("danger");
-    // A leitura precisa apontar a consequência processual, não só o placar.
-    expect(c.avaliacao.leitura).toMatch(/Tema 1\.061/);
+    // O checklist da cópia não decide a suficiência da prova original.
+    expect(c.avaliacao.leitura).toMatch(/não é possível concluir sobre a completude dos registros originais/);
+    expect(c.avaliacao.leitura).toMatch(/não decorre automaticamente da contagem/);
   });
 
   it("percorre as quatro faixas de completude", () => {
@@ -82,7 +83,7 @@ describe("buildCustodyChain", () => {
     // É a norma que fixa os prazos de guarda — e a perda do dado é irreversível.
     const ip = ELEMENTOS_CADEIA.find((e) => e.chave === "registro_ip");
     expect(ip.norma).toMatch(/12\.965/);
-    expect(ip.ausencia).toMatch(/irrevers/i);
+    expect(ip.ausencia).toMatch(/não demonstram exclusão efetiva/);
   });
 });
 

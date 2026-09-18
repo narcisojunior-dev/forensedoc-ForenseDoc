@@ -458,7 +458,7 @@ function sectionClient(ctx, extracted) {
 function sectionSignature(ctx, extracted, result = {}) {
   const a = extracted.assinatura || {};
   heading(ctx, "§ 4 · Assinatura eletrônica e cadeia de custódia");
-  badge(ctx, "Assinatura presente", a.presente ? "CONFIRMADA" : "AUSENTE", !!a.presente);
+  badge(ctx, "Registro textual de assinatura", a.presente ? "LOCALIZADO" : "NÃO LOCALIZADO", !!a.presente);
   paragraph(ctx, NOTA_ASSINATURA, { color: MUTED, size: 8.5 });
   field(ctx, "Plataforma de assinatura", a.plataforma);
   field(ctx, "Tipo de assinatura", a.tipo);
@@ -511,9 +511,9 @@ function sectionCustodyChain(ctx, extracted, ipAnalysis = [], geoPresente = fals
   const av = cadeia.avaliacao;
   badge(
     ctx,
-    "Completude da cadeia",
-    `${cadeia.presentes}/${cadeia.total} · ${av.pct}% · ${av.rotulo}`,
-    av.tom === "ok"
+    "Referências documentais localizadas",
+    `${cadeia.presentes}/${cadeia.total} · presença documental, sem validação de autoria`,
+    true
   );
   paragraph(ctx, av.leitura, { size: 9 });
 
@@ -531,7 +531,7 @@ function sectionCustodyChain(ctx, extracted, ipAnalysis = [], geoPresente = fals
       });
 
     doc.fontSize(8.5).font("Helvetica").fillColor(INK);
-    doc.text(`Função probatória: ${e.comprova}`, MARGIN + 12, doc.y + 1, {
+    doc.text(`Finalidade e limite: ${e.comprova}`, MARGIN + 12, doc.y + 1, {
       width: contentWidth - 12,
     });
     doc.fillColor(MUTED).text(`Base normativa: ${e.norma}`, MARGIN + 12, doc.y + 1, {
@@ -551,7 +551,7 @@ function sectionCustodyChain(ctx, extracted, ipAnalysis = [], geoPresente = fals
   if (cadeia.faltantes.length) {
     paragraph(
       ctx,
-      `Elementos ausentes (${cadeia.faltantes.length}): ${cadeia.faltantes.map((e) => e.nome.toLowerCase()).join("; ")}.`,
+      `Referências não localizadas (${cadeia.faltantes.length}): ${cadeia.faltantes.map((e) => e.nome.toLowerCase()).join("; ")}.`,
       { color: DANGER, size: 9 }
     );
   }
@@ -1364,22 +1364,13 @@ function sectionContractingTrail(ctx, extracted) {
   const a = extracted.assinatura || {};
   const trilha = extracted.trilha_acesso;
   const linha = a.linha_do_tempo;
-  const placar = extracted.cadeia_custodia?.placar;
-  if (!a.forma_aceite && !linha && !trilha && !placar && !a.plataforma_nota) return;
+  if (!a.forma_aceite && !linha && !trilha && !a.plataforma_nota) return;
 
   heading(ctx, "§ 4.2 · Trilha da contratação");
   field(ctx, "Forma de aceite", a.forma_aceite);
   field(ctx, "Telefone do aceite", a.telefone_aceite);
   field(ctx, "Dispositivo", a.dispositivo?.resumo);
   field(ctx, "Código de autenticação declarado", a.codigo_autenticacao_declarado, { mono: true });
-  if (placar) {
-    badge(
-      ctx,
-      "Itens eliminatórios da cadeia de custódia",
-      `${placar.eliminatorios_presentes}/${placar.eliminatorios_total} · auxiliares ${placar.auxiliares_presentes}/${placar.auxiliares_total}`,
-      placar.eliminatorios_presentes === placar.eliminatorios_total
-    );
-  }
   if (a.plataforma_nota) paragraph(ctx, a.plataforma_nota, { size: 9 });
   if (a.assinatura_manual_textual) paragraph(ctx, a.assinatura_manual_textual, { size: 9 });
 
