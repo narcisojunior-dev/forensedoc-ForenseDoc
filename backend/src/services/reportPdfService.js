@@ -1167,6 +1167,9 @@ function sectionInsurance(ctx, extracted) {
   if (!sg) return;
   heading(ctx, "§ 2.3 · Seguro prestamista vinculado à operação", { danger: (sg.achados || []).some((a) => a.gravidade === "ALTA") });
   field(ctx, "Proposta", sg.proposta);
+  field(ctx, "Forma de pagamento", sg.forma_pagamento);
+  field(ctx, "Vigência", sg.vigencia?.premissa);
+  field(ctx, "Marcos de contagem", sg.marcos_temporais);
   field(ctx, "Prêmio", sg.premio ? `${sg.premio}${sg.premio_sobre_liberado != null ? ` (${pctBR(sg.premio_sobre_liberado, 2)} do valor liberado)` : ""}` : null);
   field(ctx, "IOF do seguro", sg.iof);
   field(ctx, "Pró-labore", sg.pro_labore ? `${sg.pro_labore}${sg.pro_labore_sobre_premio != null ? ` (${pctBR(sg.pro_labore_sobre_premio)} do prêmio)` : ""}` : null);
@@ -1178,7 +1181,7 @@ function sectionInsurance(ctx, extracted) {
     field(
       ctx,
       `   ${c.nome}`,
-      [c.premio, c.participacao_premio != null ? `${pctBR(c.participacao_premio)} do prêmio` : null, `carência ${c.carencia_dias ? `${c.carencia_dias} dias` : "não há"}`, `franquia ${c.franquia_dias ? `${c.franquia_dias} dias` : "não há"}`, c.teto_parcelas ? `até ${c.teto_parcelas} parcelas` : null].filter(Boolean).join(" · ")
+      [c.premio, c.participacao_premio != null ? `${pctBR(c.participacao_premio)} do prêmio` : null, `carência ${c.carencia_dias == null ? "não identificada" : c.carencia_dias ? `${c.carencia_dias} dias` : "não há"}`, `franquia ${c.franquia_dias == null ? "não identificada" : c.franquia_dias ? `${c.franquia_dias} dias` : "não há"}`, c.teto_parcelas ? `até ${c.teto_parcelas} parcelas` : null].filter(Boolean).join(" · ")
     );
   }
 }

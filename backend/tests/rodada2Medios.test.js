@@ -108,7 +108,9 @@ describe("MED-05: quesitos derivados dos achados", () => {
     expect(todoTexto).toMatch(/R\$ 1\.779,15 na conta 005555-1, agência 1234, Banco 237/);
     expect(todoTexto).toMatch(/"000007 - CONSIG TRAB"/);
     expect(todoTexto).toMatch(/111111111111/);
-    expect(todoTexto).toMatch(/carência de 90 dias e franquia de 31 dias tornam a indenização possível apenas 121 dias/);
+    expect(todoTexto).toMatch(/carência de 90 dias e da franquia de 31 dias/);
+    expect(todoTexto).toMatch(/marcos próprios/);
+    expect(todoTexto).not.toMatch(/121 dias/);
     expect(todoTexto).toMatch(/pró-labore de R\$ 98,02/);
     expect(todoTexto).toMatch(/27 segundos após o evento anterior para 12 páginas/);
     expect(todoTexto).not.toMatch(/undefined|null|NaN|operação ,/);

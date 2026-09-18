@@ -127,6 +127,7 @@ export function extrairSeguroPrestamista({ texto, segmentacao, contrato = {} }) 
     periodicidade: valorAbaixoDoRotulo(trecho, /Periodicidade\s+de\s+Pagamento/i),
     forma_pagamento: valorAbaixoDoRotulo(trecho, /Forma\s+de\s+pagamento/i),
     pro_labore: proLabore,
+    marcos_temporais: /Car[êe]ncia:[\s\S]{0,400}in[íi]cio\s+de\s+vig[êe]ncia/i.test(trecho) && /Franquia:[\s\S]{0,400}(?:sinistro|evento)/i.test(trecho) ? "A carência é contada do início da vigência; a franquia, da ocorrência do sinistro, conforme definições da proposta." : null,
     coberturas: coberturas.map((c) => ({
       ...c,
       participacao_premio: c.premio && premioCents ? moneyToCents(c.premio) / premioCents : null,
@@ -173,15 +174,12 @@ export function extrairSeguroPrestamista({ texto, segmentacao, contrato = {} }) 
     || /certificado\s+individual\s+(?:de\s+seguro\s+)?n[ºo°]\s*[:\-]?\s*\S+/i.test(t);
 
   const remissaoTexto = remissaoVigencia ? remissaoVigencia[0].replace(/\s+/g, " ").trim() : null;
-  const premissaPresumida = !vigenciaDeclarada && Boolean(contrato.data_contrato);
   seguro.vigencia = {
     inicio_declarado: vigenciaDeclarada || null,
     premissa: vigenciaDeclarada
-      ? `Início de vigência declarado na própria proposta (${vigenciaDeclarada}).`
-      : premissaPresumida
-        ? `Premissa adotada: início de vigência na data do contrato (${contrato.data_contrato}), porque a proposta não declara a data.${remissaoTexto ? ` A proposta remete as datas ao certificado individual do seguro${certificadoNoArquivo ? ", que consta do arquivo e deve ser conferido" : ", que não foi localizado no arquivo examinado"}.` : ""}`
-        : "Início de vigência não declarado na proposta e sem data de contrato para adotar como premissa.",
-    premissa_origem: vigenciaDeclarada ? "DECLARADO_NA_PROPOSTA" : premissaPresumida ? "PRESUMIDO_DATA_DO_CONTRATO" : "INDETERMINADO",
+      ? `Início de vigência declarado na proposta (${vigenciaDeclarada}).`
+      : `Início de vigência não demonstrado pela extração da proposta. ${remissaoTexto || "Solicitar o certificado individual."}`,
+    premissa_origem: vigenciaDeclarada ? "DECLARADO_NA_PROPOSTA" : "INDETERMINADO",
     // Três estados, não dois: localizado, não localizado, e não verificado.
     certificado_individual: certificadoNoArquivo
       ? "LOCALIZADO_NO_ARQUIVO"
@@ -244,50 +242,11 @@ function avaliarSeguro(seguro, contrato) {
   const achados = [];
   const add = (codigo, gravidade, titulo, texto) => achados.push({ codigo, gravidade, titulo, texto });
 
-  // SEG1: carência + franquia contra o cronograma de parcelas.
-  // D9: quando a vigência é declarada, ela é a base do confronto. A data do
-  // contrato entra apenas como premissa explícita, e só na falta daquela.
-  const vigenciaDeclarada = parsePtDate(seguro.vigencia?.inicio_declarado);
-  const base = vigenciaDeclarada || parsePtDate(contrato.data_contrato);
-  // O rótulo acompanha a base efetivamente usada. Dizer "após a emissão" quando
-  // a contagem partiu do início de vigência declarado descreve mal o cálculo.
-  const rotuloDaBase = vigenciaDeclarada
-    ? `o início de vigência declarado (${seguro.vigencia.inicio_declarado})`
-    : "a emissão";
-
-  /*
-   * A conclusão antiga era absoluta: "a cobertura vendida tem pouca ou nenhuma
-   * serventia no contrato ao qual foi vinculada". Isso contradiz a própria
-   * premissa condicional do achado, porque a serventia da cobertura depende de
-   * quando a vigência começou, que é justamente o que não se sabe sem o
-   * certificado. A conclusão passa a se limitar ao efeito verificável sobre o
-   * cronograma, que é o que os números demonstram.
-   */
-  const conclusaoDoAchado = vigenciaDeclarada
-    ? "Nessas condições, as parcelas vencidas dentro do período de carência e franquia não contam com a cobertura contratada."
-    : "Mantida essa premissa de início de vigência, as parcelas vencidas dentro do período de carência e franquia não contariam com a cobertura contratada. A extensão do efeito depende da data de início de vigência, que o certificado individual deve esclarecer.";
-  const primeiro = parsePtDate(contrato.data_primeiro_vencimento);
-  const parcelas = Number(contrato.numero_parcelas);
-  const diasParcelas = base && primeiro && parcelas > 0
-    ? vencimentosMensais(primeiro, parcelas).map((d) => diasEntre(base, d))
-    : [];
+  // Carência e franquia têm marcos diferentes; vencimento não é sinistro.
   for (const c of seguro.coberturas) {
-    const espera = (c.carencia_dias || 0) + (c.franquia_dias || 0);
-    if (!espera || !diasParcelas.length) continue;
-    const descobertas = diasParcelas.filter((d) => d <= espera).length;
-    if (espera > diasParcelas[0] || descobertas / diasParcelas.length > 1 / 3) {
-      add(
-        "SEG1",
-        // D9: sem o certificado individual, o início de vigência é premissa, e
-        // achado que depende de premissa não declarada não sustenta gravidade
-        // máxima. Volta a ALTA quando a vigência for declarada ou o certificado
-        // for juntado.
-        seguro.vigencia?.premissa_origem === "PRESUMIDO_DATA_DO_CONTRATO" ? "MÉDIA" : "ALTA",
-        "Carência e franquia do seguro incompatíveis com o prazo da operação",
-        `A cobertura "${c.nome}" tem carência de ${c.carencia_dias || 0} dias e franquia de ${c.franquia_dias || 0} dias: a primeira indenização só é possível ${espera} dias após o início da vigência.${seguro.vigencia?.premissa_origem === "PRESUMIDO_DATA_DO_CONTRATO" ? ` ${seguro.vigencia.premissa}${seguro.vigencia.certificado_individual === "NAO_LOCALIZADO_NO_ARQUIVO" ? " Enquanto o certificado individual não for juntado, este achado depende dessa premissa e deve ser lido com essa ressalva." : " Este achado depende dessa premissa e deve ser lido com essa ressalva."}` : seguro.vigencia?.inicio_declarado ? ` O confronto usa o início de vigência declarado na proposta (${seguro.vigencia.inicio_declarado}), não a data do contrato.` : ""} O primeiro vencimento ocorre ${diasParcelas[0]} dias após ${rotuloDaBase}, e ${descobertas} de ${diasParcelas.length} parcelas ${descobertas === 1 ? "vence" : "vencem"} antes desse prazo mínimo${c.teto_parcelas ? `; a cobertura paga no máximo ${c.teto_parcelas} parcelas` : ""}. ${conclusaoDoAchado}`
-      );
-      break;
-    }
+    if (!(c.carencia_dias > 0 || c.franquia_dias > 0)) continue;
+    add("SEG1", "INFO", "Carência, franquia e vigência a conferir",
+      `A cobertura "${c.nome}" declara carência de ${c.carencia_dias ?? "não identificado"} dias e franquia de ${c.franquia_dias ?? "não identificado"} dias. ${seguro.marcos_temporais || "Os marcos de contagem devem ser conferidos nas condições da cobertura."} ${seguro.vigencia?.premissa || "Solicitar o certificado individual para identificar a vigência."}${c.teto_parcelas ? ` O limite declarado é de até ${c.teto_parcelas} parcelas.` : ""} Esses prazos não permitem contar parcelas descobertas nem fixar a primeira indenização sem vigência, data e enquadramento do sinistro.`);
   }
 
   // SEG2: cobertura que concentra o prêmio e tem carência ou franquia.

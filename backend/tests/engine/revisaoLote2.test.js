@@ -80,10 +80,11 @@ describe("D10 · o achado da soma das coberturas não colide com o do prêmio da
 describe("D9 · base do confronto e estado do certificado", () => {
   const extraido = heuristicExtractionFromText(texto);
 
-  it("sem vigência declarada, a premissa é a data do contrato e o achado é rebaixado", () => {
+  it("sem vigência declarada, a data permanece indeterminada", () => {
     const s = extraido.seguro_prestamista;
-    expect(s.vigencia.premissa_origem).toBe("PRESUMIDO_DATA_DO_CONTRATO");
-    expect(s.achados.find((a) => a.codigo === "SEG1").gravidade).toBe("MÉDIA");
+    expect(s.vigencia.premissa_origem).toBe("INDETERMINADO");
+    expect(s.achados.find((a) => a.codigo === "SEG1").gravidade).toBe("INFO");
+    expect(s.achados.find((a) => a.codigo === "SEG1").texto).not.toMatch(/121|parcelas vencidas.*não contariam/i);
   });
 
   /**
@@ -116,7 +117,7 @@ describe("D9 · base do confronto e estado do certificado", () => {
       expect(comVigencia.vigencia.premissa_origem).toBe("DECLARADO_NA_PROPOSTA");
       const seg1 = comVigencia.achados.find((a) => a.codigo === "SEG1");
       if (seg1) {
-        expect(seg1.gravidade).toBe("ALTA");
+        expect(seg1.gravidade).toBe("INFO");
         expect(seg1.texto).toMatch(/in[íi]cio de vig[êe]ncia declarado na proposta/i);
       }
     }

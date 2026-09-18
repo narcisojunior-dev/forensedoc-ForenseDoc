@@ -157,8 +157,8 @@ const MODELOS = {
     const estipulante = sg.estipulante?.nome;
     return {
       titulo: "Seguro Prestamista Vinculado à Operação",
-      quesito: `Queira a seguradora ou o estipulante apresentar a apólice, o certificado individual e a comprovação da opção de ${nomeRef} pela cobertura de ${cobertura.nome}, cuja carência de ${dias(cobertura.carencia_dias)}${cobertura.franquia_dias ? ` e franquia de ${dias(cobertura.franquia_dias)} tornam` : " torna"} a indenização possível apenas ${dias(minimo)} após o início da vigência${Number.isFinite(carencia) && carencia > 0 ? `, em operação cujo primeiro vencimento ocorre ${dias(carencia)} após a emissão` : ""}${sg.pro_labore ? `, bem como a memória do pró-labore de ${sg.pro_labore} pago ao estipulante${estipulante ? ` (${estipulante})` : ""}` : ""}.`,
-      finalidade: "Verificar a voluntariedade da adesão e a utilidade da cobertura no contrato ao qual foi vinculada.",
+      quesito: `Queira a seguradora ou o estipulante apresentar a apólice, o certificado individual e a comprovação da opção de ${nomeRef} pela cobertura de ${cobertura.nome}, esclarecer o início e o fim da vigência e os marcos de contagem da carência de ${dias(cobertura.carencia_dias)} e da franquia de ${dias(cobertura.franquia_dias || 0)}${sg.pro_labore ? `, além da memória do pró-labore de ${sg.pro_labore}` : ""}. Os dois prazos têm marcos próprios e não fixam, por soma automática, a primeira indenização.`,
+      finalidade: "Conferir adesão, vigência, condições de cobertura e remuneração, sem presumir parcelas descobertas.",
     };
   },
   "TRL1-CCB"(e, { bancoRef }) {
