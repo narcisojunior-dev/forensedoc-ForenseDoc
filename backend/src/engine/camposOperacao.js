@@ -90,3 +90,47 @@ export function extrairCamposOperacao(texto, { produtoCodigo = null, saldoPortad
     modalidade_desconto_provavel: modalidade,
   };
 }
+
+/*
+ * ─── D3 · município de emissão como ponto próprio do confronto ───────────────
+ *
+ * Quando a referência residencial informada na geração do laudo é recusada por
+ * conflito com o instrumento, o confronto contra a residência cai, e deve cair.
+ * Mas dois outros confrontos não dependem dela e usam apenas dados do próprio
+ * instrumento e do dossiê:
+ *
+ *   B. coordenada declarada × município de emissão declarado no instrumento
+ *   C. coordenada declarada × cidade do registro público do IP
+ *
+ * O C já existe como par `gps-x-ip`. Faltava o B, porque o município de emissão
+ * (item 3 da CCB, "LOCAL E DATA DE EMISSÃO: Manaquiri - AM - 25/06/2025") nunca
+ * foi extraído como ponto autônomo: o único ponto "do instrumento" era o
+ * endereço cadastral do contratante, que é outra coisa e pode estar vazio.
+ */
+
+/** "LOCAL E DATA DE EMISSÃO: Manaquiri - AM - 25/06/2025" */
+const LOCAL_EMISSAO = [
+  /LOCAL\s+E\s+DATA\s+DE\s+EMISS[ÃA]O\s*:?\s*([A-Za-zÀ-ÿ'´`^~.\- ]{2,60}?)\s*[-–/]\s*([A-Z]{2})\b/i,
+  /LOCAL\s+DE\s+EMISS[ÃA]O\s*:?\s*([A-Za-zÀ-ÿ'´`^~.\- ]{2,60}?)\s*[-–/]\s*([A-Z]{2})\b/i,
+  /Emitid[ao]\s+em\s+([A-Za-zÀ-ÿ'´`^~.\- ]{2,60}?)\s*[-–/]\s*([A-Z]{2})\b/i,
+];
+
+/**
+ * Município e UF de emissão declarados no instrumento.
+ *
+ * @param {string} texto texto do documento
+ * @returns {{municipio: string, uf: string, literal: string}|null}
+ */
+export function extrairLocalEmissao(texto) {
+  const t = String(texto || "");
+  for (const regex of LOCAL_EMISSAO) {
+    const m = t.match(regex);
+    if (!m) continue;
+    const municipio = m[1].replace(/\s+/g, " ").trim().replace(/[.,;-]+$/, "");
+    const uf = m[2].toUpperCase();
+    // "de" e "da" sobrando, ou município de uma letra, são leitura errada.
+    if (municipio.length < 3) continue;
+    return { municipio, uf, literal: m[0].replace(/\s+/g, " ").trim() };
+  }
+  return null;
+}

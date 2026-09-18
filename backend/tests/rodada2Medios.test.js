@@ -52,9 +52,17 @@ describe("MED-04: campos da operação no layout de caixas do C6", () => {
 describe("MED-06: conclusão do § 2.1 gerada do resultado", () => {
   const todos = { prazo_confere: true, somatorio_confere: true, composicao_confere: true, vp_confere: true, cet_implicito_veredito: "Confere", cet_anual_confere: true, cet_maior_que_juros: true };
 
-  it("dossiê: confere em tudo, exceto o prazo, que é nomeado", () => {
+  /**
+   * D4 mudou o desfecho deste item: o campo de prazo do dossiê é condicional
+   * ("6 meses ou até o pagamento da última parcela"), então o prazo deixa de
+   * DIVERGIR e passa a NÃO SER AFERIDO, com o motivo nomeado. O que MED-06
+   * prendia continua valendo: a conclusão nomeia o que confere e o que não foi
+   * aferido, em vez da frase genérica de conferência manual.
+   */
+  it("dossiê: confere em tudo, e o prazo sai como não aferido, com o motivo", () => {
     const conclusao = extraido.afericao_matematica.conclusao;
-    expect(conclusao).toMatch(/^A aferição financeira confere em todos os pontos aferidos, exceto no prazo total declarado: declarado 6 meses, efetivo 249 dias/);
+    expect(conclusao).toMatch(/^A aferição matemática confere em todos os itens aferidos/);
+    expect(conclusao).toMatch(/Não foram aferidos: prazo total declarado \(o campo declara o prazo de forma condicional/);
     expect(conclusao).not.toMatch(/exigem conferência manual/);
   });
 
@@ -205,14 +213,24 @@ describe("verificação de endereços, dois a dois", () => {
   const IP = { lat: -3.29972, lon: -60.62056, rotulo: "Manacapuru/Amazonas", precisao: "ip" };
   const GPS = { lat: -3.4340189, lon: -60.4593232, rotulo: "Manaquiri", precisao: "gps" };
 
-  it("mede os quatro pares e diz o que cada um compara", () => {
-    const { pares } = montarConfrontoEnderecos({ instrumento: MANAQUIRI, laudo: PEDRO_II, ip: IP, gps: GPS });
+  // D3 acrescentou o confronto B (GPS × município de emissão), que não depende da
+  // residência e sobrevive à recusa da referência. São cinco pares agora.
+  it("mede os pares e diz o que cada um compara", () => {
+    const { pares } = montarConfrontoEnderecos({ instrumento: MANAQUIRI, laudo: PEDRO_II, ip: IP, gps: GPS, emissao: MANAQUIRI });
     const por = Object.fromEntries(pares.map((p) => [p.id, p]));
-    expect(pares.map((p) => p.id)).toEqual(["ip-x-instrumento", "laudo-x-instrumento", "ip-x-laudo", "gps-x-ip"]);
+    expect(pares.map((p) => p.id)).toEqual(["ip-x-instrumento", "laudo-x-instrumento", "ip-x-laudo", "gps-x-ip", "gps-x-emissao"]);
     expect(por["laudo-x-instrumento"].km).toBeGreaterThan(2000);
     expect(por["gps-x-ip"].km).toBeCloseTo(23.3, 0);
     expect(por["ip-x-instrumento"].precisao).toBe("municipio");
     expect(pares.every((p) => p.texto && p.indisponivel === null)).toBe(true);
+  });
+
+  it("sem município de emissão, o confronto B fica não aferido e não some", () => {
+    const { pares } = montarConfrontoEnderecos({ instrumento: MANAQUIRI, laudo: PEDRO_II, ip: IP, gps: GPS });
+    const b = pares.find((p) => p.id === "gps-x-emissao");
+    expect(b).toBeDefined();
+    expect(b.km).toBeNull();
+    expect(b.indisponivel).toContain("emissao");
   });
 
   it("par sem os dois pontos não vira zero: fica não aferido, dizendo o que falta", () => {

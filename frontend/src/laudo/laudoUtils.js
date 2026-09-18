@@ -97,7 +97,31 @@ export function normalizeIssue(issue, index = 0) {
   return { codigo: `LEGADO${index}`, gravidade: "MÉDIA", titulo: (title || "Achado técnico").replace(/\.+$/, ""), texto: rest.join(". ") };
 }
 
-export function reportIssues(extracted = {}) {
+/**
+ * D5 · o corpo do laudo e o sumário renderizam a MESMA lista.
+ *
+ * Antes, o § 8 lia `achados_irregularidade` e o sumário lia a saída de
+ * `buildIrregularitySummary`, que reúne aqueles achados e mais os que ela mesma
+ * produz (assinatura simples, hash, geografia). Daí o laudo FD-20260917 trazer
+ * 20 itens no corpo, 15 no sumário e um item no sumário sem correspondente no
+ * corpo. Recebida a projeção canônica, ela é a fonte única; `extracted` fica
+ * como reserva para laudos antigos, emitidos antes deste campo existir.
+ *
+ * @param {object} extracted
+ * @param {Array<{severity:string, key:string, title:string, text:string}>} [projecao]
+ */
+export function reportIssues(extracted = {}, projecao = null) {
+  // Projeção vazia é resposta, não ausência de resposta. Testar `.length` fazia
+  // `[]` cair no caminho legado e ressuscitar achados que a projeção excluiu
+  // deliberadamente (os de residência, quando o confronto é recusado).
+  if (Array.isArray(projecao)) {
+    return ordenarAchados(projecao.map((f) => ({
+      codigo: f.key,
+      gravidade: f.severity,
+      titulo: cleanIssueText(f.title || "Achado técnico").replace(/\.+$/, ""),
+      texto: cleanIssueText(f.text || ""),
+    })));
+  }
   const structured = Array.isArray(extracted.achados_irregularidade) ? extracted.achados_irregularidade : [];
   const legacy = structured.length ? [] : (extracted.evidencias_irregularidade || []);
   const seen = new Set();
@@ -182,4 +206,13 @@ export function riskFromDistanceWithHistory(km, historico) {
  */
 export function semPontoFinal(valor) {
   return valor == null ? valor : String(valor).replace(/\.+\s*$/, "");
+}
+
+/** Rótulos de apresentação; os códigos persistidos continuam estáveis. */
+export function labelModalidade(value) {
+  return ({COMPRA_CARTAO: "Compra com cartão", SAQUE_CARTAO_CONSIGNADO: "Saque parcelado do cartão consignado", CDC_COM_GARANTIA: "Crédito direto ao consumidor com garantia", CREDITO_PESSOA_JURIDICA: "Crédito para pessoa jurídica"})[value] || value;
+}
+
+export function formatMetadataWarning(value) {
+  return String(value || "").replace(/^[A-Z]+\d+[A-Z0-9-]*\s+(?:CRÍTICO|CRITICO|ALTA|ALTO|MÉDIA|MÉDIO|MEDIA|MEDIO|INFO):\s*/u, "");
 }

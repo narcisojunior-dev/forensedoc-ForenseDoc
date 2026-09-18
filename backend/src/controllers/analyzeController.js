@@ -9,14 +9,15 @@ import {
   SLOT_COTA_DO_USUARIO,
 } from "../utils/lock.js";
 import { getPlanLimits } from "../services/planLimitsService.js";
-import { ocrBudgetMs } from "../services/ocrService.js";
+import { ocrBudgetMs, extractPdfTextWithOcr } from "../services/ocrService.js";
+import { preflightReference } from "../services/referencePreflight.js";
 import { validatePdfPayload } from "../utils/pdfValidation.js";
 import { buildReportPdf } from "../services/reportPdfService.js";
 import { haversineKm } from "../utils/geoUtils.js";
 import { recomputeDerived } from "../services/analysisRecompute.js";
 import { coerenciaBloqueante } from "../engine/coerenciaLaudo.js";
 import { geocodeAddress, reverseGeocode } from "../services/geocodingService.js";
-import { ESTADO_CONFRONTO, avaliarConflitoReferencia, descreverEstadoConfronto } from "../utils/referenciaResidencial.js";
+import { ESTADO_CONFRONTO, avaliarConflitoReferencia, descreverEstadoConfronto, validarFormaDaReferencia } from "../utils/referenciaResidencial.js";
 import {
   CAMPOS_REVISAVEIS,
   validarCampos,
@@ -128,6 +129,14 @@ export async function analyzePdf(req, res) {
 
     // Coordenada confirmada pelo operador (padrão-ouro): se informada e válida,
     // vence a geocodificação automática.
+    // D3: a forma da referência é conferida antes de debitar crédito e de abrir
+    // o arquivo. UF inexistente ou CEP malformado derrubam a verificação
+    // geográfica inteira, e descobrir isso depois custa a seção e a execução.
+    const formaReferencia = validarFormaDaReferencia(home);
+    if (!formaReferencia.ok) {
+      return res.status(400).json({ error: formaReferencia.error, code: formaReferencia.code });
+    }
+
     const homeCoord = parseCoord(homeLat, homeLon);
     const homeContestacao = parseContestacao(homeAddressContested, homeAddressJustification);
     if (homeContestacao && homeContestacao.justificativa.length < 15) {
@@ -194,6 +203,19 @@ export async function analyzePdf(req, res) {
       });
     }
 
+    // O slot limita a leitura/OCR preliminar; ainda não há débito nem análise
+    // pericial. O worker reutiliza esta extração, em vez de reler o documento.
+    const preflight = await preflightReference(Buffer.from(validation.base64, "base64"), home, extractPdfTextWithOcr);
+    if (preflight.conflito && !(homeContestacao?.contestado && homeContestacao.justificativa.length >= 15)) {
+      await releaseSlot(analysisLockKey(tenantId), lockToken);
+      lockToken = null;
+      return res.status(409).json({
+        code: "CONFLITO_REFERENCIA",
+        error: `${preflight.conflito.descricao}. Corrija ou remova a referência residencial antes de iniciar a análise, ou declare o endereço do instrumento contestado com justificativa.`,
+        conflito: preflight.conflito,
+      });
+    }
+
     const debit = await prisma.$transaction(async (tx) => {
       const created = await tx.analysis.create({
         data: {
@@ -256,6 +278,7 @@ export async function analyzePdf(req, res) {
         homeAddress: home,
         homeCoord,
         homeContestacao,
+        preliminaryExtraction: preflight.extraction || undefined,
         filename: filename || null,
         creditoIsento,
       },
@@ -396,6 +419,7 @@ export async function correctAnalysisGeo(req, res) {
 
     // Substitui a residência pela coordenada confirmada e recalcula distâncias.
     result.home = {
+      ...result.home,
       query: result.home?.query || null,
       source: "Coordenada confirmada pelo operador",
       geo: {

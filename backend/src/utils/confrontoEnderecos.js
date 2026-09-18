@@ -30,7 +30,29 @@ const PARES = [
   { id: "laudo-x-instrumento", de: "laudo", para: "instrumento", rotulo: "Endereço informado no laudo × endereço do instrumento", papel: "instrumento" },
   { id: "ip-x-laudo", de: "ip", para: "laudo", rotulo: "IP do dossiê × endereço informado no laudo", papel: "laudo" },
   { id: "gps-x-ip", de: "gps", para: "ip", rotulo: "GPS da assinatura × IP do dossiê", papel: "gps" },
+  // D3 · confronto B: não depende da residência e usa só o próprio instrumento.
+  // Sobrevive à recusa da referência residencial, que é o ponto do defeito.
+  { id: "gps-x-emissao", de: "gps", para: "emissao", rotulo: "GPS da assinatura × município de emissão declarado no instrumento", papel: "gps" },
 ];
+
+/**
+ * Método da distância, declarado na saída.
+ *
+ * O resumo anterior estimou "cerca de 38 km a leste da sede de Manaquiri", de
+ * cabeça. Número sem origem não entra em laudo: ele sai do código, com a fórmula
+ * e a base de coordenadas declaradas ao lado, para que qualquer um refaça a
+ * conta. Foi esse tipo de número sem origem que produziu o problema do IMG3.
+ */
+export const METODO_DISTANCIA = {
+  formula: "Haversine sobre esfera de raio 6.371 km",
+  unidade: "km",
+};
+
+export function memoriaDoConfronto(metodo) {
+  if (!metodo) return null;
+  const ponto = (p) => `${p.rotulo || "ponto"} (${p.lat}, ${p.lon}); fonte: ${p.fonte || "não identificada no registro"}; precisão: ${p.precisao || "não informada"}`;
+  return `${metodo.formula}. Origem: ${ponto(metodo.de)}. Destino: ${ponto(metodo.para)}. Referências municipais e por IP são aproximadas e não demonstram a presença física do aparelho.`;
+}
 
 /** Abaixo de 100 m entre dois geocodificados, o número exato não tem sentido. */
 export function textoDistancia(km) {
@@ -49,6 +71,7 @@ export function montarConfrontoEnderecos(pontos = {}) {
     laudo: ponto(pontos.laudo),
     ip: ponto(pontos.ip),
     gps: ponto(pontos.gps),
+    emissao: ponto(pontos.emissao),
   };
 
   const pares = PARES.map((par) => {
@@ -56,6 +79,11 @@ export function montarConfrontoEnderecos(pontos = {}) {
     const b = p[par.para];
     const km = a && b ? haversineKm(a.lat, a.lon, b.lat, b.lon) : null;
     const precisoes = [a?.precisao, b?.precisao].filter(Boolean);
+    const metodo = km === null ? null : {
+      ...METODO_DISTANCIA,
+      de: { rotulo: a.rotulo || null, lat: a.lat, lon: a.lon, precisao: a.precisao || null, fonte: a.fonte || null },
+      para: { rotulo: b.rotulo || null, lat: b.lat, lon: b.lon, precisao: b.precisao || null, fonte: b.fonte || null },
+    };
     return {
       id: par.id,
       rotulo: par.rotulo,
@@ -65,6 +93,10 @@ export function montarConfrontoEnderecos(pontos = {}) {
       // Sem os dois pontos, o laudo diz qual falta, em vez de omitir o par.
       indisponivel: km === null ? [!a ? par.de : null, !b ? par.para : null].filter(Boolean) : null,
       precisao: precisoes.includes("municipio") ? "municipio" : precisoes.includes("ip") ? "ip" : precisoes[0] || null,
+      // A base de cada ponto viaja com a distância: quem confere o número sabe
+      // de onde saíram as duas coordenadas e por qual fórmula.
+      metodo,
+      memoria_calculo: memoriaDoConfronto(metodo),
     };
   });
 
@@ -76,6 +108,7 @@ const NOME_DO_PONTO = {
   laudo: "endereço informado na geração do laudo",
   ip: "endereço do IP do dossiê",
   gps: "GPS da assinatura",
+  emissao: "município de emissão declarado no instrumento",
 };
 
 /** "endereço do instrumento não localizado" para o par que não pôde ser medido. */

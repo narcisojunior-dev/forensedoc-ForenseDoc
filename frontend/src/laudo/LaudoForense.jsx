@@ -1,12 +1,13 @@
 import React from "react";
 import "./laudo.css";
 import {
-  classifyHashString, shortHash, nBR, formatCnpj, formatCpf, labelHashState, labelProvenance,
+  classifyHashString, shortHash, nBR, formatCnpj, formatCpf, labelHashState, labelProvenance, labelModalidade, formatMetadataWarning,
   noteForDeclaredHashState, reportIssues, issueBucket, extractCnjFromName, labelComparisonStatus,
   comparisonStatusColor, severityColor, haversineKm, riskFromDistance, riskFromDistanceWithHistory, semPontoFinal,
 } from "./laudoUtils.js";
 import SumarioIrregularidades from "./SumarioIrregularidades.jsx";
 import { distanciaKm } from "./distancia.js";
+import { fichaBeneficioSeAplica, marcarOrigem } from "./produto.js";
 
 /**
  * Laudo técnico pericial, portado do motor de geração.
@@ -271,12 +272,12 @@ function GeoMap({
 export default function LaudoForense({ report }) {
   return (
     <div className="fd-root fd-embutido">
-              <div id="fd-report" style={{ background: "var(--ink)", padding: "2px 0" }}>
+              <div id="fd-report" data-source-filename={report.file.name} style={{ background: "var(--ink)", padding: "2px 0" }}>
               {/* Report header */}
               <div className="card report-cover" style={{ textAlign: "center", borderColor: "rgba(79,195,232,0.3)", background: "linear-gradient(180deg, rgba(79,195,232,0.06), var(--panel))" }}>
                 <div className="eyebrow" style={{ fontSize: 11 }}>Laudo técnico pericial · Análise forense digital</div>
                 <div className="report-cover-title" style={{ fontFamily: "var(--display)", fontWeight: 700, fontSize: 22, color: "#fff", margin: "12px 0 8px", letterSpacing: "0.02em" }}>
-                  Contrato de Crédito Consignado
+                  {report.extracted.contrato?.produto || "Instrumento de crédito"}
                 </div>
                 <div className="cover-kicker">Exame automatizado de integridade, autoria e consistência documental</div>
                 <div className="cover-meta">
@@ -310,7 +311,7 @@ export default function LaudoForense({ report }) {
                   <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
                     <span style={{ color: "var(--ok)", fontSize: 18, lineHeight: 1.2 }}>✓</span>
                     <div>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ok)", marginBottom: 4 }}>OCR local aplicado</div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ok)", marginBottom: 4 }}>Nota de processamento</div>
                       <div style={{ fontSize: 13, color: "#bfe8d6", lineHeight: 1.6 }}>{report.processingNotice}</div>
                     </div>
                   </div>
@@ -474,7 +475,7 @@ export default function LaudoForense({ report }) {
                       <div className="sub-head">Achados da auditoria de metadados</div>
                       {report.metadata.warnings.map((warning, index) => (
                         <div key={index} className="flag" style={{ color: "#d9c79a", borderBottomColor: "rgba(242,176,61,0.18)" }}>
-                          <b style={{ color: "var(--warn)" }}>▸</b><span>{warning}</span>
+                          <b style={{ color: "var(--warn)" }}>▸</b><span>{formatMetadataWarning(warning)}</span>
                         </div>
                       ))}
                     </>
@@ -487,13 +488,14 @@ export default function LaudoForense({ report }) {
 
               {/* §2 */}
               <Section title="§ 2 · Dados do instrumento contratual">
+                {report.extracted.contrato?.condicoes_financeiras_nota && <div className="note">{report.extracted.contrato.condicoes_financeiras_nota}</div>}
                 {[
                   ["Número do contrato", report.extracted.contrato?.numero],
                   ["Banco / instituição financeira", report.extracted.contrato?.banco],
                   ["CNPJ da instituição", formatCnpj(report.extracted.contrato?.cnpj_instituicao)],
                   ["Código BACEN", report.extracted.contrato?.codigo_banco_bacen],
                   ["Produto", report.extracted.contrato?.produto],
-                  ["Modalidade", report.extracted.contrato?.modalidade],
+                  ["Modalidade", labelModalidade(report.extracted.contrato?.modalidade)],
                   ["Tipo de operação", report.extracted.contrato?.tipo_operacao],
                   ["Operação portada", report.extracted.contrato?.operacao_portada === true ? "Sim" : report.extracted.contrato?.operacao_portada === false ? "Não" : null],
                   ["Empregador declarado", report.extracted.contrato?.empregador ? `${report.extracted.contrato.empregador.literal}${report.extracted.contrato.empregador.identificado ? "" : " (sem razão social e sem CNPJ)"}` : null],
@@ -507,15 +509,23 @@ export default function LaudoForense({ report }) {
                   ["Valor de entrada", report.extracted.contrato?.valor_entrada],
                   ["Valor da parcela", report.extracted.contrato?.valor_parcela],
                   ["Quantidade de parcelas mensais", report.extracted.contrato?.parcelas_mensais || report.extracted.contrato?.numero_parcelas],
-                  ["Prazo da operação (dias)", report.extracted.contrato?.prazo_dias != null ? nBR(report.extracted.contrato.prazo_dias) : null],
-                  ["Prazo total declarado", report.extracted.contrato?.prazo_total_declarado ? `${report.extracted.contrato.prazo_total_declarado.quantidade} ${report.extracted.contrato.prazo_total_declarado.unidade}` : null],
+                  /* D6: a origem é impressa junto do valor. Guardar no JSON não
+                     basta: quem lê o laudo precisa saber o que o instrumento
+                     declarou e o que o sistema calculou. */
+                  [marcarOrigem("Prazo da operação (dias)", report.extracted.contrato?.prazo_dias_origem), report.extracted.contrato?.prazo_dias != null ? nBR(report.extracted.contrato.prazo_dias) : null],
+                  /* D4: a ficha publica o token completo, com a ressalva. */
+                  ["Prazo total declarado", report.extracted.contrato?.prazo_total_declarado
+                    ? (report.extracted.contrato.prazo_total_declarado.condicional
+                      ? `${report.extracted.contrato.prazo_total_declarado.texto} · declaração condicional`
+                      : `${report.extracted.contrato.prazo_total_declarado.quantidade} ${report.extracted.contrato.prazo_total_declarado.unidade}`)
+                    : null],
                   ["Prazo efetivo, da emissão ao último vencimento (dias)", report.extracted.contrato?.prazo_efetivo_dias != null ? nBR(report.extracted.contrato.prazo_efetivo_dias) : null],
-                  ["Prazo da operação (meses, aprox.)", report.extracted.contrato?.prazo_operacao_meses_aprox != null ? nBR(report.extracted.contrato.prazo_operacao_meses_aprox, 1) : null],
+                  [marcarOrigem("Prazo da operação (meses, aprox.)", report.extracted.contrato?.prazo_operacao_meses_aprox_origem), report.extracted.contrato?.prazo_operacao_meses_aprox != null ? nBR(report.extracted.contrato.prazo_operacao_meses_aprox, 1) : null],
                   ["Carência até o primeiro vencimento (dias)", report.extracted.contrato?.carencia_dias != null ? nBR(report.extracted.contrato.carencia_dias) : null],
                   ["Juros acumulados na carência", report.extracted.contrato?.juros_carencia],
                   ["Taxa de juros mensal", report.extracted.contrato?.taxa_juros_mensal],
                   ["Taxa de juros anual", report.extracted.contrato?.taxa_juros_anual],
-                  ["Taxa de juros anual calculada", report.extracted.contrato?.taxa_juros_anual_calculada],
+                  [marcarOrigem("Taxa de juros anual calculada", report.extracted.contrato?.taxa_juros_anual_calculada_origem), report.extracted.contrato?.taxa_juros_anual_calculada],
                   ["CET mensal", report.extracted.contrato?.cet_mensal],
                   ["CET anual", report.extracted.contrato?.cet_anual],
                   ["Somatório das parcelas", report.extracted.contrato?.valor_total_parcelas],
@@ -541,7 +551,7 @@ export default function LaudoForense({ report }) {
                       <>
                         {[
                           ["Prazo declarado", m.prazo_descricao
-                            ? `${m.prazo_descricao} · ${ok(m.prazo_confere) || "não aferido"}`
+                            ? `${m.prazo_descricao} · ${ok(m.prazo_confere) || (m.prazo_declarado_condicional ? "não aferido: campo condicional" : "não aferido")}`
                             : `${m.prazo_calculado_dias != null ? nBR(m.prazo_calculado_dias) : "n/i"} dias calculados${m.prazo_declarado_dias != null ? ` contra ${nBR(m.prazo_declarado_dias)} declarados` : ", prazo declarado não localizado"} · ${ok(m.prazo_confere) || "não aferido"}`],
                           ["Somatório das parcelas", `${m.somatorio_calculado || "n/i"} calculado${m.somatorio_declarado ? ` contra ${m.somatorio_declarado} declarado` : ""} · ${ok(m.somatorio_confere) || "não aferido"}`],
                           ["Composição do financiado", `${m.composicao_financiado_calculada || "n/i"} calculado${m.composicao_componentes?.length ? ` (${m.composicao_componentes.map((c) => `${c.rotulo} ${c.localizado ? c.valor : "não localizado"}`).join(" + ")})` : ""} · ${ok(m.composicao_confere) || "não aferido"}`],
@@ -663,9 +673,14 @@ export default function LaudoForense({ report }) {
                   ["Telefone", report.extracted.cliente?.telefone],
                   ["E-mail", comEstado("email", report.extracted.cliente?.email)],
                   ["Ocupação", estados.ocupacao?.estado === "LOCALIZADO_VAZIO" ? comEstado("ocupacao", null) : null],
-                  ["Matrícula INSS", report.extracted.cliente?.matricula_inss],
-                  ["Número do benefício", report.extracted.cliente?.numero_beneficio],
-                  ["Espécie do benefício", report.extracted.cliente?.especie_beneficio],
+                  /* D7: campos de benefício previdenciário não se imprimem em
+                     modalidade que não os comporta (ex.: consignado CLT). */
+                  ...(fichaBeneficioSeAplica(report.extracted.contrato?.produto_codigo) ? [
+                    ["Matrícula INSS", report.extracted.cliente?.matricula_inss],
+                    ["Número do benefício", report.extracted.cliente?.numero_beneficio],
+                    ["Espécie do benefício", report.extracted.cliente?.especie_beneficio],
+                  ] : []),
+
                   ["Banco de recebimento", report.extracted.cliente?.banco_recepcao],
                   ].map(([lbl, value]) => <Row key={lbl} label={lbl} value={value} />);
                 })()}
@@ -680,7 +695,10 @@ export default function LaudoForense({ report }) {
                   <>
                     <div className="sub-head">Verificação de endereços (confrontos dois a dois)</div>
                     {report.confrontoEnderecos.pares.map((par) => (
-                      <Row key={par.id} label={par.rotulo} value={par.texto || (par.indisponivel?.length ? "não aferido" : null)} />
+                      <div key={par.id}>
+                        <Row label={par.rotulo} value={par.texto || (par.indisponivel?.length ? "não aferido" : null)} />
+                        {par.memoria_calculo && <div className="note">{par.memoria_calculo}</div>}
+                      </div>
                     ))}
                     {report.confrontoEnderecos.pontos?.instrumento?.precisao === "municipio" && (
                       <div className="note">
@@ -832,9 +850,23 @@ export default function LaudoForense({ report }) {
                 {report.extracted.assinatura?.metodos_autenticacao?.length > 0 && (
                   <Row label="Métodos de autenticação registrados" value={report.extracted.assinatura.metodos_autenticacao.join(" · ")} />
                 )}
-                {report.extracted.assinatura?.metodos_mencionados_clausulado?.length > 0 && (
-                  <Row label="Métodos apenas mencionados no clausulado" value={report.extracted.assinatura.metodos_mencionados_clausulado.join(" · ")} />
-                )}
+                {report.extracted.assinatura?.metodos_descritos_no_fluxo?.length > 0 ? (
+                  <>
+                    <Row
+                      label="Métodos descritos no instrumento como etapa do fluxo"
+                      value={report.extracted.assinatura.metodos_descritos_no_fluxo.map((m) => m.rotulo).join(" · ")}
+                    />
+                    {report.extracted.assinatura.metodos_descritos_no_fluxo.map((m) => (
+                      <Row
+                        key={m.codigo}
+                        label={`Trecho que sustenta · ${m.codigo}${m.pagina ? ` · pág. ${m.pagina}` : ""}`}
+                        value={`"${m.trecho}"`}
+                      />
+                    ))}
+                  </>
+                ) : report.extracted.assinatura?.metodos_descritos_estado ? (
+                  <Row label="Métodos descritos no instrumento como etapa do fluxo" value="não localizado no material examinado" />
+                ) : null}
                 {report.extracted.assinatura?.hash_documento_assinado && (
                   <Row label="Hash do doc. assinado" value={report.extracted.assinatura.hash_documento_assinado} mono />
                 )}
@@ -1174,7 +1206,7 @@ export default function LaudoForense({ report }) {
 
               {/* §4.3 Trilha de eventos (formato dossiê de contratação) */}
               {report.extracted.trilha_eventos?.eventos?.length > 0 && (
-                <Section title="§ 4.3 · Trilha de eventos da contratação" danger={reportIssues(report.extracted).some((i) => /^TRL1|^TRL5/.test(i.codigo) && i.gravidade === "ALTA")}>
+                <Section title="§ 4.3 · Trilha de eventos da contratação" danger={reportIssues(report.extracted, report.sumarioIrregularidades?.projecao).some((i) => /^TRL1|^TRL5/.test(i.codigo) && i.gravidade === "ALTA")}>
                   {(() => {
                     const t = report.extracted.trilha_eventos;
                     return (
@@ -1474,10 +1506,10 @@ export default function LaudoForense({ report }) {
               )}
 
               {/* §8 */}
-              {reportIssues(report.extracted).length > 0 && (
-                <Section title="§ 8 · Achados técnicos e diligências" danger={reportIssues(report.extracted).some((issue) => issue.gravidade === "ALTA")}>
+              {reportIssues(report.extracted, report.sumarioIrregularidades?.projecao).length > 0 && (
+                <Section title="§ 8 · Achados técnicos e diligências" danger={reportIssues(report.extracted, report.sumarioIrregularidades?.projecao).some((issue) => issue.gravidade === "ALTA")}>
                   {(() => {
-                    const issues = reportIssues(report.extracted);
+                    const issues = reportIssues(report.extracted, report.sumarioIrregularidades?.projecao);
                     const groups = [
                       ["instrumento", "Inconsistências do instrumento"],
                       ["lacunas", "Lacunas probatórias a suprir pelo banco"],

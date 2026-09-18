@@ -60,6 +60,18 @@ const ROTULOS = {
  */
 export function classificarProduto(flat) {
   const texto = String(flat || "");
+  // Campos preenchidos da operação prevalecem sobre cláusulas genéricas de
+  // folha, FGTS ou rescisão que também constam em modelos usados pelo INSS.
+  const plano = texto.replace(/\s+/g, " ");
+  const fonteInss = /Nome\s+do\s+Empregador[^\n]{0,120}Consignante[\s\S]{0,150}?\bINSS\b/i.test(texto)
+    || /(?:Fonte\s+Pagadora|Nome\s+do\s+Empregador)[^\n]{0,150}\n[^\n]{0,100}\bINSS\b/i.test(texto)
+    || /CONV[EÊ]NIO:[^\n]{0,100}\([xX]\)\s*INSS/i.test(texto)
+    || /(?:Fonte\s+Pagadora(?:\s*\(Conv[eê]nio\))?(?:\s*\/\s*[ÓO]rg[ãa]o\s+pagador)?|Empregador\s*\(Nome\s+da\s+Fonte\s+Pagadora\))\s*:?\s*(?:CNPJ\/MF\s*)?(?:MFACIL\s+CONSIG\s+)?INSS\b/i.test(plano)
+    || /(?:Nome\s+do\s+Empregador[^\n]{0,100}\n)[^\n]{0,80}\bINSS\b/i.test(texto)
+    || /Ente\s+Consignante\)\s*:\s*INSTITUTO\s+NACIONAL\s+DO\s+SEGURO\s+SOCIAL/i.test(plano)
+    || /(?:Contrato\s+de\s+Empr[eé]stimo\s+Pessoal\s*-\s*Consignado\s*-\s*INSS|Consigna[cç][aã]o\s+e\/ou\s+Reten[cç][aã]o\s*-\s*INSS)/i.test(plano);
+  const fonteClt = /\bCONSIG\s+TRAB\b|\bCG[.\s]*CLTv?[\d.]+/i.test(plano);
+  if (fonteInss && !fonteClt) return {codigo:"CONSIGNADO_INSS", rotulo:ROTULOS.CONSIGNADO_INSS, marcadores:["fonte pagadora ou título do instrumento: INSS"], pontuacao:{CONSIGNADO_INSS:10}, confianca:"ALTA"};
   const pontuacao = {};
   const encontrados = {};
   for (const [codigo, lista] of Object.entries(MARCADORES)) {
@@ -73,6 +85,7 @@ export function classificarProduto(flat) {
     }
   }
 
+  if (!fonteClt && !/INSTITUI[ÇC][ÃA]O\s+CONSIGNANTE\s*\/\s*EMPREGADOR/i.test(plano)) pontuacao.CONSIGNADO_CLT = 0;
   const ordenados = Object.entries(pontuacao).sort((a, b) => b[1] - a[1]);
   const [primeiro, segundo] = ordenados;
   // Abaixo de 3 pontos não há marcador estrutural nenhum: melhor não classificar.
@@ -108,4 +121,37 @@ export function extrairEmpregador(texto) {
   const cnpj = bruto.match(/\b\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}\b/)?.[0] || null;
   const generico = !cnpj && (!nome || /^CONSIG(?:NADO)?\s+TRAB(?:ALHADOR)?$/i.test(nome) || nome.length < 6);
   return { literal: bruto, codigo, nome, cnpj, identificado: !generico };
+}
+
+/*
+ * ─── D7 · ficha de INSS impressa em contrato celetista ───────────────────────
+ *
+ * O § 3 do laudo FD-20260917 imprimiu "Matrícula INSS", "Número do benefício" e
+ * "Espécie do benefício", os três como não identificados, num contrato que o
+ * próprio § 2 classificou como consignado CLT e cujas condições gerais trazem o
+ * rodapé CG.CLTv1.20250420.
+ *
+ * Não muda conclusão nenhuma, e é por isso que incomoda: é o tipo de descuido
+ * que faz o juiz duvidar do cuidado do resto. Campo que não se aplica à
+ * modalidade não é impresso como "não identificado", porque isso afirma uma
+ * lacuna onde não há campo a preencher.
+ */
+
+/** Modalidades em que os campos de benefício previdenciário fazem sentido. */
+const MODALIDADES_COM_BENEFICIO = new Set(["CONSIGNADO_INSS"]);
+
+/**
+ * A ficha de benefício previdenciário se aplica a esta modalidade?
+ *
+ * Modalidade indeterminada mantém os campos: na dúvida, o laudo mostra o que
+ * leu. A supressão vale para a modalidade afirmada que os exclui.
+ *
+ * @param {string|null|undefined} produtoCodigo `contrato.produto_codigo`
+ * @returns {boolean}
+ */
+export function fichaBeneficioSeAplica(produtoCodigo) {
+  const codigo = String(produtoCodigo || "").toUpperCase();
+  if (!codigo || codigo === "INDETERMINADO") return true;
+  if (!(codigo in ROTULOS)) return true;
+  return MODALIDADES_COM_BENEFICIO.has(codigo);
 }

@@ -37,9 +37,41 @@ export function limiarConflitoKm() {
 
 /** UF escrita num endereço livre ("..., Pedro II - PI - 64255-000"). */
 export function ufDoTexto(texto) {
-  const tokens = String(texto || "").toUpperCase().match(/(?:^|[\s,\-\/])([A-Z]{2})(?=$|[\s,\-\/.])/g) || [];
-  const ufs = tokens.map((t) => t.replace(/[\s,\-\/]/g, "")).filter((t) => UFS.includes(t));
-  return ufs.at(-1) || null;
+  const { ufCandidata } = camposDaReferencia(texto);
+  return UFS.includes(ufCandidata) ? ufCandidata : null;
+}
+
+/** Só interpreta UF/CEP em posição de campo, nunca palavras do logradouro. */
+export function camposDaReferencia(endereco) {
+  const texto = String(endereco || "").trim();
+  const cepRotulado = texto.match(/\bCEP\s*[:=]?\s*([\d.\-]+)\b/i);
+  const cepFinal = texto.match(/(?:^|[,;\s])((?:\d{5}|\d{2}\.\d{3})-\d+|\d{6,})\s*$/);
+  const cepCandidato = cepRotulado?.[1] || cepFinal?.[1] || null;
+  const semCep = texto.replace(/\bCEP\s*[:=]?\s*[\d.\-]*\s*$/i, "")
+    .replace(/(?:[,;\s])(?:\d{5}|\d{2}\.\d{3})-\d+\s*$/, "")
+    .replace(/(?:[,;\s])\d{6,}\s*$/, "").replace(/[,;\s–-]+$/, "");
+  const ufRotulada = texto.match(/\bUF\s*[:=]?\s*([A-Za-z]{2})\b/i);
+  const ufFinal = semCep.match(/(?:[,;\/–-]\s*)([A-Za-z]{2})\.?$/);
+  // Formato sem vírgula: só aceita uma UF conhecida, sem presumir que "II"
+  // em "Pedro II" ou "Av" no logradouro seja um campo de estado inválido.
+  const ufConhecida = semCep.match(/\s+([A-Za-z]{2})\.?$/)?.[1]?.toUpperCase();
+  const ufCandidata = (ufRotulada?.[1] || ufFinal?.[1] || (UFS.includes(ufConhecida) ? ufConhecida : "")).toUpperCase() || null;
+  return { ufCandidata, cepCandidato, temRotuloCep: /\bCEP\b/i.test(texto), cep: cepCandidato?.replace(/\D/g, "") || null };
+}
+
+/** Comparação local, antes de perícia, consultas externas e débito de crédito. */
+export function compararReferenciaComInstrumento(cliente = {}, enderecoManual) {
+  const campos = camposDaReferencia(enderecoManual);
+  const instrumento = { cidade: cliente.cidade || null, uf: cliente.estado?.toUpperCase() || null, cep: cliente.cep || null };
+  const manual = { uf: ufDoTexto(enderecoManual), texto: enderecoManual || null, cep: campos.cep };
+  if (manual.uf && instrumento.uf && manual.uf !== instrumento.uf) {
+    return { motivo: "UF", manual, instrumento, km: null, descricao: `conflito entre endereço informado (${manual.uf}) e endereço extraído do instrumento (${instrumento.uf})` };
+  }
+  const cepInstrumento = String(instrumento.cep || "").replace(/\D/g, "");
+  if (campos.cep?.length === 8 && cepInstrumento.length === 8 && campos.cep !== cepInstrumento) {
+    return { motivo: "CEP", manual, instrumento, km: null, descricao: `CEP informado (${campos.cep}) diferente do CEP extraído do instrumento (${cepInstrumento}); confira qual referência deve ser usada` };
+  }
+  return null;
 }
 
 /** Uma linha legível para cidade/UF. */
@@ -57,6 +89,8 @@ function lugar({ cidade, uf }) {
  * @returns {Promise<object|null>} conflito, ou null quando compatível ou não verificável
  */
 export async function avaliarConflitoReferencia({ cliente = {}, enderecoManual, pontoManual, geoManual = null, servicos }) {
+  const preliminar = compararReferenciaComInstrumento(cliente, enderecoManual);
+  if (preliminar) return preliminar;
   const instrumento = {
     cidade: cliente.cidade || null,
     uf: cliente.estado ? String(cliente.estado).toUpperCase() : null,
@@ -130,4 +164,57 @@ export function descreverEstadoConfronto(home) {
     default:
       return null;
   }
+}
+
+/*
+ * ─── D3 · validação da referência informada, na entrada ──────────────────────
+ *
+ * O dossiê C6 foi processado inteiro e só então o confronto foi recusado, porque
+ * o operador digitou o endereço do escritório (Pedro II/PI) no campo da
+ * residência. O custo de descobrir tarde é a seção inteira mais o tempo de
+ * execução.
+ *
+ * A validação se divide em duas, porque as duas coisas são verificáveis em
+ * momentos diferentes:
+ *
+ *   1. FORMA, aqui: a UF escrita existe? o CEP tem oito dígitos? Isso não
+ *      depende do instrumento e roda na entrada, antes de debitar crédito.
+ *   2. CONFLITO com o instrumento: depende da UF extraída do PDF, e por isso
+ *      não pode acontecer antes de abrir o arquivo. Roda antes do
+ *      enriquecimento, em `avaliarConflitoReferencia`.
+ *
+ * Confundir as duas foi o que levou a ordem a pedir "validação na entrada" para
+ * algo que precisa do documento aberto. O que dá para antecipar, antecipa-se.
+ */
+
+/**
+ * Confere a forma da referência informada pelo operador.
+ *
+ * @param {string} enderecoManual texto digitado
+ * @returns {{ok: true}|{ok: false, code: string, error: string}}
+ */
+export function validarFormaDaReferencia(enderecoManual) {
+  const texto = String(enderecoManual || "").trim();
+  if (!texto) return { ok: true };
+
+  // Sigla de dois caracteres que não é UF: quase sempre erro de digitação, e o
+  // confronto inteiro depende dela.
+  const { ufCandidata, cepCandidato, cep, temRotuloCep } = camposDaReferencia(texto);
+  if (ufCandidata && !UFS.includes(ufCandidata)) {
+    return {
+      ok: false,
+      code: "UF_INVALIDA",
+      error: `A referência informada traz "${ufCandidata}" no campo de estado, e essa sigla não corresponde a nenhuma UF. Corrija o endereço antes de enviar.`,
+    };
+  }
+
+  if ((cepCandidato || temRotuloCep) && cep?.length !== 8) {
+    return {
+      ok: false,
+      code: "CEP_INVALIDO",
+      error: `O CEP informado${cepCandidato ? ` (${cepCandidato})` : ""} deve ter oito dígitos (formato 00000-000). Corrija ou remova o campo antes de enviar.`,
+    };
+  }
+
+  return { ok: true };
 }

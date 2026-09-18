@@ -73,10 +73,11 @@ export function pontosDoConfronto(result) {
     : result.home?.referencia_informada_geo || null;
   return {
     instrumento: result.home?.instrumento_geo || null,
+    emissao: result.home?.emissao_geo || null,
     laudo,
-    ip: ip ? { lat: ip.geo.lat, lon: ip.geo.lon, rotulo: [ip.geo.city, ip.geo.region].filter(Boolean).join("/") || ip.endereco, precisao: "ip" } : null,
+    ip: ip ? { lat: ip.geo.lat, lon: ip.geo.lon, rotulo: [ip.geo.city, ip.geo.region].filter(Boolean).join("/") || ip.endereco, precisao: "ip", fonte: ip.geo.source || null } : null,
     gps: result.contractGeo && Number.isFinite(result.contractGeo.lat)
-      ? { lat: result.contractGeo.lat, lon: result.contractGeo.lon, rotulo: result.contractGeo.municipio || "coordenada do log", precisao: "gps" }
+      ? { lat: result.contractGeo.lat, lon: result.contractGeo.lon, rotulo: result.contractGeo.municipio || "coordenada do log", precisao: result.contractGeo.precision || "gps", fonte: result.contractGeo.fonte || result.contractGeo.source || "coordenada declarada no documento" }
       : null,
   };
 }

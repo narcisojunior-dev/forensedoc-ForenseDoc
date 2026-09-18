@@ -69,7 +69,38 @@ export function extrairPlanilhaCalculo(texto) {
 
   const parcelas = t.match(/N[ºo°][ \t]*de[ \t]+Parcelas(?:[ \t]*\(mensais\))?[ \t]*:?[ \t]*(\d{1,3})\b/i)?.[1] || null;
   const vencimentos = t.match(/Venc\.?[ \t]*1[ªa][ \t]*e[ \t]*[ÚU]ltima[ \t]+Parcela[ \t]*:?[ \t]*(\d{2}\/\d{2}\/\d{4})[ \t]*-[ \t]*(\d{2}\/\d{2}\/\d{4})/i);
-  const prazo = t.match(/Prazo[ \t]+Total[ \t]*:?[ \t]*(\d{1,4})[ \t]*(meses|m[eê]s|dias)/i);
+  /*
+   * ─── D4 · prazo com ressalva escrita no mesmo campo ──────────────────────────
+   *
+   * O item 5.1 da CCB do dossiê C6 escreve o campo assim:
+   *
+   *     "Prazo Total: 6 meses ou até o pagamento da última parcela, o que
+   *      acontecer por último"
+   *
+   * O padrão anterior terminava em `(meses|mês|dias)` e `prazo[0]` parava ali.
+   * A ressalva, que está DENTRO do mesmo campo que o laudo leu, caía fora do
+   * match antes de qualquer comparação, e a camada matemática recebia "6 meses"
+   * como prazo fechado. O laudo então marcou "Diverge" contra um campo que nunca
+   * afirmou prazo fechado.
+   *
+   * A extração passa a resolver o token completo antes de a camada matemática
+   * comparar: o número, a unidade e o resto da cláusula até o fim da linha.
+   */
+  const prazo = t.match(/Prazo[ \t]+Total[ \t]*:?[ \t]*(\d{1,4})[ \t]*(meses|m[eê]s|dias)([^\n]*)/i);
+  // A planilha é de duas colunas e o campo continua ALGUMAS LINHAS ABAIXO, na
+  // mesma coluna, com linhas da outra coluna interleavadas no meio:
+  //
+  //     ...                                  Prazo Total:6 meses ou até o pagamento da última parcela, o
+  //     IOF (Financiado)   R$ 36,07   1,77%
+  //                                          que acontecer por último.
+  //
+  // Parar na quebra de linha cortava a ressalva ao meio. A continuação é
+  // reconhecida pelo alinhamento: mesma coluna do rótulo, e nunca uma linha que
+  // comece na coluna zero, que pertence à outra coluna do quadro.
+  const ressalva = prazo ? continuarNaMesmaColuna(t, prazo) : "";
+  // "ou até...", "o que ocorrer por último", "prorrogável", "no mínimo": o campo
+  // condiciona o próprio prazo e não declara um valor fechado.
+  const temExtensao = /\bou\s+at[ée]\b|o\s+que\s+(?:acontecer|ocorrer|vier)\s+por\s+[úu]ltimo|prorrog|renov|no\s+m[íi]nimo|at[ée]\s+o\s+pagamento/i.test(ressalva);
 
   return {
     componentes,
@@ -78,7 +109,64 @@ export function extrairPlanilhaCalculo(texto) {
     data_primeiro_vencimento: vencimentos?.[1] || null,
     data_ultimo_vencimento: vencimentos?.[2] || null,
     prazo_total_declarado: prazo
-      ? { quantidade: Number(prazo[1]), unidade: /dia/i.test(prazo[2]) ? "dias" : "meses", texto: prazo[0].replace(/\s+/g, " ").trim() }
+      ? {
+        quantidade: Number(prazo[1]),
+        unidade: /dia/i.test(prazo[2]) ? "dias" : "meses",
+        // O campo como o documento o escreve, com a continuação da outra linha:
+        // é este texto que a ficha do laudo publica, e cortá-lo aqui repetiria
+        // na apresentação o corte que o comparador fazia.
+        // Rótulo, número e unidade, mais a ressalva completa. `prazo[0]` já
+        // contém o começo da ressalva, então ele é cortado no fim da unidade
+        // para não duplicá-la.
+        texto: `${prazo[0].slice(0, prazo[0].length - (prazo[3] || "").length)} ${ressalva}`
+          .replace(/\s+/g, " ")
+          .trim(),
+        // O token completo, com a ressalva, e o que ela significa para a
+        // comparação. Quem compara precisa saber que o campo é condicional.
+        ressalva: ressalva || null,
+        condicional: temExtensao,
+      }
       : null,
   };
+}
+
+
+/** Tolerância de recuo, em caracteres, para reconhecer a mesma coluna. */
+const TOLERANCIA_COLUNA = 12;
+/** Quantas linhas abaixo ainda podem conter a continuação do campo. */
+const LINHAS_DE_CONTINUACAO = 4;
+
+/**
+ * Continuação de um campo em planilha de duas colunas.
+ *
+ * @param {string} texto texto completo
+ * @param {RegExpMatchArray} match match do campo, com `index`
+ * @returns {string} a ressalva completa, incluindo o que estava na primeira linha
+ */
+function continuarNaMesmaColuna(texto, match) {
+  const inicioDaLinha = texto.lastIndexOf("\n", match.index) + 1;
+  const coluna = match.index - inicioDaLinha;
+  let acumulado = (match[3] || "").trim();
+
+  // Nada após a unidade: o campo é só "6 meses" e está completo. Procurar
+  // continuação aqui capturaria uma linha alheia que por acaso esteja alinhada.
+  if (!acumulado) return "";
+  // Ponto final na própria linha: o campo terminou ali.
+  if (/[.;]$/.test(acumulado)) return acumulado;
+
+  const restante = texto.slice(texto.indexOf("\n", match.index) + 1).split("\n");
+  for (const linha of restante.slice(0, LINHAS_DE_CONTINUACAO)) {
+    const recuo = linha.length - linha.trimStart().length;
+    const conteudo = linha.trim();
+    if (!conteudo) continue;
+    // Linha da outra coluna do quadro: recuo menor que o do rótulo.
+    if (recuo < coluna - TOLERANCIA_COLUNA) continue;
+    // Rótulo novo com valor monetário ou percentual não é continuação de frase.
+    if (/R\$\s*[\d.]+,\d{2}|\d+,\d{2}\s*%/.test(conteudo)) continue;
+    // Um novo campo rotulado encerra o anterior.
+    if (/^[A-ZÀ-Ý][^:]{2,40}:/.test(conteudo)) break;
+    acumulado = `${acumulado} ${conteudo}`.replace(/\s+/g, " ").trim();
+    if (/[.;]$/.test(acumulado)) break;
+  }
+  return acumulado;
 }

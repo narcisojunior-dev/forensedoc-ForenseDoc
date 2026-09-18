@@ -21,7 +21,7 @@
   "afericao_matematica.cet_implicito_veredito": "Confere",
   "afericao_matematica.cet_anual_confere": true,
   "afericao_matematica.prazo_calculado_dias": 249,
-  "afericao_matematica.prazo_confere": false,
+  "afericao_matematica.prazo_confere": null,
   "assinatura.hash_documento_assinado": null,
   "assinatura.codigo_autenticacao_declarado": "3b9e2c1a-7d4f-4e8a-9c21-5f6d7e8a9b0c",
   "assinatura.biometria_registrada_como_evento": true,

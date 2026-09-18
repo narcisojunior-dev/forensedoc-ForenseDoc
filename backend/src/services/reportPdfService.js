@@ -15,6 +15,7 @@ import { calculateForensicScore } from "../utils/forensicScore.js";
 import { generateJudicialQuesitos } from "../reports/quesitosTemplate.js";
 import { montarConfrontoGeografico } from "../utils/distancia.js";
 import { descreverIndisponibilidade } from "../utils/confrontoEnderecos.js";
+import { fichaBeneficioSeAplica } from "../engine/produto.js";
 
 // Paleta sóbria para peça processual (impressão em preto e branco continua legível).
 const INK = "#1a1a1a";
@@ -24,6 +25,18 @@ const DANGER = "#b91c1c";
 const RULE = "#d4d4d8";
 
 const MARGIN = 50;
+// O rodapé é escrito a partir de `page.height - 45`. Uma margem inferior de
+// 70pt deixava 25pt de faixa morta em toda página do laudo; 58pt encostam o
+// texto do corpo 13pt acima da linha do SHA-256, sem invadi-la.
+const MARGIN_BOTTOM = 58;
+// Largura do mapa estático como fração da coluna de texto. A imagem vem em
+// 780x460, e à largura cheia ocupava 292pt (40% da altura útil): não cabendo
+// no resto da página, ela empurrava tudo e abria um vazio do mesmo tamanho.
+const MAP_WIDTH_RATIO = 0.78;
+// Redução máxima tolerada para encaixar o mapa no que resta da página. Abaixo de
+// 75% os rótulos de município da base cartográfica deixam de ser legíveis em
+// impressão, e aí compensa mais jogar a figura para a folha seguinte.
+const MAP_MIN_SCALE = 0.75;
 
 /**
  * Gera o laudo pericial em PDF a partir do `result` persistido de uma análise.
@@ -50,7 +63,7 @@ export async function buildReportPdf(analysis, result) {
 
   const doc = new PDFDocument({
     size: "A4",
-    margins: { top: MARGIN, bottom: 70, left: MARGIN, right: MARGIN },
+    margins: { top: MARGIN, bottom: MARGIN_BOTTOM, left: MARGIN, right: MARGIN },
     bufferPages: true, // necessário para numerar o rodapé no fim
     info: {
       Title: `Laudo ForenseDoc ${analysis.id.slice(0, 8)}`,
@@ -81,7 +94,7 @@ export async function buildReportPdf(analysis, result) {
   sectionEventTrail(ctx, extracted);
   sectionBiometricArtifact(ctx, extracted);
   sectionGeo(ctx, result, { mapaIpResidencia, mapaResidenciaDeclarado, mapaDeclaradoIp });
-  sectionIrregularities(ctx, extracted);
+  sectionIrregularities(ctx, extracted, result.sumarioIrregularidades?.projecao);
   sectionProcessComparison(ctx, result.processComparison);
   sectionRemarks(ctx, extracted);
   sectionQuesitos(ctx, extracted, result);
@@ -112,8 +125,8 @@ function safeParse(raw) {
 /** Subtítulo de subseção (§ 4.1), sem a régua do heading principal. */
 function subheading(ctx, title) {
   const { doc, contentWidth } = ctx;
-  if (doc.y > doc.page.height - 160) doc.addPage();
-  doc.moveDown(0.4);
+  reserve(ctx, 54); // título da subseção + duas linhas do que vem abaixo
+  doc.moveDown(0.3);
   doc
     .fontSize(10.5)
     .fillColor(INK)
@@ -124,8 +137,8 @@ function subheading(ctx, title) {
 
 function heading(ctx, title, { danger = false } = {}) {
   const { doc, contentWidth } = ctx;
-  if (doc.y > doc.page.height - 140) doc.addPage();
-  doc.moveDown(0.8);
+  reserve(ctx, 62); // título + régua + duas linhas, para o heading não ficar órfão
+  doc.moveDown(0.6);
   doc
     .fontSize(12)
     .fillColor(danger ? DANGER : ACCENT)
@@ -146,7 +159,7 @@ function heading(ctx, title, { danger = false } = {}) {
 function field(ctx, label, value, { mono = false } = {}) {
   if (value === null || value === undefined || value === "") return;
   const { doc, contentWidth } = ctx;
-  if (doc.y > doc.page.height - 90) doc.addPage();
+  reserve(ctx, 16); // uma linha
   doc
     .fontSize(9.5)
     .font("Helvetica")
@@ -160,13 +173,15 @@ function field(ctx, label, value, { mono = false } = {}) {
 
 function paragraph(ctx, text, { color = INK, size = 9.5, italic = false } = {}) {
   const { doc, contentWidth } = ctx;
-  if (doc.y > doc.page.height - 120) doc.addPage();
+  // O PDFKit já quebra o parágrafo sozinho no meio; a guarda só evita começar um
+  // com menos de duas linhas de espaço, o que deixaria uma viúva no pé.
+  reserve(ctx, 30);
   doc
     .fontSize(size)
     .font(italic ? "Helvetica-Oblique" : "Helvetica")
     .fillColor(color)
     .text(text, MARGIN, doc.y, { width: contentWidth, align: "justify", lineGap: 1.5 });
-  doc.moveDown(0.5);
+  doc.moveDown(0.35);
 }
 
 /**
@@ -177,14 +192,32 @@ function paragraph(ctx, text, { color = INK, size = 9.5, italic = false } = {}) 
  * páginas diferentes: o § 5.2 saía com o rótulo COMPATÍVEL no pé de uma página e
  * "O documento situa a assinatura praticamente no mesmo local" solto no topo da
  * seguinte, sem o número a que se referia.
+ *
+ * `pontos` é a altura REAL do bloco. A formulação anterior (`y > page.height -
+ * pontos`) embutia a margem inferior no número, então cada guarda descartava
+ * silenciosamente uma margem a mais de página: as reservas de 170pt protegiam
+ * 100pt de texto e jogavam fora os outros 70.
  */
 function reserve(ctx, pontos) {
-  if (ctx.doc.y > ctx.doc.page.height - pontos) ctx.doc.addPage();
+  const { doc } = ctx;
+  // Invariante que fecha a classe inteira do defeito: quebrar a página quando
+  // ela ainda está intacta produz, por definição, uma folha em branco. Acontecia
+  // com qualquer bloco mais alto do que a área útil — a guarda disparava, abria
+  // a página, disparava de novo no topo e assim por diante. Aqui o bloco maior
+  // que a folha simplesmente começa no topo e transborda como o PDFKit já sabe
+  // tratar, em vez de empurrar uma página vazia à frente dele.
+  if (doc.y <= doc.page.margins.top + 1) return;
+  if (espacoLivre(doc) < pontos) doc.addPage();
+}
+
+/** Pontos de altura ainda utilizáveis na página corrente, já fora da margem. */
+function espacoLivre(doc) {
+  return doc.page.height - doc.page.margins.bottom - doc.y;
 }
 
 function badge(ctx, label, value, ok) {
   const { doc, contentWidth } = ctx;
-  if (doc.y > doc.page.height - 90) doc.addPage();
+  reserve(ctx, 16);
   doc
     .fontSize(9.5)
     .font("Helvetica")
@@ -377,10 +410,11 @@ function sectionMetadata(ctx, metadata) {
 function sectionContract(ctx, extracted) {
   const c = extracted.contrato || {};
   heading(ctx, "§ 2 · Dados do instrumento contratual");
+  if (c.condicoes_financeiras_nota) paragraph(ctx, c.condicoes_financeiras_nota, { color: DANGER, size: 8.5 });
   field(ctx, "Número do contrato", c.numero);
   field(ctx, "Banco / instituição", c.banco);
   field(ctx, "Produto", c.produto);
-  field(ctx, "Modalidade", c.modalidade);
+  field(ctx, "Modalidade", ({COMPRA_CARTAO: "Compra com cartão", SAQUE_CARTAO_CONSIGNADO: "Saque parcelado do cartão consignado", CDC_COM_GARANTIA: "Crédito direto ao consumidor com garantia", CREDITO_PESSOA_JURIDICA: "Crédito para pessoa jurídica"})[c.modalidade] || c.modalidade);
   if (c.empregador) field(ctx, "Empregador declarado", `${c.empregador.literal}${c.empregador.identificado ? "" : " (sem razão social e sem CNPJ)"}`);
   field(ctx, "Valor contratado", c.valor_contratado);
   field(ctx, "Valor da parcela", c.valor_parcela);
@@ -410,7 +444,11 @@ function sectionClient(ctx, extracted) {
   field(ctx, "Cidade / Estado", [c.cidade, c.estado].filter(Boolean).join(" / "));
   field(ctx, "CEP", c.cep);
   field(ctx, "Telefone", c.telefone);
-  field(ctx, "Número do benefício", c.numero_beneficio);
+  // D7: campo de benefício previdenciário não se imprime em modalidade que não
+  // o comporta. "Não identificado" ali afirma lacuna onde não há campo.
+  if (fichaBeneficioSeAplica(extracted.contrato?.produto_codigo)) {
+    field(ctx, "Número do benefício", c.numero_beneficio);
+  }
 }
 
 function sectionSignature(ctx, extracted, result = {}) {
@@ -424,7 +462,14 @@ function sectionSignature(ctx, extracted, result = {}) {
   field(ctx, "Data / hora da assinatura", a.data_hora_assinatura);
   field(ctx, "Algoritmo de hash", a.algoritmo_hash);
   if (a.metodos_autenticacao?.length) field(ctx, "Métodos de autenticação", a.metodos_autenticacao.join(" · "));
-  if (a.metodos_mencionados_clausulado?.length) field(ctx, "Métodos apenas mencionados no clausulado", a.metodos_mencionados_clausulado.join(" · "));
+  if (a.metodos_descritos_no_fluxo?.length) {
+    field(ctx, "Métodos descritos no instrumento como etapa do fluxo", a.metodos_descritos_no_fluxo.map((m) => m.rotulo).join(" · "));
+    for (const metodo of a.metodos_descritos_no_fluxo) {
+      paragraph(ctx, `${metodo.rotulo}${metodo.pagina ? ` (pág. ${metodo.pagina})` : ""}: "${metodo.trecho}"`, { color: MUTED, size: 8 });
+    }
+  } else if (a.metodos_descritos_estado) {
+    field(ctx, "Métodos descritos no instrumento como etapa do fluxo", "não localizado no material examinado");
+  }
   if (a.mencao_textual) field(ctx, "Menção textual de assinatura", `${a.mencao_textual}${a.mencao_textual_documento ? ` (${a.mencao_textual_documento})` : ""}`);
   if (a.blocos_por_documento) paragraph(ctx, `Blocos de assinatura por documento: ${a.blocos_por_documento}.`, { size: 8.5 });
   if (Number.isFinite(a.blocos_assinatura_total)) field(ctx, "Blocos de assinatura em documentos negociais", a.blocos_assinatura_total);
@@ -470,7 +515,7 @@ function sectionCustodyChain(ctx, extracted, ipAnalysis = [], geoPresente = fals
 
   doc.moveDown(0.3);
   for (const e of cadeia.elementos) {
-    if (doc.y + 68 > doc.page.height - 80) doc.addPage();
+    reserve(ctx, 68);
 
     const cor = e.presente ? ACCENT : DANGER;
     doc
@@ -530,11 +575,41 @@ function precisionText(geoLike) {
 // legenda. Quebra de página se não couber no espaço restante.
 function drawMap(ctx, mapBuffer, legenda) {
   const { doc, contentWidth } = ctx;
-  const imgH = contentWidth * (460 / 780); // mesma proporção da imagem buscada
-  if (doc.y + imgH + 52 > doc.page.height - 60) doc.addPage();
-  doc.moveDown(0.4);
+
+  // A imagem é aberta ANTES de qualquer reserva. Reservar primeiro e só então
+  // descobrir que o PDFKit não decodifica o buffer deixava para trás a página
+  // que a reserva tinha acabado de abrir — em branco, porque o `return` do
+  // catch saía sem desenhar nada nela.
+  let imagem;
   try {
-    doc.image(mapBuffer, MARGIN, doc.y, { width: contentWidth });
+    imagem = doc.openImage(mapBuffer);
+  } catch (err) {
+    console.error("[ReportPdf] Falha ao abrir mapa:", err.message);
+    return;
+  }
+
+  const larguraNominal = contentWidth * MAP_WIDTH_RATIO;
+  const alturaNominal = larguraNominal * (imagem.height / imagem.width);
+  const alturaLegenda = 34;
+
+  // Figura não se parte entre páginas, mas encolhe. Empurrar a folha inteira por
+  // causa de uma sobra de poucos centímetros era o que abria os vazios grandes
+  // no pé da página: até MAP_MIN_SCALE ela cabe onde está, e só abaixo disso vai
+  // para a página seguinte.
+  const escalaQueCabe = () => Math.min(1, (espacoLivre(doc) - alturaLegenda) / alturaNominal);
+  let escala = escalaQueCabe();
+  if (escala < MAP_MIN_SCALE) {
+    reserve(ctx, alturaNominal + alturaLegenda);
+    escala = escalaQueCabe();
+  }
+  if (!(escala > 0)) return;
+
+  const imgW = larguraNominal * escala;
+  const imgH = alturaNominal * escala;
+  const imgX = MARGIN + (contentWidth - imgW) / 2;
+  doc.moveDown(0.3);
+  try {
+    doc.image(mapBuffer, imgX, doc.y, { width: imgW });
     doc.y += imgH + 4;
   } catch (err) {
     console.error("[ReportPdf] Falha ao embutir mapa:", err.message);
@@ -545,14 +620,14 @@ function drawMap(ctx, mapBuffer, legenda) {
     .font("Helvetica-Oblique")
     .fillColor(MUTED)
     .text(legenda, MARGIN, doc.y, { width: contentWidth, align: "center" });
-  doc.moveDown(0.4);
+  doc.moveDown(0.6); // a legenda não pode encostar no título que vier a seguir
 }
 
 function sectionGeo(ctx, result, mapas = {}) {
   // O § 5 abre sempre com o parágrafo de enquadramento e o bloco de referência.
-  // O guarda padrão do `heading` (140pt) deixava o título e a introdução órfãos
-  // no pé da página, com o resto da seção começando só na página seguinte.
-  if (ctx.doc.y > ctx.doc.page.height - 300) ctx.doc.addPage();
+  // A guarda padrão do `heading` deixava o título e a introdução órfãos no pé da
+  // página, com o resto da seção começando só na seguinte.
+  reserve(ctx, 200);
 
   heading(ctx, "§ 5 · Geolocalização da assinatura · confronto geográfico");
 
@@ -587,6 +662,7 @@ function sectionGeo(ctx, result, mapas = {}) {
     subheading(ctx, "Verificação de endereços · confrontos dois a dois");
     for (const par of paresEndereco) {
       field(ctx, par.rotulo, par.texto || (par.indisponivel?.length ? `não aferido (${descreverIndisponibilidade(par)})` : null));
+      if (par.memoria_calculo) paragraph(ctx, par.memoria_calculo, { color: MUTED, size: 8 });
     }
     if (result.confronto_enderecos?.pontos?.instrumento?.precisao === "municipio") {
       paragraph(
@@ -656,7 +732,7 @@ function sectionGeo(ctx, result, mapas = {}) {
     );
     const d = ipRef.divergenciaResidencia;
     if (d) {
-      reserve(ctx, 170); // mesmo motivo do § 5.2: veredito e síntese juntos
+      reserve(ctx, 105); // mesmo motivo do § 5.2: veredito e síntese juntos
       badge(ctx, "Distância entre a origem do IP e a residência", `${d.km.toFixed(2)} km · ${d.rotulo}`, d.tom === "ok");
       paragraph(ctx, d.sintese, { size: 9, color: d.tom === "danger" ? DANGER : INK });
     } else if (!home) {
@@ -700,7 +776,7 @@ function sectionGeo(ctx, result, mapas = {}) {
     // logo abaixo do parágrafo que afirma o contrário — ver geoDivergence.js.
     if (declarado) {
       // Veredito + síntese + eventual ressalva formam um bloco só.
-      reserve(ctx, 170);
+      reserve(ctx, 120);
       badge(
         ctx,
         "Distância entre o local declarado e a residência",
@@ -740,7 +816,7 @@ function sectionGeo(ctx, result, mapas = {}) {
     );
   } else if (ipAssinatura) {
     const da = ipAssinatura.divergenciaAssinatura;
-    reserve(ctx, 170);
+    reserve(ctx, 105);
     field(ctx, "Endereço IP", ipAssinatura.endereco, { mono: true });
     badge(ctx, "Distância entre a geolocalização declarada e a origem do IP", `${da.km.toFixed(2)} km · ${da.rotulo}`, da.tom === "ok");
     paragraph(ctx, da.sintese, { size: 9, color: da.tom === "danger" ? DANGER : INK });
@@ -823,7 +899,7 @@ function sectionIpTrace(ctx, result) {
   );
 
   for (const ip of ips) {
-    if (doc.y + 110 > doc.page.height - 80) doc.addPage();
+    reserve(ctx, 110);
     doc.moveDown(0.35);
 
     // Cabeçalho do IP: endereço + como o documento o registrou.
@@ -935,15 +1011,27 @@ function sectionIpTrace(ctx, result) {
  * conclusão pericial; omitir a seção deixa o leitor sem saber se o exame foi
  * feito.
  */
-function sectionIrregularities(ctx, extracted) {
-  const evs = extracted.evidencias_irregularidade || [];
-  const achados = Array.isArray(extracted.achados_irregularidade) ? extracted.achados_irregularidade : [];
+function sectionIrregularities(ctx, extracted, projecao = null) {
+  const temProjecao = Array.isArray(projecao);
+  // Com projeção, ela é a fonte única. Deixar `evs` vivo abria uma fuga: com
+  // projeção vazia e evidências legadas no `extracted`, o laço do fim da função
+  // voltava a imprimir o legado, que é exatamente a segunda lista que o D5
+  // eliminou.
+  const evs = temProjecao ? [] : (extracted.evidencias_irregularidade || []);
+  // D5: a projeção canônica é a fonte única do corpo e do sumário. Sem ela, o
+  // renderizador do backend voltava a publicar só `achados_irregularidade` e a
+  // divergir do sumário, que é o defeito que o D5 corrige. Projeção vazia é
+  // resposta, não ausência de resposta, por isso o teste é de tipo e não de
+  // comprimento.
+  const achados = temProjecao
+    ? projecao.map((f) => ({ codigo: f.key, gravidade: f.severity, titulo: f.title, texto: f.text }))
+    : Array.isArray(extracted.achados_irregularidade) ? extracted.achados_irregularidade : [];
   heading(ctx, "§ 6 · Evidências de irregularidade", { danger: evs.length > 0 || achados.length > 0 });
 
   // Motor pericial v2: achado estruturado com código e gravidade.
   if (achados.length) {
     for (const achado of achados) {
-      reserve(ctx, 110);
+      reserve(ctx, 60);
       const { doc, contentWidth } = ctx;
       const grave = /CR[IÍ]TIC|ALTA|ALTO/i.test(achado.gravidade || "");
       doc
@@ -968,7 +1056,7 @@ function sectionIrregularities(ctx, extracted) {
 
   for (const ev of evs) {
     const { doc, contentWidth } = ctx;
-    if (doc.y > doc.page.height - 100) doc.addPage();
+    reserve(ctx, 32);
     doc.fontSize(9.5).font("Helvetica").fillColor(DANGER).text("▸ ", MARGIN, doc.y, { continued: true });
     doc.fillColor(INK).text(ev, { width: contentWidth });
     doc.moveDown(0.2);
@@ -1016,7 +1104,7 @@ function sectionDigitalSignature(ctx, metadata, extracted) {
       field(ctx, "Atualizações incrementais", `${ds.catalog.incrementalUpdates ?? 0} (${ds.catalog.eofCount ?? 0} marca(s) %%EOF)`);
     }
     for (const sig of ds.pdfsig?.assinaturas || []) {
-      reserve(ctx, 120);
+      reserve(ctx, 80);
       subheading(ctx, `Assinatura #${sig.numero}${sig.campo ? ` · ${sig.campo}` : ""}`);
       field(ctx, "   Signatário (CN)", sig.signatario_cn);
       field(ctx, "   Data da assinatura", sig.data_assinatura);
@@ -1099,7 +1187,7 @@ function sectionEventTrail(ctx, extracted) {
   field(ctx, "Duração total da jornada", `${t.duracao_total} (${t.duracao_total_s} segundos)`);
   if (t.fuso) field(ctx, "Fuso declarado na trilha", `${t.fuso.trilha}; leitura local em ${t.fuso.local}${t.fuso.assinatura_sem_fuso ? "; bloco de assinatura sem fuso" : ""}`);
   for (const ev of t.eventos) {
-    reserve(ctx, 40);
+    reserve(ctx, 26);
     field(
       ctx,
       `   ${ev.nome}`,
@@ -1120,14 +1208,20 @@ function sectionBiometricArtifact(ctx, extracted) {
   if (!b) return;
   heading(ctx, "§ 4.4 · Artefato biométrico", { danger: Boolean(b.achado) });
   if (b.miniatura && /^data:image\/(jpeg|png);base64,/.test(b.miniatura)) {
-    reserve(ctx, 190);
+    // Decodifica primeiro: miniatura ilegível não pode custar uma quebra de
+    // página que depois ninguém preenche.
+    let buffer = null;
     try {
-      const buffer = Buffer.from(b.miniatura.split(",")[1], "base64");
+      buffer = Buffer.from(b.miniatura.split(",")[1], "base64");
+      ctx.doc.openImage(buffer);
+    } catch {
+      buffer = null; // Imagem ilegível para o PDFKit: seguem só os metadados.
+    }
+    if (buffer) {
+      reserve(ctx, 182); // a miniatura ocupa 176pt e não se parte
       const y = ctx.doc.y;
       ctx.doc.image(buffer, MARGIN, y, { fit: [96, 170] });
       ctx.doc.y = y + 176;
-    } catch {
-      // Imagem ilegível para o PDFKit: seguem os metadados.
     }
   }
   field(ctx, "Página / dimensões", `pág. ${b.pagina} · ${b.largura} x ${b.altura} pixels (${String(b.megapixels).replace(".", ",")} megapixel)`);
@@ -1143,11 +1237,14 @@ function sectionBiometricArtifact(ctx, extracted) {
 function sectionImageAnnex(ctx, extracted) {
   const lista = extracted.imagens_pdf?.imagens || [];
   if (!lista.length) return;
-  ctx.doc.addPage();
+  // Anexo em página própria só quando a atual já está cheia: a quebra
+  // incondicional abria uma página quase em branco sempre que o corpo do laudo
+  // terminava no alto da página.
+  reserve(ctx, 220);
   heading(ctx, "Anexo técnico · Inventário de imagens");
   paragraph(ctx, "Todas as imagens listadas por pdfimages, com classificação e SHA-256 individual.", { color: MUTED, size: 8.5 });
   for (const item of lista) {
-    if (ctx.doc.y > ctx.doc.page.height - 90) ctx.doc.addPage();
+    reserve(ctx, 14);
     ctx.doc.fontSize(7.5).font("Courier").fillColor(INK).text(
       `pág. ${item.page} · img ${item.num} · ${item.type} · ${item.width}x${item.height} · ${item.classificacao || item.enc} · ${item.size} · ${String(item.sha256 || "-").slice(0, 16)}`,
       { width: ctx.contentWidth }
@@ -1168,13 +1265,23 @@ function sectionEconomics(ctx, extracted) {
     ["Seguros", c.seguros],
     ["IOF financiado", c.iof_financiado],
     ["Somatório das parcelas", c.valor_total_parcelas],
-    ["Prazo declarado (dias)", c.prazo_dias],
-    ["Prazo total declarado", c.prazo_total_declarado ? `${c.prazo_total_declarado.quantidade} ${c.prazo_total_declarado.unidade}` : null],
+    // D6: o rótulo segue a origem. Chamar de "declarado" um valor que o sistema
+    // calculou afirma que o instrumento o trouxe, e não trouxe.
+    [c.prazo_dias_origem === "CALCULADO_PELO_SISTEMA" ? "Prazo da operação (dias) · calculado pelo sistema" : "Prazo declarado (dias)", c.prazo_dias],
+    // D4: a ficha publica o token completo. Reduzir a "6 meses" um campo que diz
+    // "6 meses ou até o pagamento da última parcela" reproduz, na apresentação,
+    // exatamente o corte que o comparador fazia.
+    ["Prazo total declarado", c.prazo_total_declarado
+      ? (c.prazo_total_declarado.condicional
+        ? `${c.prazo_total_declarado.texto} · declaração condicional`
+        : `${c.prazo_total_declarado.quantidade} ${c.prazo_total_declarado.unidade}`)
+      : null],
     ["Prazo efetivo, da emissão ao último vencimento (dias)", c.prazo_efetivo_dias],
     ["Carência até o 1º vencimento (dias)", c.carencia_dias],
     ["Juros acumulados na carência", c.juros_carencia],
     ["Custo total (somatório − liberado)", c.custo_total ? `${c.custo_total} (${c.custo_total_percentual} do liberado)` : null],
-    ["Taxa anual calculada", c.taxa_juros_anual_calculada],
+    ["Taxa anual calculada · calculada pelo sistema", c.taxa_juros_anual_calculada],
+    [c.prazo_operacao_meses_aprox_origem === "CALCULADO_PELO_SISTEMA" ? "Prazo da operação (meses, aprox.) · calculado pelo sistema" : "Prazo da operação (meses, aprox.)", c.prazo_operacao_meses_aprox],
     ["Tipo de operação", c.tipo_operacao ? `${c.tipo_operacao}${c.tipo_operacao_desmarcadas?.length ? ` (desmarcadas: ${c.tipo_operacao_desmarcadas.join(", ").toLowerCase()})` : ""}` : null],
     ["Operação portada", c.operacao_portada === true ? "Sim" : c.operacao_portada === false ? "Não" : null],
     ["Modalidade de desconto provável", c.modalidade_desconto_provavel],
@@ -1201,7 +1308,16 @@ function sectionEconomics(ctx, extracted) {
       if (valor === null || valor === undefined) return;
       badge(ctx, `${rotulo}${detalhe ? ` (${detalhe})` : ""}`, valor ? "CONFERE" : "NÃO CONFERE", valor);
     };
-    confere("Prazo declarado × datas", m.prazo_confere, m.prazo_descricao || (m.prazo_calculado_dias != null ? `${m.prazo_calculado_dias} dias` : null));
+    // D4: prazo condicional não é CONFERE nem NÃO CONFERE, e também não pode
+    // sumir. Omitir a linha esconderia do laudo o campo que motivou o achado.
+    if (m.prazo_declarado_condicional) {
+      badge(ctx, `Prazo declarado × datas${m.prazo_descricao ? ` (${m.prazo_descricao})` : ""}`, "NÃO AFERIDO", null);
+      if (m.prazo_declarado_ressalva) {
+        paragraph(ctx, `O campo de prazo traz ressalva no próprio texto: "${m.prazo_declarado_ressalva}". Não há prazo fechado a confrontar com as datas.`, { color: MUTED, size: 8.5 });
+      }
+    } else {
+      confere("Prazo declarado × datas", m.prazo_confere, m.prazo_descricao || (m.prazo_calculado_dias != null ? `${m.prazo_calculado_dias} dias` : null));
+    }
     confere("Somatório das parcelas", m.somatorio_confere, m.somatorio_calculado);
     confere("Composição do financiado", m.composicao_confere, m.composicao_financiado_calculada);
     if (m.composicao_nota) paragraph(ctx, m.composicao_nota, { color: MUTED, size: 8.5 });
@@ -1308,7 +1424,7 @@ function sectionProcessComparison(ctx, confronto) {
     }
   }
   for (const d of divergencias) {
-    reserve(ctx, 110);
+    reserve(ctx, 60);
     paragraph(ctx, `${d.label}: contrato ${d.contrato} × processo ${d.processo}. ${d.detalhe}`, {
       color: d.severidade === "DIVERGÊNCIA" ? DANGER : INK,
       size: 9,
@@ -1324,7 +1440,9 @@ function sectionProcessComparison(ctx, confronto) {
 /** Sumário executivo de irregularidades, ao final do laudo. */
 function sectionExecutiveSummary(ctx, sumario, reportId) {
   if (!sumario) return;
-  ctx.doc.addPage();
+  // Mesma regra do anexo: o sumário ganha página limpa quando sobra pouco, e
+  // segue na página corrente quando ela mal foi usada.
+  reserve(ctx, 260);
   heading(ctx, `Sumário executivo de irregularidades${reportId ? ` · ${reportId}` : ""}`);
   if (sumario.suspicionGrade) {
     badge(
@@ -1338,8 +1456,11 @@ function sectionExecutiveSummary(ctx, sumario, reportId) {
   if (sumario.intro) paragraph(ctx, sumario.intro, { size: 9 });
 
   subheading(ctx, "Placar de gravidade");
+  if (sumario.semAchados) {
+    paragraph(ctx, "Sem irregularidade crítica automática conclusiva. Os dados disponíveis não produziram alerta grave, sem prejuízo da revisão humana do contrato e dos logs originais.", { size: 9 });
+  }
   for (const f of sumario.findings || []) {
-    reserve(ctx, 90);
+    reserve(ctx, 52);
     const { doc, contentWidth } = ctx;
     doc
       .fontSize(9)
@@ -1353,6 +1474,10 @@ function sectionExecutiveSummary(ctx, sumario, reportId) {
     doc.moveDown(0.3);
   }
 
+  // D5: o corte de página é declarado e contado, nunca silencioso.
+  if (sumario.corte?.aviso) {
+    paragraph(ctx, sumario.corte.aviso, { color: MUTED, size: 8 });
+  }
   if (sumario.synthesis) {
     subheading(ctx, "GPS × IP");
     paragraph(ctx, sumario.synthesis, { size: 9 });
@@ -1406,7 +1531,7 @@ function sectionQuesitos(ctx, extracted, result) {
   });
 
   for (const q of quesitos) {
-    if (doc.y > doc.page.height - 110) doc.addPage();
+    reserve(ctx, 62);
     doc.moveDown(0.2);
     doc.fontSize(9.5).font("Helvetica-Bold").fillColor(ACCENT).text(`Quesito ${q.numero} · ${q.titulo}:`, { width: contentWidth });
     doc.moveDown(0.1);
@@ -1418,26 +1543,27 @@ function sectionQuesitos(ctx, extracted, result) {
 
 function sectionLegal(ctx, extracted = {}) {
   heading(ctx, "§ 9 · Fundamentação normativa aplicável");
+  paragraph(ctx, NOTA_FUNDAMENTACAO_RESSALVA, { color: MUTED, size: 8.5 });
   for (const { grupo, itens } of fundamentacaoPara(extracted.contrato?.produto_codigo)) {
     const { doc, contentWidth } = ctx;
-    if (doc.y > doc.page.height - 130) doc.addPage();
+    reserve(ctx, 72); // título do grupo + o primeiro dispositivo junto
     doc.moveDown(0.3);
     doc.fontSize(10).font("Helvetica-Bold").fillColor(INK).text(grupo, { width: contentWidth });
     doc.moveDown(0.2);
     for (const [disp, sint] of itens) {
-      if (doc.y > doc.page.height - 100) doc.addPage();
+      reserve(ctx, 44);
       doc.fontSize(9).font("Helvetica-Bold").fillColor(ACCENT).text(disp, { width: contentWidth });
       doc.fontSize(9).font("Helvetica").fillColor(INK).text(sint, { width: contentWidth, align: "justify", lineGap: 1 });
       doc.moveDown(0.3);
     }
   }
-  paragraph(ctx, NOTA_FUNDAMENTACAO_RESSALVA, { color: MUTED, size: 8.5 });
+
 }
 
 function legalNotice(ctx, timestamp) {
   const { doc, contentWidth } = ctx;
   doc.moveDown(0.5);
-  if (doc.y > doc.page.height - 160) doc.addPage();
+  reserve(ctx, 96); // régua + aviso legal inteiro, que não se divide bem
   doc.moveTo(MARGIN, doc.y).lineTo(MARGIN + contentWidth, doc.y).strokeColor(RULE).lineWidth(0.5).stroke();
   doc.moveDown(0.4);
   doc.fontSize(7.5).font("Helvetica-Oblique").fillColor(MUTED).text(avisoLegal(timestamp), { width: contentWidth, align: "justify", lineGap: 1 });
