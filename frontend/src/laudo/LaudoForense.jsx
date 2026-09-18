@@ -358,10 +358,11 @@ export default function LaudoForense({ report }) {
                     ? String(report.extracted.assinatura.hash_documento_assinado).trim()
                     : null;
                   const declaredAlgo = report.extracted.assinatura?.algoritmo_hash || null;
-                  const calc = report.hashes.sha256;
+                  const calc = String(report.hashes.sha256 || "");
                   const declaredState = report.extracted.assinatura?.hash_declarado_estado || (report.extracted.assinatura?.codigo_autenticacao_declarado ? "DECLARADO_NAO_CONFERIVEL" : "AUSENTE");
                   const cls = classifyHashString(declared);
-                  const confere = !!declared && cls?.format === "SHA-256" && declared.replace(/\s/g, "").toUpperCase() === calc.toUpperCase();
+                  const comparavel = cls?.format === "SHA-256" && /^[a-fA-F0-9]{64}$/.test(calc);
+                  const confere = comparavel && !!declared && cls?.format === "SHA-256" && declared.replace(/\s/g, "").toUpperCase() === calc.toUpperCase();
                   const vcolor = confere ? "var(--ok)" : "var(--crit)";
 
                   if (declared) {
@@ -389,13 +390,13 @@ export default function LaudoForense({ report }) {
                         <div className="row" style={{ marginTop: 14 }}>
                           <span className="row-label">Resultado da comparação</span>
                           <Badge
-                            label={!cls?.isHash ? "NÃO COMPARÁVEL" : confere ? "HASHES CONFEREM" : "DIVERGÊNCIA DETECTADA"}
-                            color={!cls?.isHash ? "#f2b03d" : confere ? "#3ddc97" : "#f06363"}
+                            label={!comparavel ? "NÃO COMPARÁVEL" : confere ? "HASHES CONFEREM" : "DIVERGÊNCIA DETECTADA"}
+                            color={!comparavel ? "#f2b03d" : confere ? "#3ddc97" : "#f06363"}
                           />
                         </div>
                         <div className="note" style={{ borderLeftColor: vcolor, background: confere ? "rgba(61,220,151,0.07)" : "rgba(240,99,99,0.07)" }}>
-                          {!cls?.isHash
-                            ? `O valor apresentado no documento como hash não corresponde a um hash criptográfico válido. ${cls?.detalhe}. A substituição do hash criptográfico por identificador dessa natureza configura defeito formal do instrumento, pois impede a verificação objetiva de integridade e autenticidade exigida para a assinatura eletrônica, nos termos da MP 2.200-2/2001.`
+                          {!comparavel
+                            ? `Comparação não realizada: o formato declarado é ${cls?.format || "não identificado"}. São necessários hashes do mesmo algoritmo e escopo; o campo calculado pelo sistema é SHA-256. Isso não determina a validade da assinatura.`
                             : confere
                             ? "O hash informado no documento confere integralmente com o hash calculado localmente sobre o arquivo. Integridade consistente entre o valor declarado e o conteúdo verificado."
                             : "O hash informado no documento diverge do hash calculado localmente sobre o arquivo. A divergência deve ser interpretada com cautela técnica: em PDFs assinados, o hash de assinatura refere-se ao conteúdo no instante da assinatura e pode não coincidir com o recálculo sobre o arquivo finalizado. Recomenda-se verificação pericial complementar antes de qualquer conclusão sobre adulteração."}

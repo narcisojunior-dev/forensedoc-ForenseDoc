@@ -235,7 +235,7 @@ export function buildIrregularitySummary(report = {}) {
   const declaredHash = String(signature.hash_documento_assinado || "").replace(/\s/g, "");
   const calculatedHash = String(report.hashes?.sha256 || "").replace(/\s/g, "");
   const declaredKind = hashKind(declaredHash);
-  const hashMismatch = declaredKind === "SHA-256" && calculatedHash
+  const hashMismatch = declaredKind === "SHA-256" && hashKind(calculatedHash) === "SHA-256"
     && declaredHash.toUpperCase() !== calculatedHash.toUpperCase();
   const hashMalformed = declaredKind === "INVALIDO";
   // Hash e código de autenticação têm estados próprios desde a separação dos
@@ -270,6 +270,8 @@ export function buildIrregularitySummary(report = {}) {
   } else if (hashMissing) {
     addFinding("MÉDIA", "hash-missing", "Integridade não confrontável pelo documento.", "O contrato não apresenta hash declarado para comparação com a impressão digital calculada pelo ForenseDoc.");
     addCheck("A", "hash", "ALERTA", "Hash declarado ausente.");
+  } else if (declaredKind !== "SHA-256" || hashKind(calculatedHash) !== "SHA-256") {
+    addCheck("A", "hash", "INDETERMINADO", `Comparação não realizada: algoritmo declarado ${declaredKind}; é necessário SHA-256 declarado e recalculado válidos.`);
   } else {
     addCheck("A", "hash", "CONFERIDO", "Hash declarado compatível com o arquivo analisado.");
     addFinding("FAVORÁVEL", "hash-ok", "Hash informado confere com o arquivo.", `O SHA-256 declarado coincide com o valor recalculado (${shortHash(calculatedHash)}).`);
@@ -496,7 +498,7 @@ export function buildIrregularitySummary(report = {}) {
     addDiligence("full-contract", "Instrumento contratual completo", "Solicitar taxa anual quando o campo estiver em branco, campo de valor liberado ao cliente, demonstrativo do CET, qualificação completa e número/espécie do benefício quando aplicável.");
   }
   if (issueCodes.has("INT1")) {
-    addDiligence("auth-code", "Explicitação do código de autenticação", "Exigir o algoritmo, o payload de origem e o procedimento de verificação do bloco impresso no rodapé da última página, a fim de permitir conferência independente do elemento declarado.");
+    addDiligence("auth-code", "Explicitação do código de autenticação", `Solicitar o procedimento de validação do código de autenticação${signature.codigo_autenticacao_origem ? ` localizado em ${signature.codigo_autenticacao_origem}` : " declarado no material examinado"}, o arquivo original e, se houver hash, seu algoritmo e payload de referência. Código de autenticação e hash são elementos distintos.`);
   }
   if (issueCodes.has("CET1")) {
     addDiligence("cet-demo", "Demonstrativo de cálculo do CET", "Exigir valor em reais, percentual e base de cálculo de cada componente do fluxo, conforme dever de informação do CDC e da regulamentação do CMN sobre CET.");
