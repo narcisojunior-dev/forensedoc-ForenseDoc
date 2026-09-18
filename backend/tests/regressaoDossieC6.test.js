@@ -257,7 +257,7 @@ describe("dossiê C6: testes negativos do relatório de homologação", () => {
         geo: { ...r.sumarioIrregularidades.geo, items: [{ label: "GPS · assinatura", distance: 0, role: "gps" }] },
       };
       const regras = verificarCoerencia(r, extraido).filter((v) => v.nivel === "CRITICA").map((v) => v.regra);
-      expect(regras).toEqual(expect.arrayContaining(["distancia-no-sumario-sem-confronto", "zero-km-no-sumario"]));
+      expect(regras).toEqual(expect.arrayContaining(["distancia-no-sumario-sem-confronto"]));
     });
   });
 

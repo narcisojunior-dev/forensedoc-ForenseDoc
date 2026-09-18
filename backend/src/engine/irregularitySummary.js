@@ -626,13 +626,14 @@ export function buildIrregularitySummary(report = {}) {
    */
   const eventosDaTrilha = report.extracted?.trilha_eventos?.eventos || [];
   const numero = (valor) => {
+    if (valor == null || typeof valor === "boolean" || String(valor).trim() === "") return null;
     const n = Number(valor);
     return Number.isFinite(n) ? n : null;
   };
   // Par completo: latitude 0 é coordenada válida, e latitude sem longitude não
   // localiza nada. O teste anterior usava `e.latitude || e.coordenada`, que
   // descartava o zero e aceitava meia coordenada.
-  const temPar = (lat, lon) => numero(lat) !== null && numero(lon) !== null;
+  const temPar = (lat, lon) => numero(lat) !== null && numero(lon) !== null && Math.abs(numero(lat)) <= 90 && Math.abs(numero(lon)) <= 180;
 
   // Contagens de EVENTOS da trilha, que é o que a frase de ausência afirma.
   const eventosComIp = eventosDaTrilha.filter((e) => hasValue(e.ip)).length;

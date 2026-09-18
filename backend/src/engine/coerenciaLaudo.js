@@ -71,13 +71,16 @@ const REGRAS = [
     },
   },
   {
-    id: "zero-km-no-sumario",
+    id: "distancia-sem-coordenadas",
     nivel: "CRITICA",
-    descricao: "Sumário executivo imprime distância de 0,00 km",
+    descricao: "Distância publicada sem os dois pontos válidos que a sustentam",
     verificar(result) {
-      const trecho = textosDoSumario(result.sumarioIrregularidades).find((t) => /(^|[^\d,])0,00 km/.test(t));
-      const pontoZero = (result.sumarioIrregularidades?.geo?.items || []).some((i) => i.distance === 0);
-      return trecho || pontoZero ? `"0,00 km" no sumário${trecho ? `: ${trecho.slice(0, 120)}` : " (ponto do gráfico)"}` : null;
+      if (result.contractGeo?.distance != null && (!coordenadaValida(result.home?.geo) || !coordenadaValida(result.contractGeo))) return "distância à residência sem coordenadas completas e válidas";
+      for (const ip of result.ipAnalysis || []) {
+        if (ip.distance != null && (!coordenadaValida(result.home?.geo) || !coordenadaValida(ip.geo))) return "distância IP/residência sem coordenadas completas e válidas";
+        if (ip.distanceToSignature != null && (!coordenadaValida(result.contractGeo) || !coordenadaValida(ip.geo))) return "distância IP/assinatura sem coordenadas completas e válidas";
+      }
+      return null;
     },
   },
   {
