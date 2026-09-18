@@ -452,7 +452,7 @@ function extractGenericContractLayout(text, flat) {
     tributosPercentual: normalizePercent(tributos?.[2]),
     valorLiberadoClienteEmBranco: blankReleasedValue,
     codigoAutenticacao: authBlockTokens.length >= 8 ? authBlockTokens.join(" ") : null,
-    assinaturaEletronicaTexto: firstMatch(flat, [/(\(assinado\s+de\s+forma\s+eletr[oô]nica\)|Assinado\s+eletronicamente\s+por\s+[A-ZÁÀÂÃÉÊÍÓÔÕÚÇ\s]{8,90}|Documento\s+assinado\s+eletronicamente[^.]{0,180})/i]),
+    assinaturaEletronicaTexto: firstMatch(flat, [/(Documento\s+assinado\s+eletronicamente[^.]{0,180}?CPF\s*n[°ºo]?\s*:\s*\d{3}\.\d{3}\.\d{3}-\d{2})/i, /(\(assinado\s+de\s+forma\s+eletr[oô]nica\)|Assinado\s+eletronicamente\s+por\s+[A-ZÁÀÂÃÉÊÍÓÔÕÚÇ\s]{8,90}|Documento\s+assinado\s+eletronicamente[^.]{0,180})/i]),
   };
 }
 
