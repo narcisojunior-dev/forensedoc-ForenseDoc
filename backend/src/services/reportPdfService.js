@@ -66,12 +66,16 @@ export async function buildReportPdf(analysis, result) {
     margins: { top: MARGIN, bottom: MARGIN_BOTTOM, left: MARGIN, right: MARGIN },
     bufferPages: true, // necessário para numerar o rodapé no fim
     info: {
-      Title: `Laudo ForenseDoc ${analysis.id.slice(0, 8)}`,
+      Title: `Laudo ForenseDoc ${result.reportId || analysis.id}`,
       Author: FIRM.nome,
       Creator: FIRM.sistema,
     },
   });
 
+  // Fontes padrão PDFKit usam WinAnsi: normalizar acentos compostos e sinais
+  // matemáticos evita nomes corrompidos e operadores ilegíveis no texto extraído.
+  const escrever = doc.text.bind(doc);
+  doc.text = (text, ...args) => escrever(typeof text === "string" ? text.normalize("NFC").replace(/−/g, "-").replace(/→/g, "->").replace(/≥/g, ">=").replace(/≤/g, "<=") : text, ...args);
   const extracted = safeParse(result.text) || {};
   const timestamp = result.generatedAt
     ? new Date(result.generatedAt).toLocaleString("pt-BR", { timeZone: "America/Fortaleza" })
@@ -246,7 +250,7 @@ function cover(ctx, analysis, result, timestamp) {
   doc.moveTo(MARGIN, doc.y).lineTo(MARGIN + contentWidth, doc.y).strokeColor(RULE).lineWidth(1).stroke();
   doc.moveDown(0.6);
 
-  field(ctx, "Identificador do laudo", analysis.id);
+  field(ctx, "Identificador do laudo", result.reportId || analysis.id);
   field(ctx, "Arquivo analisado", result.file?.name || "nome não informado");
   field(ctx, "Tamanho do arquivo", result.file?.sizeBytes ? `${(result.file.sizeBytes / 1024).toFixed(2)} KB` : null);
   field(ctx, "Data de geração", timestamp);
