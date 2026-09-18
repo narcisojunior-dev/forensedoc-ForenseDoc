@@ -407,7 +407,9 @@ function sectionMetadata(ctx, metadata) {
   field(ctx, "Aplicativo criador", metadata.creator);
   field(ctx, "Produtor", metadata.producer);
   field(ctx, "Data de criação", metadata.creationDate);
-  field(ctx, "Data de modificação", metadata.modDate);
+  // O extrator grava `modificationDate`; `modDate` nunca existiu e a linha
+  // saía sempre vazia no PDF.
+  field(ctx, "Data de modificação", metadata.modificationDate ?? metadata.modDate);
   if (metadata.warnings?.length) {
     paragraph(ctx, metadata.warnings.join(" "), { color: DANGER, size: 8.5 });
   }
