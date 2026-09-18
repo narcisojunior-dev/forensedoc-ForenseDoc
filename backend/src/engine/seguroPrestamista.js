@@ -252,7 +252,7 @@ function avaliarSeguro(seguro, contrato) {
   // SEG2: cobertura que concentra o prêmio e tem carência ou franquia.
   const concentrada = seguro.coberturas.find((c) => c.participacao_premio > 0.6 && ((c.carencia_dias || 0) > 0 || (c.franquia_dias || 0) > 0));
   if (concentrada) {
-    add("SEG2", "MÉDIA", "Prêmio concentrado em cobertura com carência", `A cobertura "${concentrada.nome}" responde por ${pct(concentrada.participacao_premio)} do prêmio (${concentrada.premio} de ${seguro.premio}) e é justamente a que tem carência${concentrada.franquia_dias ? " e franquia" : ""}.`);
+    add("SEG2", "INFO", "Prêmio concentrado em cobertura com carência", `A cobertura "${concentrada.nome}" responde por ${pct(concentrada.participacao_premio)} do prêmio (${concentrada.premio} de ${seguro.premio}) e é justamente a que tem carência${concentrada.franquia_dias ? " e franquia" : ""}.`);
   }
 
   // SEG3 e SEG4: estipulante e beneficiário iguais ao credor.
@@ -265,20 +265,20 @@ function avaliarSeguro(seguro, contrato) {
     || (credorNome && seguro.estipulante?.nome && normal(seguro.estipulante.nome).includes(credorNome.split(/\s+/)[0]))
   );
   if (estipulanteIgualCredor) {
-    add("SEG3", "MÉDIA", "Estipulante do seguro é o próprio credor", `O estipulante da apólice é ${seguro.estipulante.nome}${seguro.estipulante.cnpj ? ` (CNPJ ${seguro.estipulante.cnpj})` : ""}, a mesma instituição que concede o empréstimo. Quem vende o crédito contrata o seguro em nome do consumidor.`);
+    add("SEG3", "INFO", "Estipulante do seguro é o próprio credor", `O estipulante da apólice é ${seguro.estipulante.nome}${seguro.estipulante.cnpj ? ` (CNPJ ${seguro.estipulante.cnpj})` : ""}, a mesma instituição que concede o empréstimo. Essa coincidência de papéis não demonstra irregularidade por si.`);
   }
   if (seguro.beneficiario && (/estipulante/i.test(seguro.beneficiario) ? estipulanteIgualCredor : credorNome && normal(seguro.beneficiario).includes(credorNome.split(/\s+/)[0]))) {
-    add("SEG4", "MÉDIA", "Beneficiário do seguro é o credor", `A proposta define que "o beneficiário será ${seguro.beneficiario.toLowerCase().startsWith("o ") ? "" : "o "}${seguro.beneficiario}", que é o credor. O seguro pago pelo consumidor protege, antes de tudo, o crédito da instituição.`);
+    add("SEG4", "INFO", "Beneficiário do seguro é o credor", `A proposta define que "o beneficiário será ${seguro.beneficiario.toLowerCase().startsWith("o ") ? "" : "o "}${seguro.beneficiario}", que é o credor. A destinação ao credor é compatível com a natureza prestamista; não demonstra irregularidade por si.`);
   }
 
   // SEG5: remuneração do estipulante.
   if (seguro.pro_labore_sobre_premio > 0.2) {
-    add("SEG5", "MÉDIA", "Pró-labore elevado sobre o prêmio", `O pró-labore declarado é ${seguro.pro_labore}, ${pct(seguro.pro_labore_sobre_premio)} do prêmio de ${seguro.premio}. Quase metade do valor pago pelo consumidor volta como remuneração para quem intermediou a venda.`.replace("Quase metade", seguro.pro_labore_sobre_premio >= 0.4 ? "Quase metade" : "Parte relevante"));
+    add("SEG5", "INFO", "Pró-labore declarado sobre o prêmio", `O pró-labore declarado é ${seguro.pro_labore}, ${pct(seguro.pro_labore_sobre_premio)} do prêmio de ${seguro.premio}. Quase metade do valor pago pelo consumidor volta como remuneração para quem intermediou a venda.`.replace("Quase metade", seguro.pro_labore_sobre_premio >= 0.4 ? "Quase metade" : "Parte relevante"));
   }
 
   // SEG6: peso do prêmio sobre o valor liberado.
   if (seguro.premio_sobre_liberado > 0.05) {
-    add("SEG6", "MÉDIA", "Prêmio do seguro elevado em relação ao valor liberado", `O prêmio de ${seguro.premio} equivale a ${pct(seguro.premio_sobre_liberado, 2)} do valor liberado (${contrato.valor_liberado}) e foi financiado junto com o empréstimo, com juros.`);
+    add("SEG6", "INFO", "Relação entre prêmio e valor liberado", `O prêmio de ${seguro.premio} equivale a ${pct(seguro.premio_sobre_liberado, 2)} do valor liberado (${contrato.valor_liberado}) na proposta examinada.${/financiado/i.test(seguro.forma_pagamento || "") ? " A forma de pagamento da proposta é financiada." : " O modo de pagamento deve ser conferido no instrumento."}`);
   }
 
   // SEG7: prêmio da proposta contra o seguro da planilha do contrato.
