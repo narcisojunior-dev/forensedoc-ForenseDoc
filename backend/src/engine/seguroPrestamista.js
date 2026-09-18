@@ -209,7 +209,17 @@ export function extrairSeguroPrestamista({ texto, segmentacao, contrato = {} }) 
       coberturas_somadas: seguro.coberturas.length,
     }
     : null;
+  const instrumento = segmentacao?.documentos?.find(d => d.tipo === "INSTRUMENTO_PRINCIPAL");
+  const paginas = t.split("\f");
+  for (let i = (instrumento?.paginaInicial || 1) - 1; i < (instrumento?.paginaFinal || paginas.length); i++) {
+    const linha = paginas[i]?.split("\n").find(l => /Forma de Pagamento:/i.test(l) && /\[\s*[xX]\s*\]/.test(l));
+    const marcado = linha?.match(/\[\s*[xX]\s*\]\s*([ÀàAa]\s*Vista|Financiado)/i)?.[1];
+    if (marcado) { seguro.forma_pagamento_instrumento = { valor: marcado, pagina: i + 1, trecho: linha.trim() }; break; }
+  }
   seguro.achados = avaliarSeguro(seguro, contrato);
+  if (seguro.forma_pagamento_instrumento && seguro.forma_pagamento && seguro.forma_pagamento_instrumento.valor.toLowerCase() !== seguro.forma_pagamento.toLowerCase()) {
+    seguro.achados.push({ codigo: "SEG9", gravidade: "INFO", titulo: "Formas de pagamento do seguro com rótulos distintos", texto: `O instrumento assinala "${seguro.forma_pagamento_instrumento.valor}" (pág. ${seguro.forma_pagamento_instrumento.pagina}); a proposta de seguro informa "${seguro.forma_pagamento}"${seguro.documento ? ` (pág. ${seguro.documento.paginaInicial})` : ""}. Os rótulos podem se referir a relações diferentes: repasse à seguradora e financiamento ao consumidor. Solicitar conciliação documental; a diferença, isoladamente, não prova cobrança duplicada.` });
+  }
   if (seguro.conferencia_premio && !seguro.conferencia_premio.confere) {
     const dif = seguro.conferencia_premio.diferenca_centavos;
     const reais = (n) => `R$ ${(Math.abs(n) / 100).toFixed(2).replace(".", ",")}`;

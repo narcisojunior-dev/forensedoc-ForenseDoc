@@ -290,7 +290,7 @@ describe("dossiê C6: testes negativos do relatório de homologação", () => {
     expect(lib1.texto).toMatch(/Banco 237, agência 1234, conta 005555-1\), no valor de R\$ 1\.779,15/);
   });
 
-  it("10. emite o bloco de seguro prestamista com os sete achados", () => {
+  it("10. emite o bloco de seguro prestamista com os oito achados e marcos distintos", () => {
     const s = extraido.seguro_prestamista;
     expect(s).toMatchObject({ proposta: "900112233", premio: "R$ 218,64", iof: "R$ 0,83", pro_labore: "R$ 98,02", beneficiario: "Estipulante" });
     expect(s.coberturas.map((c) => [c.nome, c.premio, c.carencia_dias, c.franquia_dias, c.teto_parcelas])).toEqual([
@@ -303,14 +303,14 @@ describe("dossiê C6: testes negativos do relatório de homologação", () => {
     // SEG8 é a soma das coberturas contra o prêmio total (D10). SEG7 continua
     // reservado ao prêmio da proposta contra o seguro da planilha, que neste
     // dossiê não diverge.
-    expect(s.achados.map((a) => a.codigo)).toEqual(["SEG1", "SEG2", "SEG3", "SEG4", "SEG5", "SEG6", "SEG8"]);
-    // D9: sem o certificado individual, o início de vigência é premissa, e o
-    // achado que depende dela sai rebaixado, com a premissa declarada e o
-    // trecho da proposta ancorado. Volta a ALTA quando o certificado vier.
-    expect(s.achados[0].gravidade).toBe("MÉDIA");
-    expect(s.vigencia.premissa_origem).toBe("PRESUMIDO_DATA_DO_CONTRATO");
+    expect(s.achados.map((a) => a.codigo)).toEqual(["SEG1", "SEG2", "SEG3", "SEG4", "SEG5", "SEG6", "SEG9", "SEG8"]);
+    // Certificado e data do sinistro não foram apresentados: não inventar vigência.
+    expect(s.achados[0].gravidade).toBe("INFO");
+    expect(s.vigencia.premissa_origem).toBe("INDETERMINADO");
+    expect(s.vigencia.inicio_declarado).toBeNull();
+    expect(s.achados[0].texto).not.toContain("121 dias");
     expect(s.vigencia.remissao_ao_certificado).toMatch(/certificado/i);
-    expect(s.achados[0].texto).toMatch(/certificado individual/i);
+    expect(s.achados[0].texto).toMatch(/certificado (individual|do seguro)/i);
   });
 
   it("reconstrói a trilha: 6 eventos, 204 s, aceites rápidos, ausências e fuso", () => {
