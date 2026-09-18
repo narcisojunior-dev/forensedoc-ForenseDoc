@@ -15,17 +15,13 @@
  * cada defeito vive no módulo que o produziu; este validador existe para que
  * uma regressão futura não volte a sair calada.
  *
- * ─── Modo alerta ─────────────────────────────────────────────────────────────
- *
- * Registra em `result.coerencia`, no log e na tela do laudo (fora do PDF). Com
- * `COERENCIA_BLOQUEANTE=true`, a exportação em PDF fica bloqueada enquanto houver
- * contradição. O padrão é desligado: bloquear sem política de estorno do crédito
- * puniria o cliente por defeito do sistema.
+ * Contradições materiais e falhas de validação bloqueiam a emissão.
+ * Coincidências heurísticas ficam como alertas, independentemente do ambiente.
  */
+export function coerenciaBloqueante() { return true; }
 
-export function coerenciaBloqueante() {
-  return process.env.COERENCIA_BLOQUEANTE === "true";
-}
+const HEURISTICAS = new Set(["data-contrato-x-juntada", "cet-implicito-no-extremo"]);
+const coordenadaValida = (p) => p && Number.isFinite(p.lat) && Number.isFinite(p.lon) && Math.abs(p.lat) <= 90 && Math.abs(p.lon) <= 180;
 
 const normalizar = (valor) =>
   String(valor || "")
@@ -257,12 +253,14 @@ export function verificarCoerencia(result = {}, extracted = {}) {
   const violacoes = [];
   for (const regra of REGRAS) {
     let detalhe = null;
+    let falha = false;
     try {
       detalhe = regra.verificar(result, extracted || {});
     } catch (erro) {
+      falha = true;
       detalhe = `regra falhou ao executar: ${erro.message}`;
     }
-    if (detalhe) violacoes.push({ regra: regra.id, nivel: regra.nivel || NIVEL_PADRAO[regra.id] || "ALERTA", descricao: regra.descricao, detalhe });
+    if (detalhe) violacoes.push({ classe: falha ? "FALHA_VALIDACAO" : HEURISTICAS.has(regra.id) ? "HEURISTICA" : "CONTRADICAO_MATERIAL", bloqueante: falha || !HEURISTICAS.has(regra.id), regra: regra.id, nivel: regra.nivel || NIVEL_PADRAO[regra.id] || "ALERTA", descricao: regra.descricao, detalhe });
   }
   return violacoes;
 }

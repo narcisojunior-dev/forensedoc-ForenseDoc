@@ -1,3 +1,4 @@
+import { exigirEmissaoCoerente } from "../engine/validarEmissao.js";
 import PDFDocument from "pdfkit";
 import { classifyDeclaredDivergence } from "../utils/geoDivergence.js";
 import { fetchStaticMap, mapPointsIpVsHome, mapPointsHomeVsDeclared, mapPointsDeclaredVsIp } from "./staticMapService.js";
@@ -52,6 +53,7 @@ const MAP_MIN_SCALE = 0.75;
  * @param {object} result   Analysis.result já parseado
  */
 export async function buildReportPdf(analysis, result) {
+  exigirEmissaoCoerente(result);
   // Pré-busca dos DOIS mapas do § 5, em paralelo. Cada um responde a uma
   // pergunta pericial distinta (ver staticMapService.js) e nenhum é requisito:
   // se a busca falhar, a seção sai com as coordenadas e as distâncias.

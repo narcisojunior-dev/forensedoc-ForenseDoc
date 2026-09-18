@@ -13,7 +13,7 @@ vi.mock("../src/services/staticMapService.js", () => ({
 }));
 
 const { buildReportPdf } = await import("../src/services/reportPdfService.js");
-const { extractPdfTextWithOcr } = await import("../src/services/ocrService.js");
+const { extractPdfTextDetailed } = await import("../src/services/pdfService.js");
 const { extractPdfMetadata } = await import("../src/services/pdfService.js");
 const { analisarDocumento } = await import("../src/engine/analisarDocumento.js");
 const { buildSummaryForResult } = await import("../src/services/analysisRecompute.js");
@@ -35,7 +35,7 @@ describe("laudo em PDF com o motor pericial v2", () => {
       "Valor Liberado R$ 4.800,00 Taxa de Juros Efetiva 1,80% a.m.",
       "Endereco IP: 177.104.55.201 Data e hora: 25/06/2025 10:45:03",
     ]);
-    const [extraction, rawMetadata] = await Promise.all([extractPdfTextWithOcr(pdf), extractPdfMetadata(pdf)]);
+    const [extraction, rawMetadata] = await Promise.all([extractPdfTextDetailed(pdf), extractPdfMetadata(pdf)]);
     const { extracted, metadata } = await analisarDocumento({ pdfBuffer: pdf, extraction, rawMetadata });
 
     const result = {

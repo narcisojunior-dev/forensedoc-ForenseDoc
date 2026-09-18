@@ -483,24 +483,20 @@ export async function getAnalysisPdf(req, res) {
     if (analysis.status !== "COMPLETED" || !analysis.result) {
       return res.status(409).json({ error: "Laudo indisponível: análise não concluída.", status: analysis.status });
     }
-    if (coerenciaBloqueante() && analysis.result.coerencia?.length) {
-      return res.status(409).json({
-        error: "Laudo com contradição entre seções. Revise os campos indicados antes de emitir.",
-        code: "COERENCIA",
-        coerencia: analysis.result.coerencia,
-      });
-    }
-
+    // buildReportPdf valida o snapshot atual antes de gerar bytes ou cabeçalhos.
+    const pdf = await buildReportPdf(analysis, analysis.result);
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="laudo-${analysis.id.slice(0, 8)}.pdf"`);
 
-    const pdf = await buildReportPdf(analysis, analysis.result);
     pdf.on("error", (err) => {
       console.error("[Analyze] Erro ao gerar PDF:", err.message);
       if (!res.headersSent) res.status(500).end();
     });
     pdf.pipe(res);
   } catch (error) {
+    if (error.code === "COERENCIA" && !res.headersSent) {
+      return res.status(409).json({ error: error.message, code: error.code, coerencia: error.coerencia });
+    }
     console.error("[Analyze] Erro ao gerar laudo PDF:", error);
     if (!res.headersSent) return res.status(500).json({ error: "Erro interno no servidor." });
   }
