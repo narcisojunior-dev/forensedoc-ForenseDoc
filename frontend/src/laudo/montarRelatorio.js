@@ -58,6 +58,7 @@ function recontarCorte(corte, projecao, findings) {
   };
 }
 
+// Cópia no servidor: backend/src/reports/laudoApresentacao.js (sanearSumario).
 function sanearSumario(sumario, home, ipAnalysis, contractGeo) {
   if (!sumario) return sumario;
   const recusado = ["RECUSADO_CONFLITO", "INDISPONIVEL_NAO_INFORMADO"].includes(home?.estado_confronto);

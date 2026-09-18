@@ -2,6 +2,9 @@ import { ordenarAchados } from "./eixosAchado.js";
 
 // Utilitários de apresentação do laudo técnico pericial. Portados do motor de
 // geração (frontend/src/ForenseDoc.jsx) sem alteração de regra.
+// O PDF do servidor usa uma cópia destas regras em
+// backend/src/reports/laudoApresentacao.js: manter as duas iguais (o teste
+// backend/tests/reportPdfParidadeTela.test.js compara as saídas).
 
 export function classifyHashString(s) {
   if (!s || typeof s !== "string") return null;
