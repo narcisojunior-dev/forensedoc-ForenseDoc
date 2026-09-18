@@ -80,7 +80,7 @@ export function generateJudicialQuesitos({
       numero: 4,
       titulo: "Validação Biométrica e Prova de Vida Ativa (Liveness Detection)",
       quesito: `Queira o Sr. Perito informar se os registros biométricos apresentados nos autos contêm comprovação de 'Prova de Vida' ativa (Liveness Detection) com desafio dinâmico no momento da captura da imagem, ou se tratou de mera foto estática ou upload de imagem prévia passível de injeção digital ou deepfake.`,
-      finalidade: "Neutralizar biometrias estáticas fraudadas ou extraídas de documentos vazados.",
+      finalidade: "Verificar o resultado individual da validação biométrica e sua vinculação à operação.",
     },
     porAchado.INT1 || {
       numero: 5,
@@ -197,7 +197,7 @@ const MODELOS = {
     return {
       titulo: "Validação Biométrica e Prova de Vida Ativa (Liveness Detection)",
       quesito: `Considerando que o arquivo exibe ${b.contagem_faciais === 1 ? "uma única fotografia" : "fotografia"}${caracteristicas.length ? ` (${caracteristicas.join(", ")})` : ""}, queira o Sr. Perito ou a instituição informar se houve prova de vida ativa com desafio dinâmico no momento da captura${ausentes.length ? ` e apresentar ${juntarLista(ausentes)}` : ""}, esclarecendo se a imagem pode ter sido obtida por upload ou reaproveitamento de foto prévia.`,
-      finalidade: "Neutralizar biometrias estáticas fraudadas ou extraídas de documentos vazados.",
+      finalidade: "Verificar o resultado individual da validação biométrica e sua vinculação à operação.",
     };
   },
 };

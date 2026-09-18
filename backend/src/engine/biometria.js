@@ -52,15 +52,15 @@ export function analisarBiometria({ imagens, flat, alegaBiometria }) {
   };
 
   const falhas = [];
-  if (alegaBiometria && faciais.length === 1) falhas.push("exibe uma única fotografia, incompatível com desafio dinâmico de prova de vida");
+  if (alegaBiometria && faciais.length === 1) falhas.push("exibe uma fotografia; o resultado individual de vivacidade precisa ser apresentado");
   if (bloco.megapixels < 0.5) falhas.push(`de ${String(bloco.megapixels).replace(".", ",")} megapixel`);
-  if (bloco.exif === false) falhas.push("com metadados de captura (EXIF) removidos");
+  if (bloco.exif === false) falhas.push("sem metadados de captura (EXIF) identificados no artefato extraído");
   if (!documento) ausentes.push("documento de identidade de referência");
 
   if (!falhas.length && !ausentes.length) return { ...bloco, achado: null };
   const fotografia = faciais.length === 1 ? "uma única fotografia" : `${faciais.length} fotografias`;
-  const qualidades = [bloco.megapixels < 0.5 ? `de ${String(bloco.megapixels).replace(".", ",")} megapixel` : null, bloco.exif === false ? "com metadados removidos" : null].filter(Boolean).join(" e ");
-  const texto_achado = `${alegaBiometria ? "A instituição afirma ter colhido biometria facial e exibe" : "O arquivo exibe"} ${fotografia}${qualidades ? ` ${qualidades}` : ""} (pág. ${bloco.pagina}, ${bloco.largura} x ${bloco.altura} pixels${bloco.bytes ? `, ${bloco.bytes.toLocaleString("pt-BR")} bytes` : ""})${ausentes.length ? `, e não apresenta ${ausentes.join(", ").replace(/, ([^,]*)$/, " nem $1")}` : ""}. ${faciais.length === 1 && alegaBiometria ? "Uma imagem estática isolada não demonstra vivacidade nem vincula o rosto ao titular do CPF." : ""}`.trim();
+  const qualidades = [bloco.megapixels < 0.5 ? `de ${String(bloco.megapixels).replace(".", ",")} megapixel` : null, bloco.exif === false ? "sem EXIF identificado no artefato extraído" : null].filter(Boolean).join(" e ");
+  const texto_achado = `${alegaBiometria ? "A instituição afirma ter colhido biometria facial e exibe" : "O arquivo exibe"} ${fotografia}${qualidades ? ` ${qualidades}` : ""} (pág. ${bloco.pagina}, ${bloco.largura} x ${bloco.altura} pixels${bloco.bytes ? `, ${bloco.bytes.toLocaleString("pt-BR")} bytes` : ""})${ausentes.length ? `, e a extração disponível não localizou ${ausentes.join(", ").replace(/, ([^,]*)$/, " nem $1")}` : ""}. ${faciais.length === 1 && alegaBiometria ? "Uma imagem estática isolada não demonstra o resultado individual de vivacidade ou a vinculação ao titular do CPF. Ausência de EXIF nesta cópia não prova remoção nem ausência de metadados na captura original." : ""}`.trim();
   return {
     ...bloco,
     achado: { codigo: "BIO2", gravidade: "ALTA", titulo: "Lastro biométrico frágil", texto: texto_achado },
