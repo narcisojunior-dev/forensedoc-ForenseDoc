@@ -318,7 +318,7 @@ function cover(ctx, analysis, result, timestamp) {
     .fillColor(INK)
     .text(
       `• Domicílio do titular: ${homeLoc}\n` +
-      `• Origem técnica da conexão: ${ipLoc} (${origemDetalhe})\n` +
+      `• Estimativa da consulta do IP: ${ipLoc} (${origemDetalhe})\n` +
       `• GPS registrado no ato: ${gpsTexto}`,
       boxX + 12,
       boxY + 48,
@@ -651,7 +651,7 @@ function sectionGeo(ctx, result, mapas = {}) {
   // ─── Ponto de referência ───────────────────────────────────────────────────
   paragraph(
     ctx,
-    "Esta seção apresenta TRÊS confrontos independentes, cada um com seu mapa. Eles respondem a perguntas diferentes e não se somam: o primeiro verifica de onde partiu a CONEXÃO que gerou o ato; o segundo verifica o que o DOCUMENTO afirma sobre o local do ato; ambos usam como referência a residência informada. O terceiro confronta a geolocalização declarada com a origem da conexão e não depende da residência, por isso continua valendo quando ela é recusada.",
+    "Esta seção avalia três confrontos independentes; cálculos e mapas são apresentados quando os respectivos pontos estão disponíveis. Eles respondem a perguntas diferentes e não se somam: o primeiro verifica de onde partiu a CONEXÃO que gerou o ato; o segundo verifica o que o DOCUMENTO afirma sobre o local do ato; ambos usam como referência a residência informada. O terceiro confronta a geolocalização declarada com a origem da conexão e não depende da residência, por isso continua valendo quando ela é recusada.",
     { size: 9 }
   );
 
@@ -715,7 +715,7 @@ function sectionGeo(ctx, result, mapas = {}) {
   subheading(ctx, "§ 5.1 · Confronto 1 · origem da conexão (IP) × residência informada");
   paragraph(
     ctx,
-    "Pergunta: a conexão que originou a assinatura partiu da região onde o contratante reside? A localização do IP tem precisão de nível de operadora, isto é, aponta o roteador de saída e não o aparelho. A margem, portanto, é de dezenas de quilômetros, e só a incompatibilidade de ordem de grandeza tem valor indiciário.",
+    "Compara o ponto retornado pela consulta do IP com uma referência residencial disponível. A base externa fornece uma estimativa, sem margem de erro aferida neste exame. O resultado não identifica aparelho, roteador ou presença física.",
     { color: MUTED, size: 8.5 }
   );
 
@@ -731,7 +731,7 @@ function sectionGeo(ctx, result, mapas = {}) {
     field(ctx, "Endereço IP", ipRef.endereco, { mono: true });
     field(
       ctx,
-      "Origem da conexão",
+      "Estimativa retornada pela consulta do IP",
       `${[ipRef.geo.city, ipRef.geo.region, ipRef.geo.country].filter(Boolean).join(" / ")} (${ipRef.geo.lat}, ${ipRef.geo.lon})`
     );
     const d = ipRef.divergenciaResidencia;
@@ -747,7 +747,7 @@ function sectionGeo(ctx, result, mapas = {}) {
       drawMap(
         ctx,
         mapas.mapaIpResidencia,
-        "Mapa 1. Origem da conexão pelo endereço IP (I, vermelho) × residência informada (R, azul). A linha representa a distância geodésica (Haversine). O ponto I indica o ponto de presença da operadora, NÃO a posição do aparelho. Base cartográfica OpenStreetMap."
+        "Mapa 1. Origem da conexão pelo endereço IP (I, vermelho) × residência informada (R, azul). A linha representa a distância geodésica (Haversine). O ponto I é uma estimativa do provedor de geolocalização; não identifica a posição do aparelho nem comprova ponto de presença da operadora. Base cartográfica OpenStreetMap."
       );
     }
   }
@@ -756,7 +756,7 @@ function sectionGeo(ctx, result, mapas = {}) {
   subheading(ctx, "§ 5.2 · Confronto 2 · residência informada × geolocalização declarada no documento");
   paragraph(
     ctx,
-    "Pergunta: a coordenada que o próprio documento registra como local da assinatura corresponde à residência do contratante? Aqui as duas coordenadas são de precisão métrica (GPS declarado e ponto confirmado). A comparação é direta e, ao contrário do Confronto 1, uma divergência de poucos quilômetros já é significativa.",
+    "Pergunta: a coordenada que o próprio documento registra como local da assinatura corresponde à residência do contratante? A precisão depende da origem dos dois pontos. Coordenada declarada, ponto confirmado e referência municipal têm limites diferentes; sem referência residencial válida não há distância residencial aferida.",
     { color: MUTED, size: 8.5 }
   );
 
@@ -795,7 +795,7 @@ function sectionGeo(ctx, result, mapas = {}) {
       drawMap(
         ctx,
         mapas.mapaResidenciaDeclarado,
-        "Mapa 2. Residência informada (R, azul) × geolocalização declarada no documento (A, âmbar). A linha representa a distância geodésica (Haversine). Ambos os pontos têm precisão métrica, ao contrário do Mapa 1. Base cartográfica OpenStreetMap."
+        "Mapa 2. Residência informada (R, azul) × geolocalização declarada no documento (A, âmbar). A linha representa a distância geodésica (Haversine). A precisão depende das fontes declaradas para cada ponto. Base cartográfica OpenStreetMap."
       );
     }
   }
@@ -806,7 +806,7 @@ function sectionGeo(ctx, result, mapas = {}) {
   subheading(ctx, "§ 5.2.1 · Confronto 3 · geolocalização declarada × origem da conexão (IP)");
   paragraph(
     ctx,
-    "Pergunta: a conexão que originou a assinatura partiu da região que o próprio documento registra como local do ato? Não usa a residência. A precisão é a do IP, de nível de operadora: divergências de dezenas de quilômetros são esperadas, e só a incompatibilidade de ordem de grandeza tem valor indiciário.",
+    "Compara a coordenada declarada no documento com o ponto retornado pela consulta do IP, independentemente da residência. A consulta atual não comprova localização na data do ato; sem margem de erro validada, a distância não determina compatibilidade física.",
     { color: MUTED, size: 8.5 }
   );
   const ipAssinatura = (result.ipAnalysis || []).find((ip) => ip.divergenciaAssinatura?.km != null);
@@ -822,13 +822,13 @@ function sectionGeo(ctx, result, mapas = {}) {
     const da = ipAssinatura.divergenciaAssinatura;
     reserve(ctx, 105);
     field(ctx, "Endereço IP", ipAssinatura.endereco, { mono: true });
-    badge(ctx, "Distância entre a geolocalização declarada e a origem do IP", `${da.km.toFixed(2)} km · ${da.rotulo}`, da.tom === "ok");
+    field(ctx, "Distância entre GPS declarado e consulta do IP", `cerca de ${Math.round(da.km)} km · ${da.rotulo} · consulta atual, sem comprovação histórica`);
     paragraph(ctx, da.sintese, { size: 9, color: da.tom === "danger" ? DANGER : INK });
     if (mapas.mapaDeclaradoIp) {
       drawMap(
         ctx,
         mapas.mapaDeclaradoIp,
-        "Mapa 3. Geolocalização declarada no documento (A, âmbar) × origem da conexão pelo endereço IP (I, vermelho). A linha representa a distância geodésica (Haversine). O ponto I indica o ponto de presença da operadora, NÃO a posição do aparelho. Base cartográfica OpenStreetMap."
+        "Mapa 3. Geolocalização declarada no documento (A, âmbar) × estimativa retornada para o IP registrado (I, vermelho). A linha representa a distância geodésica (Haversine). O ponto I é uma estimativa do provedor de geolocalização; não identifica a posição do aparelho nem comprova ponto de presença da operadora. Base cartográfica OpenStreetMap."
       );
     }
   }
@@ -898,7 +898,7 @@ function sectionIpTrace(ctx, result) {
 
   paragraph(
     ctx,
-    "Um endereço IP não carrega coordenada. A localização abaixo vem de base que mapeia blocos de IP ao ponto de presença da operadora, ou seja, ao roteador de saída, não ao aparelho. Em rede móvel brasileira, com CGNAT e blocos IPv6 alocados por região, o ponto devolvido tende à capital ou ao centro de operação do estado. Divergências de dezenas de quilômetros são esperadas; o que tem valor indiciário é a incompatibilidade de ordem de grandeza.",
+    "Um endereço IP não contém coordenadas geográficas. A localização abaixo é uma estimativa de serviço externo, sujeita a atualização e imprecisão. Não identifica, por si só, o aparelho, um roteador específico, o signatário ou a localização na data do ato.",
     { color: MUTED, size: 8.5 }
   );
 
@@ -927,7 +927,7 @@ function sectionIpTrace(ctx, result) {
 
     if (ip.data_hora) field(ctx, "   Data / hora do registro", ip.data_hora);
     if (ip.porta) {
-      field(ctx, "   Porta lógica de origem", `${ip.porta} (porta efêmera / cliente-servidor ativa)`);
+      field(ctx, "   Porta lógica de origem", `${ip.porta} (valor declarado; não comprova sessão ativa)`);
     }
 
     if (ip.rdap) {
@@ -976,11 +976,14 @@ function sectionIpTrace(ctx, result) {
 
     field(
       ctx,
-      "   Origem da conexão",
+      "   Estimativa da consulta de geolocalização",
       `${[ip.geo.city, ip.geo.region, ip.geo.country].filter(Boolean).join(" / ")} (${ip.geo.lat}, ${ip.geo.lon})`
     );
     if (ip.geo.isp) field(ctx, "   Operadora (ISP)", ip.geo.isp);
     field(ctx, "   Fonte da geolocalização", ip.geo.source || "não informada");
+    field(ctx, "   Consulta externa", `${ip.geo.queryId || "ID não registrado"} · ${ip.geo.queriedAt || "data não registrada"}`);
+    field(ctx, "   Granularidade", ip.historico?.precisionOverride || ip.geo.granularity || "não informada");
+    paragraph(ctx, "Consulta externa atual não comprova localização histórica na data do ato; a margem de erro do serviço não foi fornecida.", { size: 8, color: MUTED });
     // Motor pericial v2: registro do bloco na data do ato (RIPEstat).
     if (ip.historico?.label) field(ctx, "   Registro do bloco na data do ato", ip.historico.label);
     if (ip.historico?.note) paragraph(ctx, ip.historico.note, { color: MUTED, size: 8.5 });
@@ -995,7 +998,7 @@ function sectionIpTrace(ctx, result) {
 
     const da = ip.divergenciaAssinatura;
     if (da) {
-      badge(ctx, "   IP × GPS declarado no contrato", `${da.km.toFixed(2)} km · ${da.rotulo}`, da.tom === "ok");
+      field(ctx, "   IP × GPS declarado no contrato", `cerca de ${Math.round(da.km)} km · ${da.rotulo} · consulta atual, sem comprovação histórica`);
       paragraph(ctx, da.sintese, { size: 8.5, color: da.tom === "danger" ? DANGER : INK });
     }
   }

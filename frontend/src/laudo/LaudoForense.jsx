@@ -1260,7 +1260,7 @@ export default function LaudoForense({ report }) {
                       const cor = d?.tom === "ok" ? "#3ddc97" : d?.tom === "danger" ? "#f06363" : "#f2b03d";
                       return (
                         <>
-                          <div className="sub-head">Confronto · geolocalização declarada no contrato × origem da conexão (IP)</div>
+                          <div className="sub-head">Confronto · GPS declarado × consulta de geolocalização do IP</div>
                           <div className="geo-visual-block">
                             <div className="row">
                               <span className="row-label">Distância entre o local declarado e a origem do IP {ipRef.endereco}</span>
@@ -1274,7 +1274,7 @@ export default function LaudoForense({ report }) {
                               distanceKm={distanciaKm(ipRef.distanceToSignature)}
                               riskColor={cor}
                               targetLabel="Localização aproximada do IP"
-                              caption="Coordenada declarada no log da assinatura × localização aproximada do IP informada pelo provedor. Este confronto não usa a residência. O ponto do IP pode representar a central da operadora, CGNAT ou VPN, e só incompatibilidade de ordem de grandeza tem valor indiciário."
+                              caption="Coordenada declarada no log da assinatura × localização aproximada do IP informada pelo provedor. Este confronto não usa a residência. O ponto do IP pode representar a central da operadora, CGNAT ou VPN, e não demonstra localização histórica, presença física ou autoria. A margem de erro do serviço não foi fornecida."
                             />
                           </div>
                         </>
@@ -1335,6 +1335,8 @@ export default function LaudoForense({ report }) {
                                 ["Provedor (ISP / ASN)", ip.geo.isp],
                                 ["Fuso horário", ip.geo.timezone],
                                 ["Fonte da geolocalização", ip.geo.source],
+                                ["Consulta externa", `${ip.geo.queryId || "ID não registrado"} · ${ip.geo.queriedAt || "data não registrada"}`],
+                                ["Granularidade", ip.historico?.precisionOverride || ip.geo.granularity || "não informada"],
                               ].map(([lbl, val]) => <Row key={lbl} label={lbl} value={val} />)}
                               {hasIpGeoCoords && <Row label="Coordenadas do IP (registro atual)" value={`${ip.geo.lat.toFixed(7)}, ${ip.geo.lon.toFixed(7)}`} mono />}
                               {distanciaKm(ip.distanceToSignature) !== null && (

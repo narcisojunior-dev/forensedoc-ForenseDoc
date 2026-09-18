@@ -67,7 +67,7 @@ describe("verificação geográfica independente da residência", () => {
     const report = montarRelatorio({ analysisId: "a1", result: recusadoComGpsEIp() });
     const { container } = render(<LaudoForense report={report} />);
     const texto = container.textContent;
-    expect(texto).toContain("Confronto · geolocalização declarada no contrato × origem da conexão (IP)");
+    expect(texto).toContain("Confronto · GPS declarado × consulta de geolocalização do IP");
     expect(texto).toMatch(/23,31 km · COMPATÍVEL/);
     expect(texto).toContain("Município do local declaradoManaquiri/AM");
     expect(texto).toContain("Distância ao local declarado da assinatura");

@@ -137,6 +137,7 @@ export async function enrichGeography(extracted, homeAddress, homeCoord = null, 
         lat: geoInstrumento.lat,
         lon: geoInstrumento.lon,
         rotulo: consultaInstrumento,
+        fonte: `${geoInstrumento.source || "provedor não identificado"}; geocodificação da consulta "${consultaInstrumento}"`,
         precisao: extractedAddr ? geoInstrumento.precision || "endereco" : "municipio",
       }
     : null;

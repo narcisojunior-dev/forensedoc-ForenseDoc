@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { buildGeocodeQueries } from "../utils/geoUtils.js";
 import { cached, TTL } from "../utils/externalCache.js";
 import { buildSearchUrl, NOMINATIM_UA } from "./nominatimClient.js";
@@ -109,7 +110,7 @@ export async function getIpInfo(ip) {
   // Dossiês de trilha repetem o mesmo endereço em vários eventos, e clientes de
   // uma mesma operadora caem em blocos próximos. Sem cache, cada repetição
   // consome uma consulta da cota diária.
-  return cached("geoip", ip, TTL.geoip, () => getIpInfoSemCache(ip));
+  return cached("geoip-v2", ip, TTL.geoip, () => getIpInfoSemCache(ip));
 }
 
 async function getIpInfoSemCache(ip) {
@@ -127,7 +128,7 @@ async function getIpInfoSemCache(ip) {
       if (normalizado) {
         // `source` entra no laudo: a origem do dado é parte da cadeia de
         // custódia, e dois provedores podem divergir entre si.
-        return { ip, ...normalizado, source: provedor.nome };
+        return { ip, ...normalizado, source: provedor.nome, queriedAt: new Date().toISOString(), queryId: randomUUID(), granularity: "estimativa de rede; margem de erro não fornecida" };
       }
     } catch (err) {
       const motivo = err.name === "AbortError" ? "timeout" : err.message;

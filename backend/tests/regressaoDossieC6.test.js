@@ -36,7 +36,7 @@ const { heuristicExtractionFromText } = await import("../src/services/extraction
 const { enrichGeography } = await import("../src/services/geoEnrichmentService.js");
 const { fundamentacaoPara } = await import("../src/reports/laudoTexts.js");
 const { verificarCoerencia } = await import("../src/engine/coerenciaLaudo.js");
-const { buildSummaryForResult } = await import("../src/services/analysisRecompute.js");
+const { buildSummaryForResult, recomputeDerived } = await import("../src/services/analysisRecompute.js");
 const { montarConfrontoGeografico } = await import("../src/utils/distancia.js");
 const { calculateForensicScore } = await import("../src/utils/forensicScore.js");
 const { buildReportPdf } = await import("../src/services/reportPdfService.js");
@@ -170,7 +170,7 @@ describe("dossiê C6: testes negativos do relatório de homologação", () => {
       const result = { ...geo, reportId: "FD-TESTE", hashes: {}, file: { name: "dossie.pdf", sizeBytes: 1 } };
       result.confronto_geografico = montarConfrontoGeografico(result);
       result.sumarioIrregularidades = buildSummaryForResult(result, extraido);
-      return result;
+      return recomputeDerived(result, extraido);
     };
 
     it("negativo 1: nenhuma seção do sumário contém 0,00 km", async () => {
@@ -246,7 +246,7 @@ describe("dossiê C6: testes negativos do relatório de homologação", () => {
       expect(plano).toMatch(/Domicílio do titular: Manaquiri\/AM \(qualificação do instrumento; o endereço informado não foi utilizado\)/);
       expect(plano).toMatch(/GPS registrado no ato: Manaquiri\/AM \(-?\d/);
       expect(plano).not.toMatch(/Domicílio do titular: Rua|GPS registrado no ato: Não registrado/);
-      expect(plano).toMatch(/Distância entre a geolocalização declarada e a origem do IP: \d+\.\d{2} km · COMPATÍVEL/);
+      expect(plano).toMatch(/Distância entre GPS declarado e consulta do IP: cerca de \d+ km · DISTÂNCIA DESCRITIVA/);
     });
 
     it("o validador acusa o sumário do laudo da rodada 2 (0,00 km em selo favorável)", async () => {
