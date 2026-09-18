@@ -328,6 +328,9 @@ function cover(ctx, analysis, result, timestamp) {
       { width: boxWidth - 24, lineGap: 1.5 }
     );
 
+  // O texto do quadro deixa o cursor horizontal recuado; sem voltar à margem,
+  // todo o § 1 saía deslocado.
+  doc.x = MARGIN;
   doc.y = boxY + boxHeight + 10;
 }
 
