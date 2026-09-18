@@ -85,7 +85,7 @@ describe("D5 · projeção canônica", () => {
    * ao resumo passou a amputar o detalhe. A ressalva de um achado costuma estar
    * no fim do texto, que é justamente o que se perdia.
    */
-  it("a projeção preserva o texto integral; o resumo é que compacta", () => {
+  it("projeção e resumo preservam integralmente as ressalvas", () => {
     const ressalva = "RESSALVA FINAL QUE NAO PODE SUMIR DO DETALHE";
     const textoLongo = `${"Fundamentação extensa do achado, repetida para ultrapassar o limite de apresentação. ".repeat(12)}${ressalva}.`;
     expect(textoLongo.length).toBeGreaterThan(900);
@@ -105,8 +105,8 @@ describe("D5 · projeção canônica", () => {
     expect(naProjecao.text).not.toMatch(/…$/);
 
     const noResumo = comAchadoLongo.findings.find((f) => f.key === "LONGO1");
-    expect(noResumo.text.length).toBeLessThan(naProjecao.text.length);
-    expect(noResumo.text).toMatch(/…$/);
+    expect(noResumo.text).toBe(naProjecao.text);
+    expect(noResumo.text).toContain(ressalva);
   });
 
   /** Ausência de achado é estado de interface, não item que só existe no sumário. */

@@ -1467,7 +1467,7 @@ function sectionExecutiveSummary(ctx, sumario, reportId) {
       .fillColor(f.severity === "ALTA" ? DANGER : f.severity === "FAVORÁVEL" ? ACCENT : INK)
       .text(`${f.severity} · `, MARGIN, doc.y, { width: contentWidth, continued: true })
       .fillColor(INK)
-      .text(f.title, { continued: true })
+      .text(`${f.title} `, { continued: true })
       .font("Helvetica")
       .text(` ${f.text}`, { align: "justify" });
     doc.moveDown(0.3);

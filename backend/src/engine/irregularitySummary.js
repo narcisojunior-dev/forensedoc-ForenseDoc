@@ -219,8 +219,9 @@ export function buildIrregularitySummary(report = {}) {
 
   const addCheck = (domain, key, status, detail = "") => checks.push({ domain, key, status, detail });
   const addFinding = (severity, key, title, text) => {
-    if (issueKeys.has(key)) return;
-    issueKeys.add(key);
+    const identidade = JSON.stringify([key, title, String(text || "").replace(/\s+/g, " ").trim()]);
+    if (issueKeys.has(identidade)) return;
+    issueKeys.add(identidade);
     // O texto entra integral. Quem resume é a página do sumário, em
     // `displayFindings`, e o corpo do laudo publica o texto completo.
     const entry = { severity, key, title, text: String(text || "").replace(/\s+/g, " ").trim() };
@@ -229,7 +230,7 @@ export function buildIrregularitySummary(report = {}) {
   const addDiligence = (key, title, text) => {
     if (diligenceKeys.has(key)) return;
     diligenceKeys.add(key);
-    diligences.push({ key, title, text: compact(text, 220) });
+    diligences.push({ key, title, text: String(text || "").replace(/\s+/g, " ").trim() });
   };
 
   const declaredHash = String(signature.hash_documento_assinado || "").replace(/\s/g, "");
@@ -557,7 +558,7 @@ export function buildIrregularitySummary(report = {}) {
   // A página do sumário resume; o corpo publica integral. Antes, o corte de 560
   // caracteres era aplicado na criação do achado e, com o corpo passando a ler
   // a projeção, levava o resumo para dentro do detalhe.
-  const displayFindings = orderedFindings.slice(0, LIMITE_SUMARIO).map((f) => ({ ...f, text: compact(f.text, 560) }));
+  const displayFindings = orderedFindings.slice(0, LIMITE_SUMARIO).map((f) => ({ ...f, text: f.text }));
   // Ausência de achado é estado de interface, não item de lista: entrar na
   // lista do sumário sem entrar na projeção quebraria a igualdade que o § de
   // achados e esta página agora mantêm.
