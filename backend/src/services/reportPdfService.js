@@ -1093,12 +1093,12 @@ function sectionDigitalSignature(ctx, metadata, extracted) {
       const p = ds.procedencia;
       field(
         ctx,
-        "Proveniência do arquivo",
+        "Proveniência indicada por elementos do arquivo (não validada)",
         `${PROCEDENCIA_PDF[p.procedencia] || p.procedencia}${p.sistema ? ` (${[p.sistema, p.tribunal].filter(Boolean).join("/")})` : ""}`
       );
       if (p.data_juntada) field(ctx, "   Data da juntada", p.data_juntada);
       if (p.movimento) field(ctx, "   Movimento", `${p.movimento}${p.descricao_movimento ? ` · ${p.descricao_movimento}` : ""}`);
-      if (p.juntado_por) field(ctx, "   Juntado por (assinatura digital)", p.juntado_por);
+      if (p.juntado_por) field(ctx, "   Assinatura mencionada no carimbo (não validada)", p.juntado_por);
       if (p.identificador_validacao) field(ctx, "   Identificador de validação", p.identificador_validacao, { mono: true });
       if (ds.procedencia.indicios?.length) field(ctx, "Indícios", ds.procedencia.indicios.join(" · "));
       if (ds.procedencia.mensagem) paragraph(ctx, ds.procedencia.mensagem, { size: 8.5 });
