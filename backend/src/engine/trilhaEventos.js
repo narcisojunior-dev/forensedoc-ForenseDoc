@@ -101,6 +101,14 @@ const ACEITES = [
 const paginasDoTipo = (segmentacao, tipos) =>
   (segmentacao?.documentos || []).filter((d) => tipos.includes(d.tipo)).reduce((acc, d) => acc + d.paginaFinal - d.paginaInicial + 1, 0);
 
+// D11: a contagem com conteúdo negocial anda ao lado da total, que continua
+// sendo a base da métrica. A defesa vai apontar a página de fecho; o achado
+// fica mais forte antecipando do que sendo corrigido.
+const paginasNegociaisDoTipo = (segmentacao, tipos) =>
+  (segmentacao?.documentos || [])
+    .filter((d) => tipos.includes(d.tipo))
+    .reduce((acc, d) => acc + (Number.isFinite(d.paginas_conteudo_negocial) ? d.paginas_conteudo_negocial : d.paginaFinal - d.paginaInicial + 1), 0);
+
 function duracaoPt(segundos) {
   if (!Number.isFinite(segundos)) return null;
   const min = Math.floor(segundos / 60);
@@ -125,7 +133,15 @@ export function analisarTrilhaEventos({ texto, segmentacao, ufEmissao, dataHoraA
     ev.ausencias = [!ev.ip ? "IP" : null, ev.lat === null ? "geolocalização" : null].filter(Boolean);
     const aceite = /aceite/i.test(ev.nome) ? ACEITES.find((a) => a.regex.test(ev.nome)) : null;
     const paginas = aceite ? paginasDoTipo(segmentacao, aceite.tipos) : 0;
-    ev.documento_aceito = aceite ? { rotulo: aceite.rotulo, paginas: paginas || null } : null;
+    const paginasNegociais = aceite ? paginasNegociaisDoTipo(segmentacao, aceite.tipos) : 0;
+    ev.documento_aceito = aceite
+      ? {
+        rotulo: aceite.rotulo,
+        paginas: paginas || null,
+        paginas_conteudo_negocial: paginas ? paginasNegociais : null,
+        paginas_fecho: paginas ? paginas - paginasNegociais : null,
+      }
+      : null;
     ev.segundos_por_pagina = aceite && paginas && ev.intervalo_s !== null ? Number((ev.intervalo_s / paginas).toFixed(2)) : null;
   });
   const duracao = Math.round((eventos.at(-1).epoch - eventos[0].epoch) / 1000);
@@ -146,7 +162,7 @@ export function analisarTrilhaEventos({ texto, segmentacao, ufEmissao, dataHoraA
       aceite.codigo,
       aceite.codigo === "TRL1-CCB" ? "ALTA" : "MÉDIA",
       `Aceite de ${aceite.rotulo} incompatível com leitura`,
-      `O evento "${ev.nome}" ocorreu ${ev.intervalo_s} segundos após o evento anterior. O documento aceito tem ${ev.documento_aceito.paginas} páginas no arquivo, o que dá ${String(ev.segundos_por_pagina).replace(".", ",")} segundos por página, tempo incompatível com a leitura do conteúdo aceito.`
+      `O evento "${ev.nome}" ocorreu ${ev.intervalo_s} segundos após o evento anterior. O documento aceito tem ${ev.documento_aceito.paginas} páginas no arquivo, o que dá ${String(ev.segundos_por_pagina).replace(".", ",")} segundos por página, tempo incompatível com a leitura do conteúdo aceito.${ev.documento_aceito.paginas_fecho > 0 ? ` Dessas, ${ev.documento_aceito.paginas_conteudo_negocial} ${ev.documento_aceito.paginas_conteudo_negocial === 1 ? "traz" : "trazem"} conteúdo negocial e ${ev.documento_aceito.paginas_fecho} ${ev.documento_aceito.paginas_fecho === 1 ? "é página de fecho, com cabeçalho e rodapé apenas" : "são páginas de fecho, com cabeçalho e rodapé apenas"}; ainda assim a métrica é calculada sobre o total, porque foi o arquivo inteiro que se apresentou ao consumidor.` : ""}`
     );
   }
   if (duracao < 600) {
@@ -196,8 +212,19 @@ export function analisarTrilhaEventos({ texto, segmentacao, ufEmissao, dataHoraA
       add(
         "TZ1",
         "MÉDIA",
-        "Referências de horário misturadas no dossiê",
-        `A trilha rotula os eventos como ${fusoTrilha}, enquanto o bloco de assinatura informa "${dataHoraAssinatura}" sem indicar fuso.${coincide?.hora_local ? ` Se o horário for ${fusoTrilha}, como o da trilha, o ato ocorreu às ${coincide.hora_local.split(" ")[1]} no horário de ${fusoLocal.rotulo}, e não às ${horaAssinatura}.` : ""} O dossiê deve esclarecer o fuso efetivamente aplicado em cada carimbo.`
+        // D8: o título antigo era "Referências de horário misturadas no dossiê",
+        // e sugeria conflito de VALORES que não existe. Conferidos os dois na
+        // pág. 1, trazem exatamente o mesmo valor. O que há é um rótulo de fuso
+        // ausente em um dos dois lugares. A observação de fundo continua de pé;
+        // o que estava errado era a descrição do que se observou.
+        coincide ? "Bloco de assinatura sem fuso declarado" : "Bloco de assinatura sem fuso declarado e sem evento de mesmo horário na trilha",
+        // A afirmação de coincidência é condicionada à coincidência efetiva. A
+        // primeira redação do D8 dizia "os dois valores coincidem" sempre, o
+        // que é falso quando nenhum evento da trilha bate com o carimbo da
+        // assinatura: trocar um erro de descrição por outro não corrige nada.
+        `O bloco de assinatura informa "${dataHoraAssinatura}" sem indicar fuso, enquanto a trilha rotula seus eventos como ${fusoTrilha}. ${coincide
+          ? `O valor do bloco coincide com o do evento "${coincide.nome}" da trilha, de modo que não há divergência de horário entre eles: o que falta é o rótulo do fuso no bloco de assinatura, e disso depende a hora local do ato.`
+          : "Nenhum evento da trilha registra esse mesmo horário, de modo que não é possível afirmar, a partir do arquivo, a qual fuso o carimbo da assinatura se refere."}${coincide?.hora_local ? ` Se o valor for ${fusoTrilha}, como o da trilha, o ato ocorreu às ${coincide.hora_local.split(" ")[1]} no horário de ${fusoLocal.rotulo}, e não às ${horaAssinatura}.` : ""} O dossiê deve esclarecer o fuso efetivamente aplicado em cada carimbo.`
       );
     }
   }

@@ -68,6 +68,9 @@ export function segmentarDocumentos(texto) {
   const t = String(texto || "");
   if (!t.includes("\f")) return null;
   const paginas = t.split("\f");
+  // Form-feed terminal cria uma página vazia a mais. A extração do Poppler o
+  // emite, e sem isto o dossiê de 27 páginas era segmentado como 28.
+  if (paginas.length > 1 && !paginas.at(-1).trim()) paginas.pop();
   const documentos = [];
 
   paginas.forEach((pagina, i) => {
@@ -91,8 +94,68 @@ export function segmentarDocumentos(texto) {
     }
   });
 
+  /*
+   * ─── D11 · a contagem de páginas inclui página de fecho ──────────────────────
+   *
+   * A pág. 7 do dossiê C6 traz apenas a faixa de cabeçalho e uma linha de rodapé
+   * com site, horário e SAC. Ela entra nas 12 páginas usadas no cálculo de 2,25
+   * segundos por página do aceite da CCB.
+   *
+   * A contagem não está errada: o documento aceito tem mesmo 12 páginas no
+   * arquivo, e é sobre o total que a métrica deve ser calculada, porque foi o
+   * arquivo inteiro que foi apresentado ao consumidor. Mas a defesa vai contar
+   * isso, e o achado fica mais forte antecipando. Duas contagens, então: total e
+   * com conteúdo negocial, com a métrica sobre a total e a outra ao lado.
+   */
+  documentos.forEach((d) => {
+    const doDocumento = paginas.slice(d.paginaInicial - 1, d.paginaFinal);
+    const negociais = doDocumento.filter((pagina) => temConteudoNegocial(pagina)).length;
+    d.paginas_total = d.paginaFinal - d.paginaInicial + 1;
+    d.paginas_conteudo_negocial = negociais;
+    d.paginas_fecho = d.paginas_total - negociais;
+  });
+
   const titulados = documentos.filter((d) => d.tituloDetectado).length;
   return { documentos, confiavel: titulados >= 2 };
+}
+
+/** Rodapé institucional: site, horário de atendimento, SAC, ouvidoria. */
+const RODAPE = /www\.|\bSAC\b|ouvidoria|atendimento|\d{4}-\d{4}|0800|central\s+de\s+relacionamento|p[áa]gina\s+\d+\s*(?:de|\/)\s*\d+|via\s+n[ãa]o\s+negoci[áa]vel|via\s+do\s+cliente|documento\s+assinado\s+digitalmente|assinado\s+digitalmente\s+por|PROJUDI|JUNTADA\s+DE\s+PETI[ÇC][ÃA]O|^\s*Arq:/i;
+
+/**
+ * Resto de texto abaixo do qual a página não tem frase própria. Uma cláusula
+ * curta real ("O contratante autoriza o desconto das parcelas em sua folha de
+ * pagamento.") tem 72 caracteres e precisa contar como conteúdo.
+ */
+const LIMIAR_FECHO = 40;
+
+/**
+ * A página tem conteúdo negocial, ou é só cabeçalho e rodapé?
+ *
+ * ─── Por que não é um limiar de tamanho ─────────────────────────────────────
+ *
+ * A primeira versão media o texto restante contra 120 caracteres. Isso trata
+ * página curta como página vazia: uma cláusula de uma linha só seria contada
+ * como fecho, e a contagem de conteúdo negocial, que existe para ANTECIPAR o
+ * argumento da defesa, passaria a dar munição a ele.
+ *
+ * Fecho é a página que tem moldura reconhecida e nada além dela. Duas condições,
+ * não uma. Sem marcador de moldura, a página conta como conteúdo, porque o que
+ * não se reconhece não se classifica: na dúvida, conteúdo.
+ */
+export function temConteudoNegocial(pagina) {
+  const linhas = String(pagina || "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (!linhas.length) return false;
+
+  const temMoldura = linhas.some((l) => RODAPE.test(l));
+  const resto = linhas.filter((l) => !RODAPE.test(l)).join(" ").replace(/\s+/g, " ").trim();
+
+  // Página sem moldura reconhecida não é fecho, seja qual for o tamanho.
+  if (!temMoldura) return true;
+  return resto.length >= LIMIAR_FECHO;
 }
 
 export function documentoDaPagina(segmentacao, pagina) {
@@ -121,7 +184,10 @@ export function avaliarAssinaturaPorDocumento(segmentacao) {
   // Só blocos apostos a documento negocial contam como assinatura.
   const totalBlocos = segmentacao.documentos.reduce((n, d) => n + d.blocosAssinatura.filter((b) => (b.tipo || "BLOCO_ASSINATURA") === "BLOCO_ASSINATURA").length, 0);
 
-  if (!principal || principal.blocosAssinatura.length || !acessoriosAssinados.length) return { achado: null, resumo, totalBlocos };
+  // Fragmentos não contíguos e aditivos impedem imputar ausência ao contrato
+  // inteiro a partir apenas do primeiro segmento com o mesmo título.
+  const principais = segmentacao.documentos.filter((d) => d.tipo === "INSTRUMENTO_PRINCIPAL");
+  if (principais.length > 1 || !principal || principal.blocosAssinatura.length || !acessoriosAssinados.length) return { achado: null, resumo, totalBlocos };
   return {
     resumo,
     totalBlocos,
@@ -132,4 +198,60 @@ export function avaliarAssinaturaPorDocumento(segmentacao) {
       texto: `O arquivo apresentado não exibe bloco de assinatura na ${principal.titulo} (${faixa(principal)}). A legenda de assinatura eletrônica localizada pertence a ${acessoriosAssinados.map((d) => `${d.titulo.toLowerCase()} (pág. ${d.blocosAssinatura.map((b) => b.pagina).join(", ")})`).join(" e ")}. A declaração de que o instrumento foi assinado, se houver, não substitui o bloco de assinatura no próprio instrumento que gera a obrigação.`,
     },
   };
+}
+
+/*
+ * ─── D12 · anomalia de paginação no rodapé do modelo ─────────────────────────
+ *
+ * As Condições Gerais do dossiê C6 ocupam as págs. 8 a 14 e trazem rodapé
+ * próprio `CG.CLTv1.20250420` numerado de 1/5 até 7/5: sete páginas numeradas
+ * contra cinco declaradas no denominador.
+ *
+ * A leitura foi confirmada visualmente na pág. 14 renderizada antes de virar
+ * código, porque a primeira leitura tinha sido de imagem e leitura de imagem
+ * erra. Mesmo confirmada, o estado é `indicio` e nunca `comprovado`: a leitura
+ * possível é que o documento juntado não corresponda ao modelo cuja numeração o
+ * rodapé declara, e isso não se conclui de uma contagem de rodapé.
+ */
+
+/**
+ * Rodapé de modelo: rótulo alfanumérico e, na MESMA linha, `n/m`. No PDF os dois
+ * ficam nas extremidades da linha, separados por um bloco de espaços, e o rótulo
+ * aparece tanto como "CG.CLTv1..." quanto como "CG CLTv1...".
+ */
+const RODAPE_MODELO = /^[ \t]*([A-Z]{2,6}[. ][A-Za-z0-9.]{4,30}?)[ \t]{2,}(\d{1,3})\s*\/\s*(\d{1,3})[ \t]*$/gm;
+
+/**
+ * @param {string} texto texto com quebras de página, sem carimbo processual
+ * @returns {Array<{modelo: string, numeradores: number[], denominador: number, paginas: number[]}>}
+ */
+export function detectarAnomaliaPaginacao(texto) {
+  const paginas = String(texto || "").split("\f");
+  const porModelo = new Map();
+
+  paginas.forEach((pagina, i) => {
+    RODAPE_MODELO.lastIndex = 0;
+    let m;
+    while ((m = RODAPE_MODELO.exec(pagina)) !== null) {
+      const modelo = m[1].replace(/\.$/, "");
+      const numerador = Number(m[2]);
+      const denominador = Number(m[3]);
+      if (!Number.isFinite(numerador) || !Number.isFinite(denominador) || denominador === 0) continue;
+      if (!porModelo.has(modelo)) porModelo.set(modelo, { modelo, numeradores: [], denominadores: new Set(), paginas: [] });
+      const registro = porModelo.get(modelo);
+      registro.numeradores.push(numerador);
+      registro.denominadores.add(denominador);
+      registro.paginas.push(i + 1);
+    }
+  });
+
+  return [...porModelo.values()]
+    .filter((r) => r.denominadores.size === 1 && Math.max(...r.numeradores) > [...r.denominadores][0])
+    .map((r) => ({
+      modelo: r.modelo,
+      numeradores: r.numeradores,
+      denominador: [...r.denominadores][0],
+      maior_numerador: Math.max(...r.numeradores),
+      paginas: r.paginas,
+    }));
 }

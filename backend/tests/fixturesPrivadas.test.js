@@ -51,9 +51,9 @@ describe.skipIf(!disponivel)("fixture privado: dossiê C6 (PDF real)", () => {
     expect(r.extracted.achados_irregularidade.map((a) => a.codigo)).not.toContain("INT2");
   });
 
-  it("com a selfie inventariada, biometria não aparece como mera menção no clausulado", () => {
+  it("com a selfie inventariada, biometria não aparece como mera descrição do instrumento", () => {
     expect((r.extracted.imagens_pdf.imagens || []).filter((i) => i.biometricaProvavel).length).toBeGreaterThan(0);
-    expect(r.extracted.assinatura.metodos_mencionados_clausulado.join(" ")).not.toMatch(/biometr/i);
+    expect(r.extracted.assinatura.metodos_descritos_no_fluxo.map((m) => m.rotulo).join(" ")).not.toMatch(/biometr/i);
   });
 
   it("data do contrato e aferição matemática no PDF real", () => {

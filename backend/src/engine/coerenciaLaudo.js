@@ -101,7 +101,11 @@ const REGRAS = [
         return `a ${principal.titulo} tem bloco na pág. ${principal.blocosAssinatura[0].pagina}, e o laudo afirma: ${negaAssinatura.slice(0, 120)}`;
       }
       const resumo = extracted.assinatura?.blocos_por_documento || "";
-      const afirmaBloco = new RegExp(`${principal.titulo.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[^;]*bloco de assinatura na p[áa]g`, "i").test(resumo);
+      const faixa = principal.paginaInicial === principal.paginaFinal ? `pág. ${principal.paginaInicial}` : `págs. ${principal.paginaInicial} a ${principal.paginaFinal}`;
+      const resumoDoPrincipal = docs.filter((d) => d.titulo === principal.titulo).length > 1
+        ? resumo.split(";").filter((parte) => parte.includes(`${principal.titulo} (${faixa})`)).join(";")
+        : resumo.split(";").filter((parte) => parte.includes(principal.titulo)).join(";");
+      const afirmaBloco = /bloco de assinatura na p[áa]g/i.test(resumoDoPrincipal);
       if (!principal.blocosAssinatura?.length && afirmaBloco) return `resumo de blocos afirma assinatura na ${principal.titulo}, que não tem bloco`;
       return null;
     },
@@ -141,7 +145,7 @@ const REGRAS = [
     descricao: "Biometria dada como apenas mencionada no clausulado, com evento ou imagem biométrica no arquivo",
     verificar(_result, extracted) {
       const a = extracted.assinatura || {};
-      const soClausulado = (a.metodos_mencionados_clausulado || []).some((m) => /biometr/i.test(m));
+      const soClausulado = (a.metodos_descritos_no_fluxo || []).some((m) => m.codigo === "BIOMETRIA" || /biometr/i.test(m.rotulo || ""));
       if (!soClausulado) return null;
       const imagens = (extracted.imagens_pdf?.imagens || []).filter((i) => i.biometricaProvavel).length;
       if (a.biometria_registrada_como_evento || imagens) {

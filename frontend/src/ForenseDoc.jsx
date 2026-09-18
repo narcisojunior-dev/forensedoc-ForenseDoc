@@ -9,6 +9,7 @@ import { exportReportPDF } from "./utils/pdfExport.js";
 import { Row, Badge, Section } from "./components/UiComponents.jsx";
 import { DistanceBanner } from "./components/DistanceBanner.jsx";
 import { GeoMap } from "./components/GeoMap.jsx";
+import { fichaBeneficioSeAplica } from "./laudo/produto.js";
 
 function arrayBufferToBase64(buffer) {
   let binary = "";
@@ -472,9 +473,14 @@ export default function ForenseDoc() {
                   ["CEP", report.extracted.cliente?.cep],
                   ["Telefone", report.extracted.cliente?.telefone],
                   ["E-mail", report.extracted.cliente?.email],
-                  ["Matrícula INSS", report.extracted.cliente?.matricula_inss],
-                  ["Número do benefício", report.extracted.cliente?.numero_beneficio],
-                  ["Espécie do benefício", report.extracted.cliente?.especie_beneficio],
+                  /* D7: campos de benefício previdenciário não se imprimem em
+                     modalidade que não os comporta (ex.: consignado CLT). */
+                  ...(fichaBeneficioSeAplica(report.extracted.contrato?.produto_codigo) ? [
+                    ["Matrícula INSS", report.extracted.cliente?.matricula_inss],
+                    ["Número do benefício", report.extracted.cliente?.numero_beneficio],
+                    ["Espécie do benefício", report.extracted.cliente?.especie_beneficio],
+                  ] : []),
+
                   ["Banco de recebimento", report.extracted.cliente?.banco_recepcao],
                 ].map(([lbl, val]) => <Row key={lbl} label={lbl} value={val} />)}
 

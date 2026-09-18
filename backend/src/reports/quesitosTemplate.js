@@ -94,8 +94,17 @@ export function generateJudicialQuesitos({
   return quesitos.filter(Boolean).map((q, i) => ({ ...q, numero: i + 1 }));
 }
 
-/** Achados de gravidade MÉDIA que o relatório da rodada 2 pediu nominalmente. */
-const SEMPRE = new Set(["EMP1", "CAD4"]);
+/**
+ * Achados de gravidade MÉDIA que o relatório da rodada 2 pediu nominalmente.
+ *
+ * SEG1 entrou aqui por causa do D9: sem o certificado individual do seguro, o
+ * achado é rebaixado de ALTA para MÉDIA, porque depende de uma premissa de
+ * início de vigência. Mas é exatamente esse quesito que PEDE o certificado.
+ * Deixá-lo cair com o rebaixamento fecharia o único caminho para confirmar a
+ * premissa, e o achado ficaria rebaixado para sempre por falta do documento
+ * que o próprio quesito requisita.
+ */
+const SEMPRE = new Set(["EMP1", "CAD4", "SEG1"]);
 /** Achados cujo quesito toma o lugar do quesito geral do mesmo tema. */
 const SUBSTITUI_GERAL = new Set(["INT1", "BIO2"]);
 

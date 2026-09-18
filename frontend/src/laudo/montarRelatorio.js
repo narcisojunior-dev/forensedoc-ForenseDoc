@@ -37,6 +37,27 @@ function geoMedidoAteOGps(geo, ipAnalysis, contractGeo) {
  * residência calculada a partir de nulo ("0,00 km" em selo favorável). Sem
  * confronto válido, a tela retira esses itens em vez de exibi-los.
  */
+/**
+ * Reconta o corte declarado depois de a saneadora remover achados. Sem isto, o
+ * aviso de página listaria códigos que já não estão em lugar nenhum.
+ */
+function recontarCorte(corte, projecao, findings) {
+  if (!corte) return null;
+  const exibidos = new Set(findings.map((f) => f.key));
+  const omitidos = projecao.filter((f) => !exibidos.has(f.key));
+  if (!omitidos.length) return null;
+  const codigos = omitidos.map((f) => f.key);
+  return {
+    ...corte,
+    total: projecao.length,
+    exibidos: findings.length,
+    omitidos: omitidos.length,
+    codigos,
+    gravidades: [...new Set(omitidos.map((f) => f.severity))],
+    aviso: `Os ${projecao.length} achados do corpo do laudo estão no § de achados técnicos. Esta página exibe os ${findings.length} de maior gravidade; ${omitidos.length} ${omitidos.length === 1 ? "foi omitido" : "foram omitidos"} por limite de página (${codigos.join(", ")}).`,
+  };
+}
+
 function sanearSumario(sumario, home, ipAnalysis, contractGeo) {
   if (!sumario) return sumario;
   const recusado = ["RECUSADO_CONFLITO", "INDISPONIVEL_NAO_INFORMADO"].includes(home?.estado_confronto);
@@ -49,10 +70,17 @@ function sanearSumario(sumario, home, ipAnalysis, contractGeo) {
     return { ...sumario, geo: sumario.geo ? { ...sumario.geo, items: (sumario.geo.items || []).filter((i) => valida(i.distance)) } : sumario.geo };
   }
   const semResidencia = (lista = []) => lista.filter((f) => !CHAVES_DISTANCIA_RESIDENCIA.has(f.key));
+  // D5: a projeção canônica é a fonte do § 8 e do sumário. Se um achado sai de
+  // um, sai dos dois, e o corte declarado é recontado sobre o que sobrou. Caso
+  // contrário o corpo do laudo exibiria itens que o sumário removeu.
+  const projecao = semResidencia(sumario.projecao || sumario.allFindings);
+  const findings = semResidencia(sumario.findings);
   return {
     ...sumario,
-    findings: semResidencia(sumario.findings),
+    findings,
     allFindings: semResidencia(sumario.allFindings),
+    projecao,
+    corte: recontarCorte(sumario.corte, projecao, findings),
     favorable: semResidencia(sumario.favorable),
     checks: (sumario.checks || []).map((c) => (c.key === "gps-residencia" ? { ...c, status: "INDETERMINADO", detail: "Distância à residência não calculada." } : c)),
     geo: sumario.geo ? geoMedidoAteOGps(sumario.geo, ipAnalysis, contractGeo) : sumario.geo,

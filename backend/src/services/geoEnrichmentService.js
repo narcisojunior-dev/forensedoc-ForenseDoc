@@ -269,11 +269,37 @@ export async function enrichGeography(extracted, homeAddress, homeCoord = null, 
   }
 
   const pontoIp = ipAnalysis.find((ip) => Number.isFinite(ip.geo?.lat) && Number.isFinite(ip.geo?.lon));
+
+  /*
+   * D3 · confronto B: coordenada declarada × município de emissão do instrumento.
+   *
+   * Independe da residência informada, e por isso continua valendo quando ela é
+   * recusada. A sede do município é geocodificada aqui, e a coordenada obtida
+   * viaja na saída junto com a fórmula, para que o número não seja uma
+   * afirmação sem origem.
+   */
+  const localEmissao = extracted.contrato?.local_emissao || null;
+  let pontoEmissao = null;
+  if (localEmissao?.municipio) {
+    const consulta = [localEmissao.municipio, localEmissao.uf].filter(Boolean).join(", ");
+    const sede = await geocodeAddress(consulta).catch(() => null);
+    if (sede && Number.isFinite(sede.lat) && Number.isFinite(sede.lon)) {
+      pontoEmissao = {
+        lat: sede.lat,
+        lon: sede.lon,
+        rotulo: `${localEmissao.municipio}/${localEmissao.uf}`,
+        precisao: "municipio",
+        fonte: `${sede.source || "provedor não identificado"}; referência municipal geocodificada a partir de "${consulta}"`,
+      };
+    }
+  }
+
   const confrontoEnderecos = montarConfrontoEnderecos({
     instrumento: pontoInstrumento,
     laudo: pontoLaudo,
-    ip: pontoIp ? { lat: pontoIp.geo.lat, lon: pontoIp.geo.lon, rotulo: [pontoIp.geo.city, pontoIp.geo.region].filter(Boolean).join("/") || pontoIp.endereco, precisao: "ip" } : null,
-    gps: contractGeo ? { lat: contractGeo.lat, lon: contractGeo.lon, rotulo: contractGeo.municipio || "coordenada do log", precisao: "gps" } : null,
+    emissao: pontoEmissao,
+    ip: pontoIp ? { lat: pontoIp.geo.lat, lon: pontoIp.geo.lon, rotulo: [pontoIp.geo.city, pontoIp.geo.region].filter(Boolean).join("/") || pontoIp.endereco, precisao: "ip", fonte: pontoIp.geo.source || null } : null,
+    gps: contractGeo ? { lat: contractGeo.lat, lon: contractGeo.lon, rotulo: contractGeo.municipio || "coordenada do log", precisao: contractGeo.precision || "gps", fonte: contractGeo.fonte || contractGeo.source || "coordenada declarada no documento" } : null,
   });
 
   const home = {
@@ -287,6 +313,8 @@ export async function enrichGeography(extracted, homeAddress, homeCoord = null, 
     endereco_literal: cliente.endereco_literal || cliente.estados_campos?.endereco?.valor || null,
     endereco_nao_informado: enderecoNaoInformado,
     instrumento_geo: pontoInstrumento,
+    emissao_geo: pontoEmissao,
+    local_emissao: localEmissao,
     referencia_informada_geo: pontoLaudo,
   };
   home.alerta = descreverEstadoConfronto(home);

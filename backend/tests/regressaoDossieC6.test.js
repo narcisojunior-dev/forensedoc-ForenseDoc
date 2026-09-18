@@ -118,9 +118,17 @@ describe("dossiê C6: testes negativos do relatório de homologação", () => {
     expect(extraido.achados_irregularidade.find((a) => a.codigo === "EMP1")?.texto).toMatch(/000007 - CONSIG TRAB/);
   });
 
-  it("7. não afirma que a biometria foi apenas mencionada no clausulado", () => {
-    expect(extraido.assinatura.metodos_mencionados_clausulado.join(" ")).not.toMatch(/biometr/i);
+  it("7. não afirma que a biometria foi apenas descrita no instrumento", () => {
+    const rotulos = extraido.assinatura.metodos_descritos_no_fluxo.map((m) => m.rotulo).join(" ");
+    expect(rotulos).not.toMatch(/biometr/i);
     expect(extraido.assinatura.biometria_registrada_como_evento).toBe(true);
+  });
+
+  // D1: o § 4 do laudo FD-20260917 afirmou "SMS Token · E-mail" para este
+  // dossiê, que não contém a palavra "token" em nenhuma das 27 páginas.
+  it("7.1. não afirma fator de autenticação ausente do material", () => {
+    expect(JSON.stringify(extraido.assinatura)).not.toMatch(/SMS\s*Token/i);
+    expect(extraido.assinatura.metodos_descritos_estado).toBe("nao_localizado_no_material");
   });
 
   it("protocolo de autenticidade não é tratado como hash declarado", () => {
@@ -132,11 +140,20 @@ describe("dossiê C6: testes negativos do relatório de homologação", () => {
     expect(int1.texto).toMatch(/autoverificação/);
   });
 
-  it("somatório confere e prazo diverge (6 meses declarados, 249 dias efetivos)", () => {
+  /**
+   * D4: o campo do instrumento é "Prazo Total: 6 meses ou até o pagamento da
+   * última parcela, o que acontecer por último". A ressalva está dentro do mesmo
+   * campo que o laudo leu, e o comparador descartava o resto do token. Campo
+   * condicional não declara prazo fechado, logo não há divergência a afirmar: o
+   * desfecho é inconclusivo e o achado muda de natureza (PRZ2).
+   */
+  it("somatório confere e o prazo sai como condicional, não como divergente", () => {
     const m = extraido.afericao_matematica;
     expect(m.somatorio_confere).toBe(true);
-    expect(m.prazo_descricao).toBe("declarado 6 meses, efetivo 249 dias (8,3 meses)");
-    expect(m.prazo_confere).toBe(false);
+    expect(m.prazo_confere).toBeNull();
+    expect(m.prazo_declarado_condicional).toBe(true);
+    expect(m.prazo_descricao).toMatch(/declarado de forma condicional/);
+    expect(m.prazo_descricao).toMatch(/efetivo 249 dias \(8,3 meses\)/);
   });
 
   it("campos cadastrais fictícios ou vazios viram achado sobre o instrumento", () => {
@@ -272,7 +289,7 @@ describe("dossiê C6: testes negativos do relatório de homologação", () => {
     expect(lib1.texto).toMatch(/Banco 237, agência 1234, conta 005555-1\), no valor de R\$ 1\.779,15/);
   });
 
-  it("10. emite o bloco de seguro prestamista com os seis achados", () => {
+  it("10. emite o bloco de seguro prestamista com os sete achados", () => {
     const s = extraido.seguro_prestamista;
     expect(s).toMatchObject({ proposta: "900112233", premio: "R$ 218,64", iof: "R$ 0,83", pro_labore: "R$ 98,02", beneficiario: "Estipulante" });
     expect(s.coberturas.map((c) => [c.nome, c.premio, c.carencia_dias, c.franquia_dias, c.teto_parcelas])).toEqual([
@@ -282,8 +299,17 @@ describe("dossiê C6: testes negativos do relatório de homologação", () => {
     ]);
     expect(s.seguradora.cnpj).toBe("02.102.498/0001-29");
     expect(s.corretora).toEqual({ nome: "Nova Casa do Corretor", cnpj: "07.340.832/0001-04", susep: "202037842" });
-    expect(s.achados.map((a) => a.codigo)).toEqual(["SEG1", "SEG2", "SEG3", "SEG4", "SEG5", "SEG6"]);
-    expect(s.achados[0].gravidade).toBe("ALTA");
+    // SEG8 é a soma das coberturas contra o prêmio total (D10). SEG7 continua
+    // reservado ao prêmio da proposta contra o seguro da planilha, que neste
+    // dossiê não diverge.
+    expect(s.achados.map((a) => a.codigo)).toEqual(["SEG1", "SEG2", "SEG3", "SEG4", "SEG5", "SEG6", "SEG8"]);
+    // D9: sem o certificado individual, o início de vigência é premissa, e o
+    // achado que depende dela sai rebaixado, com a premissa declarada e o
+    // trecho da proposta ancorado. Volta a ALTA quando o certificado vier.
+    expect(s.achados[0].gravidade).toBe("MÉDIA");
+    expect(s.vigencia.premissa_origem).toBe("PRESUMIDO_DATA_DO_CONTRATO");
+    expect(s.vigencia.remissao_ao_certificado).toMatch(/certificado/i);
+    expect(s.achados[0].texto).toMatch(/certificado individual/i);
   });
 
   it("reconstrói a trilha: 6 eventos, 204 s, aceites rápidos, ausências e fuso", () => {

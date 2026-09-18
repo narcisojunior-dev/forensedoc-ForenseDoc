@@ -88,7 +88,12 @@ export function nomePlausivel(valor) {
 const NUMERO_DE_CONTRATO = /(?=[A-Z0-9.\-\/]*(?:\d[A-Z0-9.\-\/]*){4,})([A-Z0-9.\-\/]{5,})/i;
 
 export function numeroContratoPlausivel(valor) {
-  return (String(valor || "").match(/\d/g) || []).length >= 4;
+  const v = String(valor || "").trim();
+  return /^[A-Z0-9][A-Z0-9./-]{3,79}$/i.test(v)
+    && (v.match(/\d/g) || []).length >= 4
+    && !/^\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}$/.test(v)
+    && !/^\d{2}\/\d{2}\/\d{4}$/.test(v)
+    && !/https|visualizar|listview/i.test(v);
 }
 
 export function extrairNumeroContrato(flat) {

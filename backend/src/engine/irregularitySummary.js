@@ -205,7 +205,9 @@ function normalizeIssue(issue, index = 0) {
       codigo: issue.codigo || `AUTO${index}`,
       gravidade: issue.gravidade || issue.severidade || "MÉDIA",
       titulo: compact(String(issue.titulo || "Achado técnico").replace(/\.+$/, ""), 120),
-      texto: compact(issue.texto || issue.detalhe || "", 900),
+      // D5: sem corte aqui. O texto integral é o que o corpo do laudo publica;
+      // a compactação é da apresentação resumida, aplicada só no sumário.
+      texto: String(issue.texto || issue.detalhe || "").replace(/\s+/g, " ").trim(),
     };
   }
   const clean = String(issue || "")
@@ -238,7 +240,9 @@ export function buildIrregularitySummary(report = {}) {
   const addFinding = (severity, key, title, text) => {
     if (issueKeys.has(key)) return;
     issueKeys.add(key);
-    const entry = { severity, key, title, text: compact(text, 560) };
+    // O texto entra integral. Quem resume é a página do sumário, em
+    // `displayFindings`, e o corpo do laudo publica o texto completo.
+    const entry = { severity, key, title, text: String(text || "").replace(/\s+/g, " ").trim() };
     if (severity === "FAVORÁVEL") favorable.push(entry); else findings.push(entry);
   };
   const addDiligence = (key, title, text) => {
@@ -541,11 +545,42 @@ export function buildIrregularitySummary(report = {}) {
   // dossiê C6, "metadados descritivos ausentes" saía antes da falta de prova do
   // crédito e da fragilidade biométrica.
   const orderedFindings = ordenarAchados(findings, { codigo: (f) => f.key, gravidade: (f) => f.severity });
-  const displayFindings = orderedFindings.slice(0, 15);
-  if (favorable.length) displayFindings.push(favorable[0]);
-  if (!displayFindings.length) {
-    displayFindings.push({ severity: "FAVORÁVEL", key: "no-auto-alert", title: "Sem irregularidade crítica automática conclusiva.", text: "Os dados disponíveis não produziram alerta grave, sem prejuízo da revisão humana do contrato e dos logs originais." });
-  }
+
+  /*
+   * ─── D5 · projeção canônica ─────────────────────────────────────────────────
+   *
+   * O laudo FD-20260917 trazia 20 achados no corpo e 15 no sumário, e um item
+   * no sumário sem correspondente no corpo. Um mecanismo só explica as duas
+   * coisas: este ponto cortava a lista em 15 sem avisar, e a lista cortada é
+   * maior do que a do corpo, porque reúne os achados estruturados da extração
+   * com os que o próprio sumário produz (assinatura simples, hash, geografia).
+   *
+   * `projecao` é agora a lista canônica, a mesma que o corpo do laudo passa a
+   * renderizar. O sumário consome essa projeção e não constrói item próprio.
+   * Quando a página não comporta todos, o corte é declarado e contado aqui, e
+   * impresso na própria página. Truncar não é defeito; truncar em silêncio é.
+   */
+  const LIMITE_SUMARIO = 15;
+  const omitidos = orderedFindings.slice(LIMITE_SUMARIO);
+  const corte = omitidos.length
+    ? {
+      limite: LIMITE_SUMARIO,
+      total: orderedFindings.length,
+      exibidos: LIMITE_SUMARIO,
+      omitidos: omitidos.length,
+      codigos: omitidos.map((f) => f.key),
+      gravidades: [...new Set(omitidos.map((f) => f.severity))],
+      aviso: `Os ${orderedFindings.length} achados do corpo do laudo estão no § de achados técnicos. Esta página exibe os ${LIMITE_SUMARIO} de maior gravidade; ${omitidos.length} ${omitidos.length === 1 ? "foi omitido" : "foram omitidos"} por limite de página (${omitidos.map((f) => f.key).join(", ")}).`,
+    }
+    : null;
+  // A página do sumário resume; o corpo publica integral. Antes, o corte de 560
+  // caracteres era aplicado na criação do achado e, com o corpo passando a ler
+  // a projeção, levava o resumo para dentro do detalhe.
+  const displayFindings = orderedFindings.slice(0, LIMITE_SUMARIO).map((f) => ({ ...f, text: compact(f.text, 560) }));
+  // Ausência de achado é estado de interface, não item de lista: entrar na
+  // lista do sumário sem entrar na projeção quebraria a igualdade que o § de
+  // achados e esta página agora mantêm.
+  const semAchados = orderedFindings.length === 0;
 
   const geoItems = [];
   if (!(report.confronto_enderecos?.pares || []).length && gpsDistance !== null && !distanciaSuspeita(gpsDistance)) {
@@ -592,7 +627,71 @@ export function buildIrregularitySummary(report = {}) {
     }
   }
 
-  let synthesis = "O documento não contém elementos geográficos suficientes para confronto entre GPS e IP de acesso; a ausência integral de trilha de rede/localização é o achado geográfico principal.";
+  /*
+   * ─── D2 · a conclusão geográfica contradizia o corpo do laudo ───────────────
+   *
+   * A frase de ausência integral era o VALOR INICIAL desta variável, não um
+   * ramo. Sobrevivia sempre que nenhum dos ramos abaixo disparasse, e foi o que
+   * ocorreu no laudo FD-20260917: com a residência recusada não há distância, e
+   * nenhum IP foi classificado como infraestrutura. O laudo então afirmou
+   * "ausência integral de trilha de rede/localização" na pág. 22, onze páginas
+   * depois de imprimir seis eventos, quatro IPs completos e três coordenadas.
+   *
+   * Dois estados que compartilhavam um texto passam a ser distintos. Confronto
+   * não realizado por recusa da referência não é insumo geográfico ausente no
+   * arquivo. A frase de ausência só pode ser emitida quando as duas contagens
+   * abaixo forem zero, e elas passam a ser campos da resposta, não texto.
+   */
+  const eventosDaTrilha = report.extracted?.trilha_eventos?.eventos || [];
+  const numero = (valor) => {
+    const n = Number(valor);
+    return Number.isFinite(n) ? n : null;
+  };
+  // Par completo: latitude 0 é coordenada válida, e latitude sem longitude não
+  // localiza nada. O teste anterior usava `e.latitude || e.coordenada`, que
+  // descartava o zero e aceitava meia coordenada.
+  const temPar = (lat, lon) => numero(lat) !== null && numero(lon) !== null;
+
+  // Contagens de EVENTOS da trilha, que é o que a frase de ausência afirma.
+  const eventosComIp = eventosDaTrilha.filter((e) => hasValue(e.ip)).length;
+  const eventosComCoordenada = eventosDaTrilha.filter((e) => temPar(e.lat ?? e.latitude, e.lon ?? e.longitude)).length;
+
+  // Insumos adicionais, contados à parte. Somá-los às contagens de eventos com
+  // `||` misturava grandezas diferentes e inflava a trilha com IPs que o
+  // enriquecimento inventariou fora dela.
+  const ipsInventariados = (report.ipAnalysis || []).length;
+  const geoAssinatura = report.extracted?.geolocalizacao_assinatura || {};
+  const coordenadaDeclarada = temPar(report.contractGeo?.lat, report.contractGeo?.lon)
+    || temPar(geoAssinatura.latitude, geoAssinatura.longitude);
+
+  const semInsumoGeografico = eventosComIp === 0
+    && eventosComCoordenada === 0
+    && ipsInventariados === 0
+    && !coordenadaDeclarada;
+
+  // O motivo é consultado, não presumido. Referência recusada e IP sem
+  // geolocalização são causas distintas de o confronto não fechar, e atribuir
+  // sempre à referência era repetir, em menor escala, o erro que o D2 corrige.
+  const referenciaIndisponivel = ["RECUSADO_CONFLITO", "INDISPONIVEL_NAO_INFORMADO"].includes(report.home?.estado_confronto);
+  const ipSemGeolocalizacao = ipsInventariados > 0 && (report.ipAnalysis || []).every((ip) => !temPar(ip.geo?.lat, ip.geo?.lon));
+  const motivoDoConfronto = referenciaIndisponivel
+    ? "a referência residencial não está disponível para o confronto (ver § 3)"
+    : ipSemGeolocalizacao
+      ? "os endereços IP inventariados não foram geolocalizados"
+      : !coordenadaDeclarada
+        ? "o documento não declara coordenada do ato para confrontar com a rede"
+        : "os elementos disponíveis não formaram par comparável";
+
+  const inventario = [
+    eventosComIp ? `${eventosComIp} ${eventosComIp === 1 ? "evento com IP" : "eventos com IP"}` : null,
+    eventosComCoordenada ? `${eventosComCoordenada} ${eventosComCoordenada === 1 ? "evento com coordenada" : "eventos com coordenada"}` : null,
+    !eventosComIp && ipsInventariados ? `${ipsInventariados} ${ipsInventariados === 1 ? "endereço IP inventariado" : "endereços IP inventariados"}` : null,
+    !eventosComCoordenada && coordenadaDeclarada ? "coordenada declarada no documento" : null,
+  ].filter(Boolean).join(", ");
+
+  let synthesis = semInsumoGeografico
+    ? "O documento não contém elementos geográficos suficientes para confronto entre GPS e IP de acesso; a ausência integral de trilha de rede/localização é o achado geográfico principal."
+    : `O confronto entre GPS e IP de acesso não foi concluído porque ${motivoDoConfronto}. O arquivo NÃO é omisso quanto a rastros geográficos: ${inventario} constam do dossiê e estão detalhados nas seções anteriores. Confronto não realizado e insumo ausente são estados distintos, e este é o primeiro.`;
   if (gpsIpDistance !== null && gpsIpDistance >= 50) {
     synthesis = `A tese técnica se concentra na divergência de ${formatKm(gpsIpDistance)} entre o GPS da assinatura e o IP de acesso provável. IPs classificados como servidor, CDN ou infraestrutura não devem ser usados para localizar o consumidor.`;
   } else if (gpsIpDistance !== null) {
@@ -603,8 +702,8 @@ export function buildIrregularitySummary(report = {}) {
 
   const methods = Array.isArray(signature.metodos_autenticacao) && signature.metodos_autenticacao.length
     ? signature.metodos_autenticacao.join(" e ")
-    : signature.metodos_mencionados_clausulado?.length
-      ? `nenhum método operacional registrado; ${signature.metodos_mencionados_clausulado.join(", ").toLowerCase()}`
+    : signature.metodos_descritos_no_fluxo?.length
+      ? `nenhum método operacional registrado; ${signature.metodos_descritos_no_fluxo.map((m) => m.rotulo).join(", ").toLowerCase()}`
       : "nenhum método operacional registrado";
   const introSubject = `Leitura crítica do exame do arquivo "${compact(report.file?.name || "documento analisado", 100)}", do contrato nº ${contractNumber} de ${bank}.`.replace(/\.\s*\.$/, ".");
   const intro = `${introSubject} O placar separa alertas, pontos favoráveis e diligências conforme os elementos efetivamente presentes no documento.`;
@@ -627,15 +726,33 @@ export function buildIrregularitySummary(report = {}) {
     counts: {
       domains: 8,
       irregularities: findings.length,
+      // D2: as contagens que autorizam ou proíbem a frase de ausência integral
+      // saem como número na resposta, não apenas embutidas no texto da síntese.
+      eventos_com_ip: eventosComIp,
+      eventos_com_coordenada: eventosComCoordenada,
+      ips_inventariados: ipsInventariados,
       favorable: favorable.length,
       diligences: Math.min(diligences.length, 7),
     },
     findings: displayFindings,
+    semAchados,
     allFindings: orderedFindings,
+    // Projeção canônica: a lista única que o corpo e o sumário renderizam. O
+    // corte é nulo quando tudo coube.
+    projecao: orderedFindings,
+    corte,
     favorable,
     geo: {
       items: geoItems.slice(0, 4),
       status: confronto.status,
+      // D2: as duas contagens que autorizam ou proíbem a frase de ausência
+      // integral são campo da resposta, não texto reescrito na conclusão.
+      insumos: {
+        eventos_com_ip: eventosComIp,
+        eventos_com_coordenada: eventosComCoordenada,
+        ips_inventariados: ipsInventariados,
+        coordenada_declarada: coordenadaDeclarada,
+      },
       referencia: pares.length ? "pares" : referenciaDoGrafico,
       pares,
       modo: pares.length ? "pares" : "referencia",

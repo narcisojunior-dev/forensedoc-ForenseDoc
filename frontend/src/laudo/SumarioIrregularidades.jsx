@@ -97,8 +97,17 @@ export default function SumarioIrregularidades({ summary }) {
 
         <div className="summary-section-title">PLACAR DE GRAVIDADE</div>
         <div className="summary-gravity-table">
-          {summary.findings.map((finding) => <SeverityRow key={finding.key} finding={finding} />)}
+          {summary.semAchados ? (
+            <div className="summary-sem-achados">
+              Sem irregularidade crítica automática conclusiva. Os dados disponíveis não produziram alerta grave,
+              sem prejuízo da revisão humana do contrato e dos logs originais.
+            </div>
+          ) : (
+            summary.findings.map((finding) => <SeverityRow key={finding.key} finding={finding} />)
+          )}
         </div>
+        {/* D5: corte de página é declarado e contado, nunca silencioso. */}
+        {summary.corte && <div className="summary-corte">{summary.corte.aviso}</div>}
 
         {/* Sempre presente: a verificação geográfica é parte central do laudo.
             Sem residência aferida, o gráfico mede os IPs até o GPS declarado. */}

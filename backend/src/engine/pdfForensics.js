@@ -597,7 +597,7 @@ export async function extractPdfMetadata(pdfBuffer) {
       warnings.push("O arquivo contém formulário interativo; campos podem ter sido preenchidos ou alterados após a criação inicial.");
     }
     for (const alert of digitalSignature.alerts || []) {
-      warnings.push(`${alert.codigo} ${alert.severidade}: ${alert.titulo}. ${alert.detalhe}`);
+      warnings.push(`${alert.titulo}. ${alert.detalhe}`);
     }
 
     return {

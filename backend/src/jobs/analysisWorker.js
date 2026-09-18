@@ -22,7 +22,7 @@ function fileHashes(buffer) {
 }
 
 export async function processAnalysis(job) {
-  const { analysisId, pdfKey, pdfBase64, tenantId, userId, lockToken, homeAddress, homeCoord, homeContestacao, filename, creditoIsento } =
+  const { analysisId, pdfKey, pdfBase64, tenantId, userId, lockToken, homeAddress, homeCoord, homeContestacao, filename, creditoIsento, preliminaryExtraction } =
     job.data;
 
   try {
@@ -40,7 +40,7 @@ export async function processAnalysis(job) {
     const hashes = fileHashes(pdfBuffer);
 
     const [extraction, metadata] = await Promise.all([
-      extractPdfTextWithOcr(pdfBuffer),
+      preliminaryExtraction || extractPdfTextWithOcr(pdfBuffer),
       extractPdfMetadata(pdfBuffer),
     ]);
 
@@ -93,6 +93,7 @@ export async function processAnalysis(job) {
       contractGeo: geo.contractGeo,
       geoDeclaredPresent: geo.geoDeclaredPresent,
       ipAnalysis: geo.ipAnalysis,
+      confronto_enderecos: geo.confronto_enderecos || null,
       // Cadeia de custódia já avaliada e persistida: o PDF do servidor e a tela
       // passam a ler a MESMA análise, em vez de cada um recalcular a sua. Era
       // por aí que as duas versões do § 4 divergiam.

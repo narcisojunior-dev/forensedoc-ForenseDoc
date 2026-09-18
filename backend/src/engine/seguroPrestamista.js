@@ -138,7 +138,103 @@ export function extrairSeguroPrestamista({ texto, segmentacao, contrato = {} }) 
     premio_sobre_liberado: premioCents && liberadoCents ? premioCents / liberadoCents : null,
     pro_labore_sobre_premio: proLabore && premioCents ? moneyToCents(proLabore) / premioCents : null,
   };
+
+  /*
+   * ─── D9 · premissa de início de vigência ────────────────────────────────────
+   *
+   * O achado de carência conclui que a primeira indenização só é possível N dias
+   * "após o início da vigência". A conta está certa, mas a conclusão só vale se
+   * a vigência começou na data do contrato, e o laudo FD-20260917 tomou essa
+   * data como início sem dizer que tomou.
+   *
+   * A proposta remete as datas de vigência ao certificado individual do seguro,
+   * que não está no arquivo. A premissa passa a sair declarada e ancorada, e o
+   * achado é rebaixado enquanto o certificado não vier. O Quesito 7 do Anexo I
+   * já pede esse certificado; faltava ligar as duas coisas.
+   */
+  // A remissão ao certificado individual atravessa quebras de linha no PDF, mas
+  // não pode atravessar o fim da frase.
+  const remissaoVigencia = trecho.match(/[^.]{0,160}data[s]?\s+de\s+in[íi]cio\s+e\s+fim\s+de\s+vig[êe]ncia[^.]{0,220}\./i)
+    || trecho.match(/[^.]{0,160}vig[êe]ncia[^.]{0,100}certificado\s+individual[^.]{0,140}\./i);
+
+  // `valorAbaixoDoRotulo` devolve a linha seguinte ao rótulo, e sem rótulo
+  // presente ela devolve outra coisa qualquer: neste dossiê trouxe "Coberturas
+  // contratadas." como se fosse data de vigência. Só vale como declarada a data
+  // que se parece com data, e a remissão ao certificado é decisiva em contrário:
+  // se o documento diz que as datas estão no certificado, elas não estão aqui.
+  const candidatoVigencia = valorAbaixoDoRotulo(trecho, /In[íi]cio\s+de\s+Vig[êe]ncia/i);
+  const pareceData = /\b\d{2}\/\d{2}\/\d{2,4}\b/.test(String(candidatoVigencia || ""));
+  const vigenciaDeclarada = pareceData && !remissaoVigencia ? candidatoVigencia : null;
+  // O certificado individual só é dado como ausente quando foi procurado. Sem
+  // essa procura, o laudo afirmaria uma lacuna que não verificou, que é a mesma
+  // família do defeito que o D1 corrige.
+  const mencionaCertificado = /certificado\s+(?:individual|do\s+seguro)/i.test(t);
+  const certificadoNoArquivo = Boolean(segmentacao?.documentos?.some((d) => /certificado/i.test(d.rotulo || d.tipo || "")))
+    || /certificado\s+individual\s+(?:de\s+seguro\s+)?n[ºo°]\s*[:\-]?\s*\S+/i.test(t);
+
+  const remissaoTexto = remissaoVigencia ? remissaoVigencia[0].replace(/\s+/g, " ").trim() : null;
+  const premissaPresumida = !vigenciaDeclarada && Boolean(contrato.data_contrato);
+  seguro.vigencia = {
+    inicio_declarado: vigenciaDeclarada || null,
+    premissa: vigenciaDeclarada
+      ? `Início de vigência declarado na própria proposta (${vigenciaDeclarada}).`
+      : premissaPresumida
+        ? `Premissa adotada: início de vigência na data do contrato (${contrato.data_contrato}), porque a proposta não declara a data.${remissaoTexto ? ` A proposta remete as datas ao certificado individual do seguro${certificadoNoArquivo ? ", que consta do arquivo e deve ser conferido" : ", que não foi localizado no arquivo examinado"}.` : ""}`
+        : "Início de vigência não declarado na proposta e sem data de contrato para adotar como premissa.",
+    premissa_origem: vigenciaDeclarada ? "DECLARADO_NA_PROPOSTA" : premissaPresumida ? "PRESUMIDO_DATA_DO_CONTRATO" : "INDETERMINADO",
+    // Três estados, não dois: localizado, não localizado, e não verificado.
+    certificado_individual: certificadoNoArquivo
+      ? "LOCALIZADO_NO_ARQUIVO"
+      : mencionaCertificado ? "NAO_LOCALIZADO_NO_ARQUIVO" : "NAO_VERIFICADO",
+    remissao_ao_certificado: remissaoTexto,
+  };
+
+  /*
+   * ─── D10 · a soma dos prêmios por cobertura não fecha ───────────────────────
+   *
+   * No dossiê C6 as coberturas somam R$ 218,65 contra R$ 218,64 declarados como
+   * prêmio total. Um centavo, quase certamente arredondamento, e o defeito é do
+   * documento do banco, não do laudo. Mas o laudo deve registrar a diferença com
+   * o valor e a explicação provável, em vez de deixar que a outra parte a
+   * apresente primeiro como erro de quem calculou.
+   */
+  const somaCoberturasCents = seguro.coberturas.reduce((acc, c) => acc + (moneyToCents(c.premio) || 0), 0);
+  seguro.conferencia_premio = somaCoberturasCents && premioCents
+    ? {
+      soma_coberturas_centavos: somaCoberturasCents,
+      premio_declarado_centavos: premioCents,
+      diferenca_centavos: somaCoberturasCents - premioCents,
+      confere: somaCoberturasCents === premioCents,
+      // A margem compatível com arredondamento sai como número, para que a
+      // hipótese possa ser conferida em vez de aceita.
+      margem_arredondamento_centavos: Math.max(1, seguro.coberturas.length),
+      coberturas_somadas: seguro.coberturas.length,
+    }
+    : null;
   seguro.achados = avaliarSeguro(seguro, contrato);
+  if (seguro.conferencia_premio && !seguro.conferencia_premio.confere) {
+    const dif = seguro.conferencia_premio.diferenca_centavos;
+    const reais = (n) => `R$ ${(Math.abs(n) / 100).toFixed(2).replace(".", ",")}`;
+    // Arredondamento de centavos acumula, no pior caso, um centavo por parcela
+    // somada. A margem é derivada do documento, não escolhida.
+    const margemArredondamento = Math.max(1, seguro.coberturas.length);
+    seguro.achados.push({
+      // SEG8, não SEG7: `avaliarSeguro` já emite SEG7 para prêmio da proposta
+      // contra o seguro da planilha. Repetir o código faria `addFinding`
+      // deduplicar por chave no sumário e esconder um dos dois achados.
+      codigo: "SEG8",
+      // O limiar fixo de cinco centavos não prova causa nenhuma. O que o laudo
+      // afirma é a divergência documental, que é verificável; o arredondamento
+      // entra como hipótese a conferir, e a margem compatível com ela é
+      // declarada em vez de embutida. Acima dessa margem o laudo NÃO afirma que
+      // o arredondamento é impossível: afirma que ele deixa de explicar sozinho.
+      gravidade: Math.abs(dif) <= margemArredondamento ? "INFO" : "MÉDIA",
+      titulo: "Soma dos prêmios por cobertura não fecha com o prêmio total declarado",
+      texto: `Os prêmios por cobertura somam ${reais(somaCoberturasCents)}, contra ${reais(premioCents)} declarados como prêmio total: diferença de ${reais(dif)}${dif > 0 ? " a mais na soma das coberturas" : " a menos na soma das coberturas"}. A divergência é do documento da instituição e está registrada como tal, não como resultado de cálculo do laudo. ${Math.abs(dif) <= margemArredondamento
+        ? `Uma hipótese compatível é o arredondamento de centavos na composição, que com ${seguro.coberturas.length} ${seguro.coberturas.length === 1 ? "cobertura" : "coberturas"} pode acumular até ${reais(margemArredondamento)}; a hipótese não foi verificada e depende da memória de cálculo da seguradora.`
+        : `O arredondamento de centavos na composição, com ${seguro.coberturas.length} ${seguro.coberturas.length === 1 ? "cobertura" : "coberturas"}, acumularia no máximo ${reais(margemArredondamento)}, de modo que não explica sozinho a diferença observada. A memória de cálculo deve ser apresentada pela seguradora.`}`,
+    });
+  }
   return seguro;
 }
 
@@ -149,7 +245,27 @@ function avaliarSeguro(seguro, contrato) {
   const add = (codigo, gravidade, titulo, texto) => achados.push({ codigo, gravidade, titulo, texto });
 
   // SEG1: carência + franquia contra o cronograma de parcelas.
-  const base = parsePtDate(contrato.data_contrato);
+  // D9: quando a vigência é declarada, ela é a base do confronto. A data do
+  // contrato entra apenas como premissa explícita, e só na falta daquela.
+  const vigenciaDeclarada = parsePtDate(seguro.vigencia?.inicio_declarado);
+  const base = vigenciaDeclarada || parsePtDate(contrato.data_contrato);
+  // O rótulo acompanha a base efetivamente usada. Dizer "após a emissão" quando
+  // a contagem partiu do início de vigência declarado descreve mal o cálculo.
+  const rotuloDaBase = vigenciaDeclarada
+    ? `o início de vigência declarado (${seguro.vigencia.inicio_declarado})`
+    : "a emissão";
+
+  /*
+   * A conclusão antiga era absoluta: "a cobertura vendida tem pouca ou nenhuma
+   * serventia no contrato ao qual foi vinculada". Isso contradiz a própria
+   * premissa condicional do achado, porque a serventia da cobertura depende de
+   * quando a vigência começou, que é justamente o que não se sabe sem o
+   * certificado. A conclusão passa a se limitar ao efeito verificável sobre o
+   * cronograma, que é o que os números demonstram.
+   */
+  const conclusaoDoAchado = vigenciaDeclarada
+    ? "Nessas condições, as parcelas vencidas dentro do período de carência e franquia não contam com a cobertura contratada."
+    : "Mantida essa premissa de início de vigência, as parcelas vencidas dentro do período de carência e franquia não contariam com a cobertura contratada. A extensão do efeito depende da data de início de vigência, que o certificado individual deve esclarecer.";
   const primeiro = parsePtDate(contrato.data_primeiro_vencimento);
   const parcelas = Number(contrato.numero_parcelas);
   const diasParcelas = base && primeiro && parcelas > 0
@@ -162,9 +278,13 @@ function avaliarSeguro(seguro, contrato) {
     if (espera > diasParcelas[0] || descobertas / diasParcelas.length > 1 / 3) {
       add(
         "SEG1",
-        "ALTA",
+        // D9: sem o certificado individual, o início de vigência é premissa, e
+        // achado que depende de premissa não declarada não sustenta gravidade
+        // máxima. Volta a ALTA quando a vigência for declarada ou o certificado
+        // for juntado.
+        seguro.vigencia?.premissa_origem === "PRESUMIDO_DATA_DO_CONTRATO" ? "MÉDIA" : "ALTA",
         "Carência e franquia do seguro incompatíveis com o prazo da operação",
-        `A cobertura "${c.nome}" tem carência de ${c.carencia_dias || 0} dias e franquia de ${c.franquia_dias || 0} dias: a primeira indenização só é possível ${espera} dias após o início da vigência. O primeiro vencimento ocorre ${diasParcelas[0]} dias após a emissão, e ${descobertas} de ${diasParcelas.length} parcelas ${descobertas === 1 ? "vence" : "vencem"} antes desse prazo mínimo${c.teto_parcelas ? `; a cobertura paga no máximo ${c.teto_parcelas} parcelas` : ""}. A cobertura vendida tem pouca ou nenhuma serventia no contrato ao qual foi vinculada.`
+        `A cobertura "${c.nome}" tem carência de ${c.carencia_dias || 0} dias e franquia de ${c.franquia_dias || 0} dias: a primeira indenização só é possível ${espera} dias após o início da vigência.${seguro.vigencia?.premissa_origem === "PRESUMIDO_DATA_DO_CONTRATO" ? ` ${seguro.vigencia.premissa}${seguro.vigencia.certificado_individual === "NAO_LOCALIZADO_NO_ARQUIVO" ? " Enquanto o certificado individual não for juntado, este achado depende dessa premissa e deve ser lido com essa ressalva." : " Este achado depende dessa premissa e deve ser lido com essa ressalva."}` : seguro.vigencia?.inicio_declarado ? ` O confronto usa o início de vigência declarado na proposta (${seguro.vigencia.inicio_declarado}), não a data do contrato.` : ""} O primeiro vencimento ocorre ${diasParcelas[0]} dias após ${rotuloDaBase}, e ${descobertas} de ${diasParcelas.length} parcelas ${descobertas === 1 ? "vence" : "vencem"} antes desse prazo mínimo${c.teto_parcelas ? `; a cobertura paga no máximo ${c.teto_parcelas} parcelas` : ""}. ${conclusaoDoAchado}`
       );
       break;
     }

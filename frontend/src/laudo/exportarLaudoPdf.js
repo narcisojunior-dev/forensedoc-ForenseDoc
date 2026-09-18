@@ -26,7 +26,11 @@ async function waitForReportImages(el) {
 export function validateRenderableReport(el) {
   // jsdom não implementa innerText: sem o textContent, a higiene passava vazia
   // em todos os testes e não protegia nada.
-  const text = (el?.innerText ?? el?.textContent ?? "").replace(/\s+/g, " ");
+  const filename = el?.dataset?.sourceFilename;
+  const raw = el?.innerText ?? el?.textContent ?? "";
+  // O nome original é evidência literal: pode conter sublinhados ou dois
+  // pontos seguidos. Só essa sequência exata fica fora da revisão da prosa.
+  const text = (filename ? raw.split(filename).join("[arquivo examinado]") : raw).replace(/\s+/g, " ");
   const prohibited = [
     [/\b[A-Z][A-Z0-9]*_[A-Z0-9_]+\b/, "enum interno cru"],
     [/\b(CET1|FIN\d|IMG\d|INT\d|TRB\d|CAD\d|CUS\d|LOG\d)\s+(ALTA|MEDIA|MÉDIA|MÉDIO|INFO|CRITICO|CRÍTICO)\s*:/, "código de achado em prosa"],
@@ -55,7 +59,7 @@ export function verificarCoerenciaRenderizada(el, { referenciaRecusada = false }
   return problemas;
 }
 
-export async function exportarLaudoPdf(setBusy, setPdfDownload) {
+export async function exportarLaudoPdf(setBusy, setPdfDownload, { download = true } = {}) {
   const el = document.getElementById("fd-report");
   if (!el) return;
   try {
@@ -80,12 +84,17 @@ export async function exportarLaudoPdf(setBusy, setPdfDownload) {
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     validateRenderableReport(el);
 
+    let capturedLayout = null;
     const canvas = await html2canvas(el, {
       scale: 2,
       backgroundColor: "#f5f7f8",
       useCORS: true,
       logging: false,
       windowWidth: 794,
+      onclone: async (clonedDocument, clonedReport) => {
+        await clonedDocument.fonts?.ready;
+        capturedLayout = measureReportLayout(clonedReport);
+      },
       scrollX: 0,
       scrollY: -window.scrollY,
     });
@@ -100,40 +109,26 @@ export async function exportarLaudoPdf(setBusy, setPdfDownload) {
     pageCanvas.width = canvas.width;
     pageCanvas.height = pageHeightPx;
 
-    const reportRect = el.getBoundingClientRect();
-    const canvasScale = canvas.width / reportRect.width;
-    const geoNode = el.querySelector(".geo-visual-block");
-    let geoRange = null;
-    if (geoNode) {
-      const rect = geoNode.getBoundingClientRect();
-      geoRange = {
-        start: Math.max(0, Math.floor((rect.top - reportRect.top) * canvasScale)),
-        end: Math.min(canvas.height, Math.ceil((rect.bottom - reportRect.top) * canvasScale)),
-      };
-      if (geoRange.end <= geoRange.start) geoRange = null;
-    }
-    const rangeForNode = (node) => {
-      const rect = node.getBoundingClientRect();
-      return {
-        start: Math.max(0, Math.floor((rect.top - reportRect.top) * canvasScale)),
-        end: Math.min(canvas.height, Math.ceil((rect.bottom - reportRect.top) * canvasScale)),
-      };
-    };
-    const summaryRanges = Array.from(el.querySelectorAll(".summary-page"))
-      .map(rangeForNode)
-      .filter((range) => range.end > range.start)
-      .sort((a, b) => a.start - b.start);
-    const avoidCutRanges = Array.from(el.querySelectorAll(
-      ".row, .note, .flag, .grid-2, .dist-banner, .ip-block, .geo-map, .audit-layout, .audit-table-wrap, .audit-finding, .diligence-item, .norm, .report-cover, .report-notice, .hash-card, .geo-card",
-    ))
-      .map(rangeForNode)
-      .filter((range) => range.end > range.start && range.end - range.start < pageHeightPx)
-      .sort((a, b) => a.start - b.start);
+    // As medidas devem vir da mesma cópia capturada. Numa janela estreita,
+    // a tela usa regras responsivas diferentes do viewport de exportação.
+    const layout = capturedLayout || measureReportLayout(el);
+    const canvasScale = canvas.width / layout.width;
+    const scaleRange = (range) => ({
+      start: Math.max(0, Math.floor(range.start * canvasScale)),
+      end: Math.min(canvas.height, Math.ceil(range.end * canvasScale)),
+    });
+    const geoRange = layout.geo ? scaleRange(layout.geo) : null;
+    const summaryRanges = layout.summaries.map(scaleRange).filter(r => r.end > r.start);
+    const avoidCutRanges = layout.avoid.map(scaleRange)
+      .filter(r => r.end > r.start && r.end - r.start < pageHeightPx)
+      .sort((a,b) => a.start - b.start);
 
+    const pageSlices = [];
     let renderedHeight = 0;
     let page = 0;
 
     const addPdfPage = (sliceStart, sliceHeight, centerVertically = false) => {
+      pageSlices.push({sliceStart,sliceHeight});
       pageCanvas.height = sliceHeight;
       pageCtx.fillStyle = "#f5f7f8";
       pageCtx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
@@ -179,10 +174,15 @@ export async function exportarLaudoPdf(setBusy, setPdfDownload) {
         (range) => renderedHeight >= range.start - 2 && renderedHeight < range.end,
       );
       if (activeSummary) {
-        addPdfPage(activeSummary.start, activeSummary.end - activeSummary.start);
-        renderedHeight = activeSummary === summaryRanges[summaryRanges.length - 1]
-          ? canvas.height
-          : activeSummary.end;
+        const start = Math.max(renderedHeight, activeSummary.start);
+        let end = choosePageEnd(start, Math.min(start + pageHeightPx, activeSummary.end), avoidCutRanges);
+        // Arredondar início para baixo e fim para cima pode deixar 1 pixel.
+        if (activeSummary.end - end <= 2) end = activeSummary.end;
+        addPdfPage(start, Math.max(1, end - start));
+        if (end >= activeSummary.end) {
+          const next = summaryRanges[summaryRanges.indexOf(activeSummary) + 1];
+          renderedHeight = next ? next.start : canvas.height;
+        } else renderedHeight = end;
         continue;
       }
 
@@ -200,10 +200,7 @@ export async function exportarLaudoPdf(setBusy, setPdfDownload) {
         (range) => range.start > renderedHeight && range.start < sliceEnd,
       );
       if (nextSummary) sliceEnd = nextSummary.start;
-      const crossedRange = avoidCutRanges.find(
-        (range) => range.start > renderedHeight + 12 && range.start < sliceEnd && range.end > sliceEnd,
-      );
-      if (crossedRange) sliceEnd = crossedRange.start;
+      sliceEnd = choosePageEnd(renderedHeight, sliceEnd, avoidCutRanges);
       const sliceHeight = Math.max(1, sliceEnd - renderedHeight);
       addPdfPage(renderedHeight, sliceHeight);
       renderedHeight = sliceEnd;
@@ -234,6 +231,7 @@ export async function exportarLaudoPdf(setBusy, setPdfDownload) {
     const blob = pdf.output("blob");
     const url = URL.createObjectURL(blob);
     setPdfDownload({ url, filename, sizeKB: (blob.size / 1024).toFixed(1) });
+    if (download) {
     const link = document.createElement("a");
     link.href = url;
     link.download = filename;
@@ -243,6 +241,8 @@ export async function exportarLaudoPdf(setBusy, setPdfDownload) {
     link.click();
     link.remove();
     try { window.open(url, "_blank", "noopener,noreferrer"); } catch {}
+    }
+    return { blob, filename, totalPages, pagination: {canvasWidth:canvas.width,canvasHeight:canvas.height,pageHeightPx,summaryRanges,pageSlices} };
   } catch (e) {
     console.error("[ForenseDoc] Falha ao gerar PDF", e);
     // Quem chama mostra a mensagem no padrão de notificação do SaaS.
@@ -252,4 +252,28 @@ export async function exportarLaudoPdf(setBusy, setPdfDownload) {
     document.body.classList.remove("fd-exporting");
     setBusy(false);
   }
+}
+
+/** Geometria da cópia final, antes da captura. Não usa medidas da tela original. */
+export function measureReportLayout(el) {
+  const box = el.getBoundingClientRect();
+  const range = node => { const r=node.getBoundingClientRect(); return {start:r.top-box.top,end:r.bottom-box.top}; };
+  return {
+    width: box.width,
+    geo: el.querySelector(".geo-visual-block") ? range(el.querySelector(".geo-visual-block")) : null,
+    summaries: Array.from(el.querySelectorAll(".summary-page")).map(node => {
+      const r = range(node);
+      const bottoms = Array.from(node.children).map(child => child.getBoundingClientRect().bottom - box.top);
+      // A altura mínima da folha é decoração; não cria página vazia quando
+      // resta apenas padding depois do último conteúdo do sumário.
+      return {...r, end: bottoms.length ? Math.min(r.end, Math.max(...bottoms) + 8) : r.end};
+    }),
+    avoid: Array.from(el.querySelectorAll(".row, .note, .flag, .grid-2, .dist-banner, .ip-block, .geo-map, .audit-layout, .audit-table-wrap, .audit-finding, .diligence-item, .norm, .report-cover, .report-notice, .hash-card, .geo-card, .summary-header, .summary-gravity-row, .summary-synthesis, .summary-ip-card, .summary-diligence-item, .summary-geo-box, .summary-footer, .legal, tr, p")).map(range),
+  };
+}
+
+/** Não divide uma linha ou bloco que cabe inteiro numa página. */
+export function choosePageEnd(start, proposedEnd, avoidRanges) {
+  const crossed=avoidRanges.find(r=>r.start>start+12 && r.start<proposedEnd && r.end>proposedEnd+2);
+  return crossed ? crossed.start : proposedEnd;
 }

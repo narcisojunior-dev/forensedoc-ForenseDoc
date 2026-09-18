@@ -168,7 +168,7 @@ export default function Analyze() {
       const buffer = await file.arrayBuffer();
       const base64 = arrayBufferToBase64(buffer);
 
-      setProgress({ label: "Enviando documento para o motor de análise...", pct: 18 });
+      setProgress({ label: homeAddr?.trim() ? "Lendo documento e conferindo a referência residencial..." : "Enviando documento para o motor de análise...", pct: 18 });
       // Todo o processamento pesado — extração, hashes do arquivo e confronto
       // geográfico (§5) — roda no servidor e fica persistido, para o laudo ser
       // reproduzível. O cliente apenas envia o PDF e renderiza o resultado.

@@ -1,3 +1,4 @@
+import { extractContractContext, extractExtendedContractFields } from "./contractContext.js";
 // Extração heurística estruturada do contrato. Portada do motor de geração
 // (backend/server.js): layouts dedicados (Bradesco, BB, Agibank, Facta),
 // aferição matemática, achados de irregularidade e trilha de contratação.
@@ -6,15 +7,16 @@ import { extractAuditTrail } from "./audit.js";
 import { separarCarimboProcessual, paginaDoIndice } from "./carimboProcessual.js";
 import { extrairDataContrato } from "./dataContrato.js";
 import { extrairPlanilhaCalculo } from "./planilhaCalculo.js";
-import { extrairCamposOperacao } from "./camposOperacao.js";
+import { extrairCamposOperacao, extrairLocalEmissao } from "./camposOperacao.js";
 import { redigirConclusaoAfericao } from "./conclusaoAfericao.js";
 import { taxaImplicita, valorPresente, vencimentosMensais, conferirAnualizacao, diasEntre } from "./matematicaFinanceira.js";
 import { classificarProduto, extrairEmpregador } from "./produto.js";
 import { avaliarQualificacao, ESTADO as ESTADO_CAMPO } from "./camposSuspeitos.js";
-import { segmentarDocumentos, avaliarAssinaturaPorDocumento, documentoDaPagina } from "./documentosLogicos.js";
+import { segmentarDocumentos, avaliarAssinaturaPorDocumento, documentoDaPagina, detectarAnomaliaPaginacao } from "./documentosLogicos.js";
 import { avaliarComprovanteCredito } from "./comprovanteCredito.js";
 import { extrairSeguroPrestamista } from "./seguroPrestamista.js";
 import { analisarTrilhaEventos } from "./trilhaEventos.js";
+import { extrairMetodosDescritos } from "./metodosAutenticacao.js";
 import { moneyToCents, percentToNumber } from "./numberParsing.js";
 import { extractFactaCartaoConsignado } from "./factaCartao.js";
 import { resolveBankByCnpj } from "./bankRegistry.js";
@@ -164,7 +166,7 @@ export function buildMathAudit(contract) {
   const valorParcela = moneyStringToNumber(contract.valor_parcela);
   const somatorio = moneyStringToNumber(contract.valor_total_parcelas);
   const liberado = moneyStringToNumber(contract.valor_liberado);
-  const financiado = moneyStringToNumber(contract.valor_contratado || contract.valor_novos_recursos || contract.valor_total_emprestimo);
+  const financiado = moneyStringToNumber(contract.valor_total_emprestimo || contract.valor_contratado || contract.valor_novos_recursos);
   const jurosMensal = percentStringToDecimal(contract.taxa_juros_mensal);
   const jurosAnual = percentStringToDecimal(contract.taxa_juros_anual);
   const cetMensal = percentStringToDecimal(contract.cet_mensal);
@@ -191,8 +193,15 @@ export function buildMathAudit(contract) {
       prazoDescricao = `declarado ${prazoDiasDeclarado} dias, efetivo ${prazoCalculado} dias`;
     } else if (prazoTotal?.quantidade) {
       const declaradoMeses = prazoTotal.unidade === "dias" ? prazoTotal.quantidade / 30 : prazoTotal.quantidade;
-      prazoConfere = Math.abs(prazoEfetivoMeses - declaradoMeses) / declaradoMeses <= TOLERANCIA_PRAZO;
-      prazoDescricao = `declarado ${prazoTotal.quantidade} ${prazoTotal.unidade}, efetivo ${prazoCalculado} dias (${nBRDecimal(prazoEfetivoMeses)} meses)`;
+      // D4: campo com cláusula de extensão não declara prazo fechado, e não há
+      // o que divergir. O desfecho é inconclusivo, com a ressalva ancorada, e a
+      // qualificação jurídica do que isso significa fica com o escritório.
+      prazoConfere = prazoTotal.condicional
+        ? null
+        : Math.abs(prazoEfetivoMeses - declaradoMeses) / declaradoMeses <= TOLERANCIA_PRAZO;
+      prazoDescricao = prazoTotal.condicional
+        ? `declarado de forma condicional ("${prazoTotal.texto}"), efetivo ${prazoCalculado} dias (${nBRDecimal(prazoEfetivoMeses)} meses)`
+        : `declarado ${prazoTotal.quantidade} ${prazoTotal.unidade}, efetivo ${prazoCalculado} dias (${nBRDecimal(prazoEfetivoMeses)} meses)`;
     }
   }
   const prazoMesesAprox = Number.isFinite(prazoDiasDeclarado) && prazoDiasDeclarado > 0
@@ -272,6 +281,10 @@ export function buildMathAudit(contract) {
     prazo_calculado_dias: prazoCalculado,
     prazo_efetivo_meses: prazoEfetivoMeses,
     prazo_confere: prazoConfere,
+    // D4: o campo de prazo é condicional? Quem apresenta precisa saber, porque
+    // "diverge" e "prestado de forma condicional" são achados diferentes.
+    prazo_declarado_condicional: Boolean(prazoTotal?.condicional),
+    prazo_declarado_ressalva: prazoTotal?.ressalva || null,
     prazo_descricao: prazoDescricao,
     prazo_operacao_meses_aprox: prazoMesesAprox,
     carencia_dias: carenciaDias,
@@ -408,9 +421,9 @@ function extractGenericContractLayout(text, flat) {
     agencia: agenciaConta ? `${agenciaConta[1]}${agenciaConta[2] ? `-${agenciaConta[2]}` : ""}` : null,
     contaCorrente: agenciaConta ? `${agenciaConta[3]}${agenciaConta[4] ? `-${agenciaConta[4]}` : ""}` : null,
     nomeAgencia: null,
-    bancoRecebimento: agenciaConta ? "Banco Bradesco S.A." : null,
+    bancoRecebimento: null,
     tipoOperacao: tipoOperacao ? stripDiacritics(tipoOperacao).toUpperCase() : null,
-    operacaoPortada: hasPortabilitySource ? true : tipoOperacao && /^NOVO$/i.test(stripDiacritics(tipoOperacao)) ? false : null,
+    operacaoPortada: tipoOperacao && /^PORTABILIDADE$/i.test(stripDiacritics(tipoOperacao)) ? true : tipoOperacao && /^NOVO$/i.test(stripDiacritics(tipoOperacao)) ? false : null,
     valorLiberadoSolicitado: normalizeMoney(firstMatch(flat, [
       /Valor\s+Liberado\/Solicitado[\s\S]{0,100}?R\$\s*([\d.]+,\d{2})/i,
       /Valor\s+Liberado\s+ao\s+Cliente[\s\S]{0,100}?R\$\s*([\d.]+,\d{2})/i,
@@ -445,6 +458,7 @@ function extractGenericContractLayout(text, flat) {
 
 function extractBradescoConsignado(text, flat) {
   if (!/Banco\s+Bradesco\s+S\.A\.|Contrato\s+de\s+Empr[eé]stimo\s+Pessoal\s+-\s+Consignado\s+-\s+INSS/i.test(flat)) return {};
+  if (!/Valor\s+Liberad[oa]\s*\/\s*Solicitado|Contrato\s+de\s+Empr[eé]stimo\s+Pessoal\s*-\s*Consignado\s*-\s*INSS/i.test(flat)) return {};
   const clientBlock = text.match(/2\s*-\s*Cliente([\s\S]*?)(?:II\s*-\s*Opera[cç][oõ]es|III\s*-\s*Caracter[ií]sticas)/i)?.[1] || "";
   const clientLine = clientBlock.match(/Nome\s+CPF\/MF\s*\n\s*([A-ZÁÀÂÃÉÊÍÓÔÕÚÇ\s]{8,90}?)\s+(\d{11})/i);
   const rgLine = clientBlock.match(/REGISTRO\s+GERAL\s+([0-9.\-]{5,20})\s+([A-Z\/]{2,12})\s+([A-Z]{2})/i);
@@ -575,7 +589,7 @@ export function heuristicExtractionFromText(rawText) {
     /cart[ãa]o\s+consignado\s+de\s+benef[ií]cio|reserva(?:r[áa])?\s+de\s+margem\s+consign[áa]vel|\bRMC\b/i.test(flat) ? "RMC" :
     /cart[ãa]o\s+de\s+cr[ée]dito\s+consignado|\bRCC\b/i.test(flat) ? "RCC" :
     /C[ÉE]DULA\s+DE\s+CR[ÉE]DITO\s+BANC[ÁA]RIO.*?EMPR[ÉE]STIMO\s+CONSIGNADO/i.test(flat) ? "Emprestimo Consignado" :
-    /FGTS/i.test(flat) ? "FGTS" :
+    /(?:Antecipa[cç][aã]o\s+(?:do\s+)?(?:saque[- ]anivers[aá]rio|FGTS)|(?:Modalidade|Produto)\s*:\s*FGTS)/i.test(flat) ? "FGTS" :
     /EMPR[ÉE]STIMO|CONSIGNADO/i.test(flat) ? "Emprestimo Pessoal" :
     null;
   const valorContratado = firstMatch(operationBlock || flat, [
@@ -655,7 +669,12 @@ export function heuristicExtractionFromText(rawText) {
   const bbTotals = flat.match(/10\s*-\s*Ag[eê]ncia\s*\/\s*Conta:?\s+11\s*-\s*Somat[oó]rio\s+das\s+Parcelas\s+12\s*-\s*Valor\s+Desconto\s+([\d\s/]+?)\s+R\$\s*([\d.]+,\d{2})\s+R\$\s*([\d.]+,\d{2})/i);
   const bbRates = flat.match(/Taxa\s+de\s+Juros\s+Efetiva\s*:\s*2\s*-\s*Custo\s+Efetivo\s+Total\s+CET\s*:\s*([\d,.]+)\s*%\s*a\.?m\s+([\d,.]+)\s*%\s*a\.?a/i);
   const bbIssueMatch = flat.match(/Bras[ií]lia\s*\(DF\),?\s*(\d{1,2})\s+de\s+([A-Za-zçÇ]+)\s+de\s+(\d{4})/i);
-  const layout = mergeDefined(extractGenericContractLayout(text, flat), extractBradescoConsignado(text, flat), extractFactaCartaoConsignado(text, flat));
+  const contextoInstrumento = mergeDefined(extractContractContext(text), extractExtendedContractFields(text));
+  const layout = mergeDefined(extractGenericContractLayout(text, flat), contextoInstrumento, extractBradescoConsignado(text, flat), extractFactaCartaoConsignado(text, flat));
+  for (const key of ["banco", "cnpjInstituicao", "contratoNumero", "modalidade", "tipoOperacao"]) {
+    if (contextoInstrumento[key]) layout[key] = contextoInstrumento[key];
+  }
+  if (contextoInstrumento.valorTotalEmprestimo) layout.valorContratado = contextoInstrumento.valorTotalEmprestimo;
   const ipRecords = extrairIps(text);
   const ipValues = ipRecords.map((record) => record.endereco);
   const auditTrail = extractAuditTrail(text);
@@ -813,6 +832,19 @@ export function heuristicExtractionFromText(rawText) {
     achados.push({ codigo, gravidade, titulo, texto });
   };
   if (lowText) addIssue("OCR1", "MÉDIA", "PDF com pouco texto pesquisável", "O PDF possui pouco texto pesquisável/OCR extraível. Para resultado completo em documento escaneado, aplique OCR prévio ao arquivo.");
+
+  // D12: numeração do rodapé do modelo acima do denominador declarado. Sai como
+  // indício, nunca como comprovado: a leitura possível é que o documento juntado
+  // não corresponda ao modelo cuja numeração o rodapé declara, e isso não se
+  // conclui de uma contagem de rodapé.
+  for (const anomalia of detectarAnomaliaPaginacao(text)) {
+    addIssue(
+      "PAG1",
+      "MÉDIA",
+      "Numeração do rodapé acima do total declarado no próprio rodapé",
+      `O rodapé "${anomalia.modelo}" numera as páginas de 1/${anomalia.denominador} até ${anomalia.maior_numerador}/${anomalia.denominador}, nas págs. ${anomalia.paginas[0]} a ${anomalia.paginas.at(-1)} do arquivo: ${anomalia.maior_numerador} páginas numeradas contra ${anomalia.denominador} declaradas no denominador. O estado é de indício e não de comprovação. A leitura possível é que o documento juntado não corresponda ao modelo cuja numeração o rodapé declara, o que deve ser esclarecido pela instituição com a apresentação do modelo vigente na data da contratação.`
+    );
+  }
   for (const alerta of dataContratoEleita.alertas) addIssue(alerta.codigo, alerta.gravidade, alerta.titulo, alerta.texto);
   if (!hash && codigoAutenticacaoRotulado && !layout.codigoAutenticacao) {
     // Protocolo interno conferível só no site do próprio emissor. O achado não é
@@ -895,7 +927,7 @@ export function heuristicExtractionFromText(rawText) {
   // benefício; nos demais, os marcadores decidem entre CLT, INSS e servidor.
   const produtoClassificado = isCartaoConsignado
     ? { codigo: "CONSIGNADO_INSS", rotulo: "Cartão consignado de benefício", marcadores: ["modalidade RMC/RCC"], confianca: "ALTA" }
-    : classificarProduto(flat);
+    : classificarProduto(text);
   const empregador = produtoClassificado.codigo === "CONSIGNADO_CLT" ? extrairEmpregador(text) : null;
   // Layouts dedicados (Quadro V-2, "Tipo de Operação") têm precedência; o quadro
   // de caixas de seleção cobre o C6 e similares (MED-04).
@@ -905,13 +937,17 @@ export function heuristicExtractionFromText(rawText) {
   });
   const contratoExtraido = {
     numero: [layout.contratoNumero, contratoNumero].find(numeroContratoPlausivel) || null,
-    banco: bankByCnpj?.nome || (layout.isBradesco ? "Banco Bradesco S.A." : (layout.banco || normalizedBank || firstField(creditorBlock, [/\b(Banco\s+[A-ZÁÀÂÃÉÊÍÓÔÕÚÇ0-9 .-]{3,80}?)(?=\s+(?:S\.?A\.?|CNPJ|Ag[êe]ncia|Endere[cç]o)\b)/i]))),
-    produto: finalModalidade === "Renegociação CDC"
+    banco: contextoInstrumento.banco || bankByCnpj?.nome || (layout.isBradesco ? "Banco Bradesco S.A." : (layout.banco || normalizedBank || firstField(creditorBlock, [/\b(Banco\s+[A-ZÁÀÂÃÉÊÍÓÔÕÚÇ0-9 .-]{3,80}?)(?=\s+(?:S\.?A\.?|CNPJ|Ag[êe]ncia|Endere[cç]o)\b)/i]))),
+    produto: finalModalidade === "COMPRA_CARTAO" ? "Compra com cartão e cessão de crédito"
+      : finalModalidade === "SAQUE_CARTAO_CONSIGNADO" ? "Saque parcelado do cartão consignado"
+      : finalModalidade === "CREDITO_PESSOA_JURIDICA" ? "Crédito para pessoa jurídica"
+      : finalModalidade === "CDC_COM_GARANTIA" ? "Crédito Direto ao Consumidor com garantia"
+      : finalModalidade === "Renegociação CDC"
       ? "Crédito Direto ao Consumidor / Renegociação"
       : isCartaoConsignado
         ? "Cartão consignado de benefício"
         : produtoClassificado.rotulo || (finalModalidade ? "Crédito consignado" : null),
-    produto_codigo: finalModalidade === "Renegociação CDC" ? "CDC" : produtoClassificado.codigo,
+    produto_codigo: finalModalidade === "CREDITO_PESSOA_JURIDICA" ? "CREDITO_PJ" : ["Renegociação CDC", "CDC_COM_GARANTIA"].includes(finalModalidade) ? "CDC" : produtoClassificado.codigo,
     produto_marcadores: produtoClassificado.marcadores,
     empregador,
     modalidade: finalModalidade,
@@ -956,9 +992,9 @@ export function heuristicExtractionFromText(rawText) {
       : dataContrato && dataContratoEleita.confianca === "BAIXA"
         ? `Data do contrato lida sem rótulo de contratação no documento (${dataContratoEleita.origem}); confira no instrumento antes de usar prazos e taxas calculados a partir dela.`
         : null,
-    data_primeiro_vencimento: bbDueDates ? `${bbDueDates[2]}/${bbDueDates[3]}/${bbDueDates[4]}` : primeiroVencimento,
-    data_ultimo_vencimento: bbDueDates ? `${bbDueDates[5]}/${bbDueDates[6]}/${bbDueDates[7]}` : ultimoVencimento,
-    codigo_banco_bacen: bankByCnpj ? bankByCnpj.compe : (layout.codigoBancoBacen || firstField(releaseBlock || flat, [/\b(?:Banco|Institui[cç][aã]o|C[oó]digo)\s*[:\-]?\s*(\d{3})\b/i])),
+    data_primeiro_vencimento: contextoInstrumento.primeiroVencimento || (bbDueDates ? `${bbDueDates[2]}/${bbDueDates[3]}/${bbDueDates[4]}` : primeiroVencimento),
+    data_ultimo_vencimento: contextoInstrumento.ultimoVencimento || (bbDueDates ? `${bbDueDates[5]}/${bbDueDates[6]}/${bbDueDates[7]}` : ultimoVencimento),
+    codigo_banco_bacen: bankByCnpj ? bankByCnpj.compe : (layout.codigoBancoBacen || null),
     codigo_banco_bacen_nota: bankByCnpj?.semCompeNota || null,
     cnpj_instituicao: layout.cnpjInstituicao,
     agencia: layout.agencia,
@@ -968,13 +1004,72 @@ export function heuristicExtractionFromText(rawText) {
     modalidade_desconto_provavel: camposOperacao.modalidade_desconto_provavel,
     tipo_operacao: layout.tipoOperacao || camposOperacao.tipo_operacao,
     tipo_operacao_desmarcadas: layout.tipoOperacao ? null : camposOperacao.tipo_operacao_desmarcadas,
-    operacao_portada: layout.operacaoPortada ?? camposOperacao.operacao_portada,
+    operacao_portada: contextoInstrumento.tipoOperacao === "PORTABILIDADE" ? true : layout.operacaoPortada ?? camposOperacao.operacao_portada,
     cartao: isCartaoConsignado ? layout.cartao : null,
     conta_beneficio: layout.contaBeneficio || null,
     correspondente: layout.correspondente || null,
+    // D3: o município de emissão é ponto próprio do confronto geográfico e não
+    // se confunde com o endereço cadastral do contratante.
+    local_emissao: extrairLocalEmissao(text),
+    evidencias_campos: contextoInstrumento.evidenciasContexto,
+    condicoes_financeiras_nota: contextoInstrumento.condicoesNota || null,
   };
+  // OCR em tabela perde posições e pode ler o primeiro valor como o total.
+  // Sem token íntegro na coluna correta, não alimenta cálculo financeiro.
+  if (/--- OCR page-/.test(text) && /Valor\s+do[sf]\s+Novos\s+Recursos[^\n]{0,100}Valor\s+Total\s+do\s+Empr[eé]stimo/i.test(text)) {
+    for (const key of ["valor_total_emprestimo", "valor_contratado", "valor_novos_recursos", "valor_liberado", "iof_financiado", "taxa_juros_mensal", "taxa_juros_anual", "cet_mensal", "cet_anual"]) contratoExtraido[key] = null;
+    contratoExtraido.condicoes_financeiras_nota = "A leitura OCR não preservou integralmente as colunas de capital, IOF e taxas. Esses campos exigem conferência visual e não alimentam cálculos automáticos. Parcelas e vencimentos permanecem limitados aos rótulos reconhecidos.";
+    contratoExtraido.revisao_financeira_obrigatoria = true;
+  }
   const mathAudit = buildMathAudit(contratoExtraido);
-  contratoExtraido.prazo_operacao_meses_aprox = mathAudit.prazo_operacao_meses_aprox;
+
+  /*
+   * ─── D6 · campos "não identificados" que o laudo calcula duas páginas adiante ─
+   *
+   * O § 2 do laudo FD-20260917 imprimiu "Taxa de juros anual calculada: Não
+   * identificado", "Prazo da operação (dias): Não identificado" e "Prazo da
+   * operação (meses, aprox.): Não identificado". O § 2.1, na página seguinte,
+   * calculou os três. Eram dois conjuntos de campos para a mesma grandeza, um
+   * alimentado pela extração e outro pela camada matemática, sem ligação.
+   *
+   * Um documento que declara não saber aquilo que ele mesmo calcula na página
+   * seguinte convida o leitor a auditar o resto linha a linha.
+   *
+   * A ficha passa a ler o resultado da camada matemática quando a extração não
+   * encontrou o campo, sempre com a origem declarada: extraído do instrumento
+   * e calculado pelo sistema não são a mesma afirmação e não podem sair sem
+   * distinção.
+   */
+  const ORIGEM_EXTRAIDA = "EXTRAIDO_DO_INSTRUMENTO";
+  const ORIGEM_CALCULADA = "CALCULADO_PELO_SISTEMA";
+
+  if (contratoExtraido.prazo_dias !== null && contratoExtraido.prazo_dias !== undefined && contratoExtraido.prazo_dias !== "") {
+    contratoExtraido.prazo_dias_origem = ORIGEM_EXTRAIDA;
+  } else if (Number.isFinite(mathAudit.prazo_calculado_dias)) {
+    contratoExtraido.prazo_dias = mathAudit.prazo_calculado_dias;
+    contratoExtraido.prazo_dias_origem = ORIGEM_CALCULADA;
+  }
+
+  if (contratoExtraido.taxa_juros_anual_calculada) {
+    contratoExtraido.taxa_juros_anual_calculada_origem = ORIGEM_CALCULADA;
+  } else if (mathAudit.juros_anual_calculado_12m || mathAudit.juros_anual_calculado_365) {
+    const convencao = mathAudit.juros_anual_convencao;
+    const doze = mathAudit.juros_anual_calculado_12m;
+    const dias = mathAudit.juros_anual_calculado_365;
+    contratoExtraido.taxa_juros_anual_calculada = doze && dias
+      ? `${doze} em doze meses e ${dias} em 365 dias${convencao ? ` (convenção que confere: ${convencao})` : ""}`
+      : doze || dias;
+    contratoExtraido.taxa_juros_anual_calculada_origem = ORIGEM_CALCULADA;
+  }
+
+  // `prazo_operacao_meses_aprox` deriva do prazo DECLARADO. Quando o
+  // instrumento não o traz, o valor que o § 2.1 publica é o prazo efetivo em
+  // meses, calculado da emissão ao último vencimento. Era essa a grandeza que a
+  // ficha dava como não identificada enquanto a aferição imprimia 8,3 meses.
+  contratoExtraido.prazo_operacao_meses_aprox = mathAudit.prazo_operacao_meses_aprox ?? mathAudit.prazo_efetivo_meses ?? null;
+  if (contratoExtraido.prazo_operacao_meses_aprox !== null && contratoExtraido.prazo_operacao_meses_aprox !== undefined) {
+    contratoExtraido.prazo_operacao_meses_aprox_origem = ORIGEM_CALCULADA;
+  }
   contratoExtraido.carencia_dias = mathAudit.carencia_dias;
   // Primeiro vencimento anterior à data do contrato não é carência: é sinal de
   // que uma das duas datas foi lida de outro quadro do documento.
@@ -988,6 +1083,17 @@ export function heuristicExtractionFromText(rawText) {
   contratoExtraido.custo_total_percentual = mathAudit.custo_total_percentual;
   if (mathAudit.carencia_dias > 45) {
     addIssue("FIN3", "INFO", "Carência prolongada entre contratação e primeiro vencimento", `Decorreram ${plural(mathAudit.carencia_dias, "dia", "dias")} entre a data do contrato (${contratoExtraido.data_contrato}) e o primeiro vencimento (${contratoExtraido.data_primeiro_vencimento}).${mathAudit.juros_carencia ? ` Nesse período, à taxa contratada, o saldo financiado acumula ${mathAudit.juros_carencia} de juros antes do primeiro pagamento.` : ""}${contratoExtraido.valor_total_parcelas && mathAudit.somatorio_sobre_liberado_percentual ? ` O somatório das parcelas (${contratoExtraido.valor_total_parcelas}) corresponde a ${mathAudit.somatorio_sobre_liberado_percentual} do valor liberado (${contratoExtraido.valor_liberado}).` : ""} A carência não é ilícita por si e integra o placar apenas como elemento de contexto econômico.`);
+  }
+  // D4: informação de prazo prestada de forma condicional não é divergência de
+  // prazo. O achado muda de natureza, sai com o trecho ancorado e fica pendente
+  // de conferência do escritório, a quem cabe a qualificação jurídica.
+  if (mathAudit.prazo_declarado_condicional && mathAudit.prazo_declarado_meses) {
+    addIssue(
+      "PRZ2",
+      "MÉDIA",
+      "Prazo informado de forma condicional no próprio campo",
+      `O campo de prazo do instrumento não declara um prazo fechado: registra "${contratoExtraido.prazo_total_declarado?.texto || `${mathAudit.prazo_declarado_meses} meses`}", condicionando o término ao pagamento da última parcela. Da emissão (${contratoExtraido.data_contrato}) ao último vencimento (${contratoExtraido.data_ultimo_vencimento}) decorrem ${plural(mathAudit.prazo_calculado_dias, "dia", "dias")}, cerca de ${String(mathAudit.prazo_efetivo_meses).replace(".", ",")} meses. Não se trata de divergência entre o prazo declarado e o efetivo, porque o campo não afirma prazo fechado: trata-se de informação de prazo prestada de forma condicional, cuja suficiência diante do dever de informação é matéria de qualificação jurídica.`
+    );
   }
   if (mathAudit.prazo_confere === false && mathAudit.prazo_declarado_meses) {
     addIssue("PRZ1", "MÉDIA", "Prazo efetivo diverge do prazo total declarado", `O instrumento declara prazo total de ${mathAudit.prazo_declarado_meses} meses, mas da emissão (${contratoExtraido.data_contrato}) ao último vencimento (${contratoExtraido.data_ultimo_vencimento}) decorrem ${plural(mathAudit.prazo_calculado_dias, "dia", "dias")}, cerca de ${String(mathAudit.prazo_efetivo_meses).replace(".", ",")} meses. A diferença decorre da carência até o primeiro vencimento, durante a qual correm juros, e não está refletida no prazo informado ao consumidor.`);
@@ -1132,6 +1238,10 @@ export function heuristicExtractionFromText(rawText) {
     layout.trilha?.basePublica ? `Consulta a base pública ${layout.trilha.basePublica}: ${layout.trilha.scoreBasePublica || "sem resultado"}` : null,
     uaParsed?.resumo ? `Dispositivo: ${uaParsed.resumo}` : null,
   ].filter(Boolean);
+  // Eixo distinto do de cima: aqui é o que o instrumento DESCREVE, não o que a
+  // trilha registra como ocorrido. Recebe `text`, não `flat`, porque a âncora é
+  // o segmento e a página, não o arquivo inteiro achatado.
+  const metodosDescritos = extrairMetodosDescritos(text, { biometriaRegistradaComoEvento });
   const metodosRegistradosNaTrilha = metodosDaTrilha.length ? metodosDaTrilha : [
     structuredAcceptance,
     !structuredAcceptance && signatureDateTime ? `Carimbo de data/hora da assinatura: ${signatureDateTime}` : null,
@@ -1209,15 +1319,13 @@ export function heuristicExtractionFromText(rawText) {
         biometriaRegistradaComoEvento ? "Biometria facial registrada como etapa do fluxo de contratação" : null,
       ].filter(Boolean),
       biometria_registrada_como_evento: biometriaRegistradaComoEvento,
-      // "Apenas no clausulado" só é verdade quando a biometria não aparece como
-      // etapa registrada. O ajuste final, com o inventário de imagens, é feito
-      // em analisarDocumento.js.
-      metodos_mencionados_clausulado: [
-        /biometr/i.test(flat) && !biometriaRegistradaComoEvento ? "Biometria mencionada apenas no clausulado/modelo contratual" : null,
-        /token|sms/i.test(flat) ? "SMS Token" : null,
-        /email|e-mail/i.test(flat) ? "E-mail" : null,
-        /selfie/i.test(flat) ? "Selfie" : null,
-      ].filter(Boolean),
+      // D1: método de autenticação só é afirmado com trecho ancorado que o
+      // descreva como etapa do fluxo. A regra anterior era busca por palavra
+      // sobre o texto achatado e emitia "SMS Token" para dossiê sem a palavra
+      // "token". O ajuste final da biometria, com o inventário de imagens, é
+      // feito em analisarDocumento.js.
+      metodos_descritos_no_fluxo: metodosDescritos.metodos,
+      metodos_descritos_estado: metodosDescritos.estado,
       mencao_textual: layout.assinaturaEletronicaTexto || signatureText,
       assinatura_manual_textual: manualSignatureName ? `Campo "Por:" preenchido com ${manualSignatureName}. Isso não é assinatura digital/criptográfica incorporada ao PDF.` : null,
       codigo_autenticacao_declarado: codigoAutenticacao,

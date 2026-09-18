@@ -20,7 +20,16 @@ const veredito = (valor) => (valor === true ? "CONFERE" : valor === false ? "DIV
 function itensDaAfericao(m) {
   const cet = m.cet_implicito_veredito === "Confere" ? true : m.cet_implicito_veredito === "NÃO CONFERE" ? false : null;
   return [
-    { nome: "prazo total declarado", estado: veredito(m.prazo_confere), detalhe: m.prazo_descricao, motivo: "prazo declarado ou último vencimento não localizado" },
+    {
+      nome: "prazo total declarado",
+      estado: veredito(m.prazo_confere),
+      detalhe: m.prazo_descricao,
+      // D4: não aferido por campo condicional é motivo diferente de não aferido
+      // por campo ausente. O primeiro é achado; o segundo é lacuna.
+      motivo: m.prazo_declarado_condicional
+        ? "o campo declara o prazo de forma condicional, e não há prazo fechado a confrontar"
+        : "prazo declarado ou último vencimento não localizado",
+    },
     { nome: "somatório das parcelas", estado: veredito(m.somatorio_confere), detalhe: m.somatorio_calculado && m.somatorio_declarado ? `calculado ${m.somatorio_calculado}, declarado ${m.somatorio_declarado}` : null, motivo: "somatório declarado, número ou valor das parcelas não localizado" },
     { nome: "composição do valor financiado", estado: veredito(m.composicao_confere), detalhe: m.composicao_financiado_calculada ? `calculado ${m.composicao_financiado_calculada}` : null, motivo: "componentes do financiado não localizados" },
     { nome: "valor presente pela taxa declarada", estado: veredito(m.vp_confere), detalhe: m.vp_taxa_declarada ? `calculado ${m.vp_taxa_declarada}` : null, motivo: "taxa, vencimentos ou valor financiado não localizados" },
