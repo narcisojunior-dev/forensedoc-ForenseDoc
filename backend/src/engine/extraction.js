@@ -1492,7 +1492,7 @@ export function heuristicExtractionFromText(rawText) {
         "CAD4",
         "MÉDIA",
         "Qualificação do contratante com campos fictícios ou não informados",
-        `A instituição formalizou a operação com ${partes.join(" e ")}${vazios.length ? `, além de ${vazios.join(", ")} em branco na proposta` : ""}. O preenchimento indica cadastro feito por terceiro ou sem conferência documental, e falha de identificação do contratante.`
+        `A instituição formalizou a operação com ${partes.join(" e ")}${vazios.length ? `, além de ${vazios.join(", ")} em branco na proposta` : ""}. Esses campos limitam a conferência cadastral nesta cópia. Não identificam quem preencheu o cadastro nem demonstram, isoladamente, ausência de conferência ou fraude.`
       );
     }
   }

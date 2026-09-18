@@ -143,7 +143,7 @@ const MODELOS = {
     return {
       titulo: "Cadastro do Contratante",
       quesito: `Queira ${bancoRef} esclarecer a formalização da operação${campos.length ? ` com ${juntarLista(campos)}` : " com campos de qualificação fictícios ou não informados"}, informando qual documento foi efetivamente conferido e por qual canal.`,
-      finalidade: "Evidenciar cadastro feito por terceiro ou sem conferência documental.",
+      finalidade: "Esclarecer as limitações cadastrais e os documentos utilizados na identificação.",
     };
   },
   SEG1(e, { nomeRef }) {
