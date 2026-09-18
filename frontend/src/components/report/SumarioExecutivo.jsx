@@ -12,7 +12,6 @@ import { distanciaKm, distanciaSuspeita, formatarDistancia } from "../../laudo/d
  */
 
 const TOM_DA_SEVERIDADE = { ALTA: "danger", "MÉDIA": "warn", INFO: "neutral", "FAVORÁVEL": "ok" };
-const TOM_DO_GRAU = { "CRÍTICA": "danger", ALTA: "danger", MODERADA: "warn", BAIXA: "ok" };
 
 // Nulo é ausência: "não calculada", nunca "0,00 km".
 const formatKm = (km) => formatarDistancia(km) || "não calculada";
@@ -30,7 +29,6 @@ export default function SumarioExecutivo({ sumario: bruto }) {
   const sumario = bruto.geo
     ? { ...bruto, geo: { ...bruto.geo, items: (bruto.geo.items || []).filter((i) => distanciaKm(i.distance) !== null && !distanciaSuspeita(i.distance)) } }
     : bruto;
-  const grau = sumario.suspicionGrade;
 
   return (
     <div className="space-y-4">
@@ -40,11 +38,11 @@ export default function SumarioExecutivo({ sumario: bruto }) {
       >
         <div>
           <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-zinc-500">
-            Grau de suspeição técnica
+            Orientação de revisão
           </div>
-          {grau?.rationale && <div className="mt-0.5 text-[12.5px] text-zinc-400">{grau.rationale}</div>}
+          <div className="mt-0.5 text-[12.5px] text-zinc-400">Conferir as evidências e diligências de cada item. As classificações individuais orientam a revisão; não atestam fraude, autoria ou validade jurídica.</div>
         </div>
-        {grau && <Badge label={grau.label} tone={TOM_DO_GRAU[grau.label] || "neutral"} />}
+        <Badge label="REVISÃO DOCUMENTAL NECESSÁRIA" tone="neutral" />
       </div>
 
       <p data-report-block className="text-[13px] leading-relaxed text-zinc-300">

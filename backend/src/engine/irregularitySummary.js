@@ -757,23 +757,10 @@ export function buildIrregularitySummary(report = {}) {
   };
 }
 
-// Grau de suspeição técnica agregado — item 10.1 do relatório técnico de
-// 09/09/2026: o laudo não concluía nada além do placar por achado
-// individual. Regra simples e documentada, não uma fórmula estatística:
-// serve para orientar a leitura, nunca substitui a valoração jurídica.
-function computeSuspicionGrade(findingsList) {
-  const nAlta = findingsList.filter((item) => item.severity === "ALTA").length;
-  const nMedia = findingsList.filter((item) => item.severity === "MÉDIA").length;
-  if (nAlta >= 3) {
-    return { label: "CRÍTICA", color: "#f06363", rationale: `${nAlta} achados de gravidade ALTA identificados.` };
-  }
-  if (nAlta >= 1) {
-    return { label: "ALTA", color: "#f5853f", rationale: `${nAlta} achado${nAlta === 1 ? "" : "s"} de gravidade ALTA identificado${nAlta === 1 ? "" : "s"}.` };
-  }
-  if (nMedia >= 2) {
-    return { label: "MODERADA", color: "#f2b03d", rationale: `${nMedia} achados de gravidade MÉDIA, sem nenhum de gravidade ALTA.` };
-  }
-  return { label: "BAIXA", color: "#3ddc97", rationale: nMedia === 1 ? "1 achado de gravidade MÉDIA, sem nenhum de gravidade ALTA." : "Nenhum achado de gravidade ALTA ou MÉDIA além do eventual formal já listado." };
+// Nome do campo mantido por compatibilidade com resultados persistidos.
+// A quantidade de lacunas não é uma escala de suspeição do contrato.
+function computeSuspicionGrade() {
+  return { label: "REVISÃO DOCUMENTAL NECESSÁRIA", color: "#64748b", rationale: "Conferir as evidências e diligências de cada item. As classificações individuais orientam a revisão; não atestam fraude, autoria ou validade jurídica." };
 }
 
 export { formatKm };

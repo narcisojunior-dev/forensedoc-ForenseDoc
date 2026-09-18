@@ -1443,15 +1443,9 @@ function sectionExecutiveSummary(ctx, sumario, reportId) {
   // segue na página corrente quando ela mal foi usada.
   reserve(ctx, 260);
   heading(ctx, `Sumário executivo de irregularidades${reportId ? ` · ${reportId}` : ""}`);
-  if (sumario.suspicionGrade) {
-    badge(
-      ctx,
-      "Grau de suspeição técnica",
-      sumario.suspicionGrade.label,
-      !["CRÍTICA", "ALTA"].includes(sumario.suspicionGrade.label)
-    );
-    if (sumario.suspicionGrade.rationale) paragraph(ctx, sumario.suspicionGrade.rationale, { color: MUTED, size: 8.5 });
-  }
+  // Não exibir classificações agregadas antigas ao emitir resultado legado.
+  field(ctx, "Orientação de revisão", "REVISÃO DOCUMENTAL NECESSÁRIA");
+  paragraph(ctx, "Conferir as evidências e diligências de cada item. As classificações individuais orientam a revisão; não atestam fraude, autoria ou validade jurídica.", { color: MUTED, size: 8.5 });
   if (sumario.intro) paragraph(ctx, sumario.intro, { size: 9 });
 
   subheading(ctx, "Placar de gravidade");
