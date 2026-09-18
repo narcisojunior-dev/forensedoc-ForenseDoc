@@ -160,13 +160,13 @@ export function analisarTrilhaEventos({ texto, segmentacao, ufEmissao, dataHoraA
     const aceite = ACEITES.find((a) => a.regex.test(ev.nome));
     add(
       aceite.codigo,
-      aceite.codigo === "TRL1-CCB" ? "ALTA" : "MÉDIA",
-      `Aceite de ${aceite.rotulo} incompatível com leitura`,
-      `O evento "${ev.nome}" ocorreu ${ev.intervalo_s} segundos após o evento anterior. O documento aceito tem ${ev.documento_aceito.paginas} páginas no arquivo, o que dá ${String(ev.segundos_por_pagina).replace(".", ",")} segundos por página, tempo incompatível com a leitura do conteúdo aceito.${ev.documento_aceito.paginas_fecho > 0 ? ` Dessas, ${ev.documento_aceito.paginas_conteudo_negocial} ${ev.documento_aceito.paginas_conteudo_negocial === 1 ? "traz" : "trazem"} conteúdo negocial e ${ev.documento_aceito.paginas_fecho} ${ev.documento_aceito.paginas_fecho === 1 ? "é página de fecho, com cabeçalho e rodapé apenas" : "são páginas de fecho, com cabeçalho e rodapé apenas"}; ainda assim a métrica é calculada sobre o total, porque foi o arquivo inteiro que se apresentou ao consumidor.` : ""}`
+      "INFO",
+      `Intervalo registrado antes do aceite de ${aceite.rotulo}`,
+      `O evento "${ev.nome}" ocorreu ${ev.intervalo_s} segundos após o evento anterior. O conjunto documental examinado tem ${ev.documento_aceito.paginas} páginas relacionadas a esse aceite; a divisão do intervalo pelo número de páginas resulta em ${String(ev.segundos_por_pagina).replace(".", ",")} s/pág. Essa razão não mede tempo de leitura. Sem registros de início da exibição, versão apresentada e interação, não é possível afirmar que o arquivo inteiro foi exibido ou que não houve leitura prévia. Solicitar os logs de exibição e aceite.`
     );
   }
   if (duracao < 600) {
-    add("TRL2", "MÉDIA", "Jornada de contratação concluída em poucos minutos", `Do primeiro evento (${eventos[0].nome}, ${eventos[0].data_hora}) ao último (${eventos.at(-1).nome}, ${eventos.at(-1).data_hora}) decorreram ${duracaoPt(duracao)}, para ${eventos.length} etapas.`);
+    add("TRL2", "INFO", "Jornada de contratação concluída em poucos minutos", `Do primeiro evento (${eventos[0].nome}, ${eventos[0].data_hora}) ao último (${eventos.at(-1).nome}, ${eventos.at(-1).data_hora}) decorreram ${duracaoPt(duracao)}, para ${eventos.length} etapas.`);
   }
   const algumComIp = eventos.some((e) => e.ip);
   const algumComGeo = eventos.some((e) => e.lat !== null);

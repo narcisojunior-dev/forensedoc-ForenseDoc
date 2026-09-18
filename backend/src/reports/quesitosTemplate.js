@@ -104,7 +104,7 @@ export function generateJudicialQuesitos({
  * premissa, e o achado ficaria rebaixado para sempre por falta do documento
  * que o próprio quesito requisita.
  */
-const SEMPRE = new Set(["EMP1", "CAD4", "SEG1"]);
+const SEMPRE = new Set(["EMP1", "CAD4", "SEG1", "TRL1-CCB"]);
 /** Achados cujo quesito toma o lugar do quesito geral do mesmo tema. */
 const SUBSTITUI_GERAL = new Set(["INT1", "BIO2"]);
 
@@ -166,7 +166,7 @@ const MODELOS = {
     return {
       titulo: "Tempo de Exibição do Instrumento na Jornada",
       quesito: `Queira ${bancoRef} apresentar os registros de exibição e rolagem da cédula na jornada de contratação${ev ? `, cujo aceite ocorreu ${ev.intervalo_s} segundos após o evento anterior para ${ev.documento_aceito.paginas} páginas` : ""}, informando o tempo em que o documento permaneceu aberto e se houve leitura integral antes do aceite.`,
-      finalidade: "Demonstrar que o consentimento não foi precedido de acesso efetivo ao conteúdo contratado.",
+      finalidade: "Esclarecer quando e qual conteúdo foi disponibilizado antes do aceite, sem presumir tempo de leitura.",
     };
   },
   IDN1(_e, { bancoRef }, achado) {

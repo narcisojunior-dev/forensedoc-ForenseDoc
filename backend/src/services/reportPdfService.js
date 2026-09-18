@@ -1198,7 +1198,8 @@ function sectionEventTrail(ctx, extracted) {
       [
         `${ev.data_hora}${ev.hora_local ? ` (local ${ev.hora_local.split(" ")[1]})` : ""}`,
         ev.intervalo_s == null ? "referência" : `+${ev.intervalo_s} s`,
-        ev.segundos_por_pagina != null ? `${String(ev.segundos_por_pagina).replace(".", ",")} s/pág. em ${ev.documento_aceito.paginas} págs.` : null,
+        ev.segundos_por_pagina != null ? `${String(ev.segundos_por_pagina).replace(".", ",")} s/pág. (razão aritmética; não mede leitura) em ${ev.documento_aceito.paginas} págs.` : null,
+        ev.aparelho ? `dispositivo ${ev.aparelho}` : null,
         ev.ip ? `IP ${ev.ip}${ev.porta ? `:${ev.porta}` : ""}` : "sem IP",
         ev.lat != null ? `${ev.lat}, ${ev.lon}` : "sem geolocalização",
       ].filter(Boolean).join(" · ")

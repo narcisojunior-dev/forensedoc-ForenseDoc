@@ -162,7 +162,7 @@ const MODELOS = {
     return {
       titulo: "Tempo de Exibição do Instrumento na Jornada",
       quesito: `Queira ${bancoRef} apresentar os registros de exibição e rolagem da cédula na jornada de contratação${ev ? `, cujo aceite ocorreu ${ev.intervalo_s} segundos após o evento anterior para ${ev.documento_aceito.paginas} páginas` : ""}, informando o tempo em que o documento permaneceu aberto e se houve leitura integral antes do aceite.`,
-      finalidade: "Demonstrar que o consentimento não foi precedido de acesso efetivo ao conteúdo contratado.",
+      finalidade: "Esclarecer quando e qual conteúdo foi disponibilizado antes do aceite, sem presumir tempo de leitura.",
     };
   },
   IDN1(_e, { bancoRef }, achado) {
