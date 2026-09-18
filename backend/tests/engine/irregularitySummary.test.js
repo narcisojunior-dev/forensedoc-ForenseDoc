@@ -62,7 +62,8 @@ test("3/5 - ausência de dados gera cautelas sem inventar coordenadas ou IP", ()
   assert.ok(summary.allFindings.some((item) => item.key === "signature-absent"));
   assert.equal(summary.geo.items.length, 0);
   assert.equal(summary.ipCards.length, 0);
-  assert.match(summary.synthesis, /ausência integral de trilha/i);
+  assert.match(summary.synthesis, /extração disponível/i);
+  assert.doesNotMatch(summary.synthesis, /ausência integral de trilha/i);
 });
 
 test("4/5 - IPs de banco e CDN não são tratados como localização do consumidor", () => {

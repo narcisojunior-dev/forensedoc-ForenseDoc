@@ -118,9 +118,10 @@ describe("D2 · ausência integral só com as duas contagens em zero", () => {
     expect(semGeoDeIp.synthesis).not.toMatch(/refer[êe]ncia residencial/i);
   });
 
-  it("sem IP e sem coordenada, a frase de ausência é autorizada", () => {
+  it("sem IP e coordenada, a conclusão se limita à extração", () => {
     const sumario = buildIrregularitySummary({ ...base, ipAnalysis: [], contractGeo: null });
-    expect(sumario.synthesis).toMatch(REGEX_AUSENCIA);
+    expect(sumario.synthesis).not.toMatch(REGEX_AUSENCIA);
+    expect(sumario.synthesis).toMatch(/extração disponível/i);
     expect(sumario.geo.insumos).toEqual({
       eventos_com_ip: 0,
       eventos_com_coordenada: 0,

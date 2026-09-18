@@ -672,12 +672,15 @@ export function buildIrregularitySummary(report = {}) {
   ].filter(Boolean).join(", ");
 
   let synthesis = semInsumoGeografico
-    ? "O documento não contém elementos geográficos suficientes para confronto entre GPS e IP de acesso; a ausência integral de trilha de rede/localização é o achado geográfico principal."
+    ? "Não foram localizados elementos geográficos suficientes na extração disponível para confronto entre GPS e IP de acesso. A limitação da extração não comprova ausência desses elementos no original."
     : `O confronto entre GPS e IP de acesso não foi concluído porque ${motivoDoConfronto}. O arquivo NÃO é omisso quanto a rastros geográficos: ${inventario} constam do dossiê e estão detalhados nas seções anteriores. Confronto não realizado e insumo ausente são estados distintos, e este é o primeiro.`;
   if (gpsIpDistance !== null && gpsIpDistance >= 50) {
     synthesis = `A tese técnica se concentra na divergência de ${formatKm(gpsIpDistance)} entre o GPS da assinatura e o IP de acesso provável. IPs classificados como servidor, CDN ou infraestrutura não devem ser usados para localizar o consumidor.`;
   } else if (gpsIpDistance !== null) {
     synthesis = `GPS e IP de acesso estão a aproximadamente ${formatKm(gpsIpDistance)}. A convergência é favorável à coerência espacial, mas não substitui a prova de autoria. IPs de infraestrutura foram separados do acesso do usuário.`;
+  } else if (paresMedidos.some(par => par.id === "gps-x-ip")) {
+    const par = paresMedidos.find(par => par.id === "gps-x-ip");
+    synthesis = `O GPS declarado e o ponto retornado pela consulta de geolocalização do IP registrado no dossiê foram comparados: cerca de ${par.km >= 1 ? `${Math.round(par.km)} km` : formatKm(par.km)}${par.metodo?.para?.evidencias?.length ? ` (${par.metodo.para.evidencias.length} registros desse endereço)` : ""}. O papel desse IP na sessão não foi determinado nesta análise; a distância descreve os pontos consultados, cuja margem de erro não foi informada, e não comprova autoria, presença física ou localização histórica. Consulte a memória de cálculo e as fontes do par GPS × IP. ${referenciaIndisponivel ? "O confronto residencial permanece indisponível e é independente dessa comparação." : "O confronto residencial é avaliado separadamente."}`;
   } else if (infrastructureIps.length) {
     synthesis = `${infrastructureIps.length} IP(s) foram classificados como infraestrutura. Esses endereços não localizam o consumidor; a conclusão depende de identificar o IP efetivamente associado à sessão do signatário.`;
   }
