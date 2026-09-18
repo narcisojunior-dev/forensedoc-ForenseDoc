@@ -1072,7 +1072,7 @@ function sectionIrregularities(ctx, extracted, projecao = null) {
   for (const ev of evs) {
     const { doc, contentWidth } = ctx;
     reserve(ctx, 32);
-    doc.fontSize(9.5).font("Helvetica").fillColor(DANGER).text("▸ ", MARGIN, doc.y, { continued: true });
+    doc.fontSize(9.5).font("Helvetica").fillColor(DANGER).text("• ", MARGIN, doc.y, { continued: true });
     doc.fillColor(INK).text(ev, { width: contentWidth });
     doc.moveDown(0.2);
   }
