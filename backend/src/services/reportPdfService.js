@@ -17,6 +17,7 @@ import { generateJudicialQuesitos } from "../reports/quesitosTemplate.js";
 import { montarConfrontoGeografico } from "../utils/distancia.js";
 import { descreverIndisponibilidade } from "../utils/confrontoEnderecos.js";
 import { fichaBeneficioSeAplica } from "../engine/produto.js";
+import { distanciaKm } from "../utils/distancia.js";
 
 // Paleta sóbria para peça processual (impressão em preto e branco continua legível).
 const INK = "#1a1a1a";
@@ -1513,7 +1514,12 @@ function sectionQuesitos(ctx, extracted, result) {
     { size: 9, color: MUTED }
   );
 
-  const ipItem = result.ipAnalysis?.[0];
+  // Mesmas entradas da tela (montarRelatorio.js): o IP de referência é o
+  // primeiro geolocalizado e a distância é a dele à residência. A distância do
+  // GPS declarado, usada antes aqui, fazia o quesito divergir do exibido.
+  const ips = result.ipAnalysis || [];
+  const ipItem = ips.find((ip) => ip.geo) || ips[0];
+  const distanciaIp = distanciaKm(ipItem?.distance);
   const quesitos = generateJudicialQuesitos({
     clienteNome: extracted.cliente?.nome,
     clienteCpf: extracted.cliente?.cpf,
@@ -1522,12 +1528,13 @@ function sectionQuesitos(ctx, extracted, result) {
     ip: ipItem?.endereco,
     porta: ipItem?.porta,
     gpsCoords: result.contractGeo ? `${result.contractGeo.lat}, ${result.contractGeo.lon}` : null,
-    cidadeIp: ipItem?.geo?.city ? `${ipItem.geo.city}/${ipItem.geo.region || ""}` : null,
+    cidadeIp: ipItem?.geo ? [ipItem.geo.city, ipItem.geo.region].filter(Boolean).join(" / ") : null,
     cidadeDomicilio: result.home?.geo ? result.home.geo.display || result.home.query : null,
-    distanciaKm: result.contractGeo?.distance != null ? result.contractGeo.distance.toFixed(1) : null,
+    distanciaKm: distanciaIp !== null ? distanciaIp.toFixed(1) : null,
     dataHora: ipItem?.data_hora || extracted.assinatura?.data_hora_assinatura,
     achados: extracted.achados_irregularidade || [],
     extracted,
+    cadeiaCustodia: result.cadeiaCustodia || null,
   });
 
   for (const q of quesitos) {
