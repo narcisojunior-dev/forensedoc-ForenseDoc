@@ -1553,7 +1553,6 @@ function sectionQuesitos(ctx, extracted, result) {
 
 function sectionLegal(ctx, extracted = {}) {
   heading(ctx, "§ 9 · Fundamentação normativa aplicável");
-  paragraph(ctx, NOTA_FUNDAMENTACAO_RESSALVA, { color: MUTED, size: 8.5 });
   for (const { grupo, itens } of fundamentacaoPara(extracted.contrato?.produto_codigo)) {
     const { doc, contentWidth } = ctx;
     reserve(ctx, 72); // título do grupo + o primeiro dispositivo junto
@@ -1567,7 +1566,8 @@ function sectionLegal(ctx, extracted = {}) {
       doc.moveDown(0.3);
     }
   }
-
+  // A ressalva diz "a fundamentação acima": vem depois dos dispositivos.
+  paragraph(ctx, NOTA_FUNDAMENTACAO_RESSALVA, { color: MUTED, size: 8.5 });
 }
 
 function legalNotice(ctx, timestamp) {
