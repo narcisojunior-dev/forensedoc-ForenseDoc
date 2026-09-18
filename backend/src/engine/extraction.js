@@ -1082,7 +1082,7 @@ export function heuristicExtractionFromText(rawText) {
   contratoExtraido.custo_total = mathAudit.custo_total;
   contratoExtraido.custo_total_percentual = mathAudit.custo_total_percentual;
   if (mathAudit.carencia_dias > 45) {
-    addIssue("FIN3", "INFO", "Carência prolongada entre contratação e primeiro vencimento", `Decorreram ${plural(mathAudit.carencia_dias, "dia", "dias")} entre a data do contrato (${contratoExtraido.data_contrato}) e o primeiro vencimento (${contratoExtraido.data_primeiro_vencimento}).${mathAudit.juros_carencia ? ` Nesse período, à taxa contratada, o saldo financiado acumula ${mathAudit.juros_carencia} de juros antes do primeiro pagamento.` : ""}${contratoExtraido.valor_total_parcelas && mathAudit.somatorio_sobre_liberado_percentual ? ` O somatório das parcelas (${contratoExtraido.valor_total_parcelas}) corresponde a ${mathAudit.somatorio_sobre_liberado_percentual} do valor liberado (${contratoExtraido.valor_liberado}).` : ""} A carência não é ilícita por si e integra o placar apenas como elemento de contexto econômico.`);
+    addIssue("FIN3", "INFO", "Carência prolongada entre contratação e primeiro vencimento", `Decorreram ${plural(mathAudit.carencia_dias, "dia", "dias")} entre a data do contrato (${contratoExtraido.data_contrato}) e o primeiro vencimento (${contratoExtraido.data_primeiro_vencimento}).${mathAudit.juros_carencia ? ` Sob a hipótese de liberação na data de emissão e aplicação da taxa declarada nesse período, o cálculo estima ${mathAudit.juros_carencia} de juros antes do primeiro pagamento.` : ""}${contratoExtraido.valor_total_parcelas && mathAudit.somatorio_sobre_liberado_percentual ? ` O somatório das parcelas (${contratoExtraido.valor_total_parcelas}) corresponde a ${mathAudit.somatorio_sobre_liberado_percentual} do valor liberado (${contratoExtraido.valor_liberado}).` : ""} A carência não é ilícita por si e integra o placar apenas como elemento de contexto econômico.`);
   }
   // D4: informação de prazo prestada de forma condicional não é divergência de
   // prazo. O achado muda de natureza, sai com o trecho ancorado e fica pendente
@@ -1219,7 +1219,8 @@ export function heuristicExtractionFromText(rawText) {
     }
   }
 
-  mathAudit.conclusao = redigirConclusaoAfericao(mathAudit);
+  mathAudit.premissa_fluxo = "Cálculos de valor presente, juros e CET condicionados à hipótese de liberação na data de emissão, aos vencimentos previstos e aos valores declarados. Não comprovam desembolso, cobrança ou recolhimento de tributos efetivamente realizados.";
+  mathAudit.conclusao = `${redigirConclusaoAfericao(mathAudit)} ${mathAudit.premissa_fluxo}`;
 
   const platformIndependence = assessPlatformIndependence(layout.trilha?.validadorUrl, contratoExtraido.banco);
   const uaParsed = parseUserAgent(layout.trilha?.dispositivoUtilizado);

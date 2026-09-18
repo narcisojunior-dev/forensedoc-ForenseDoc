@@ -522,7 +522,7 @@ export default function LaudoForense({ report }) {
                   ["Prazo efetivo, da emissão ao último vencimento (dias)", report.extracted.contrato?.prazo_efetivo_dias != null ? nBR(report.extracted.contrato.prazo_efetivo_dias) : null],
                   [marcarOrigem("Prazo da operação (meses, aprox.)", report.extracted.contrato?.prazo_operacao_meses_aprox_origem), report.extracted.contrato?.prazo_operacao_meses_aprox != null ? nBR(report.extracted.contrato.prazo_operacao_meses_aprox, 1) : null],
                   ["Carência até o primeiro vencimento (dias)", report.extracted.contrato?.carencia_dias != null ? nBR(report.extracted.contrato.carencia_dias) : null],
-                  ["Juros acumulados na carência", report.extracted.contrato?.juros_carencia],
+                  ["Juros estimados (hipótese: liberação na emissão)", report.extracted.contrato?.juros_carencia],
                   ["Taxa de juros mensal", report.extracted.contrato?.taxa_juros_mensal],
                   ["Taxa de juros anual", report.extracted.contrato?.taxa_juros_anual],
                   [marcarOrigem("Taxa de juros anual calculada", report.extracted.contrato?.taxa_juros_anual_calculada_origem), report.extracted.contrato?.taxa_juros_anual_calculada],
@@ -559,7 +559,7 @@ export default function LaudoForense({ report }) {
                           ["Taxa implícita sobre o valor financiado", m.juros_implicito_mensal
                             ? `${m.juros_implicito_mensal} a.m. · ${m.juros_implicito_confere ? "confere com" : "diverge da"} taxa declarada${m.juros_implicito_delta_pp !== null ? ` (diferença de ${Math.abs(m.juros_implicito_delta_pp).toFixed(3).replace(".", ",")} ponto)` : ""} · valor presente a essa taxa ${m.vp_taxa_implicita}`
                             : null],
-                          ["CET implícito mensal", m.cet_implicito_mensal
+                          ["CET implícito mensal (hipótese: liberação na emissão)", m.cet_implicito_mensal
                             ? `${m.cet_implicito_mensal}${m.cet_implicito_anual_calculado ? ` (${m.cet_implicito_anual_calculado} a.a. em 365 dias)` : ""}${m.cet_implicito_nota ? ` · ${m.cet_implicito_nota}` : ""} · ${m.cet_implicito_veredito || "não aferido"}`
                             : m.cet_implicito_motivo ? `não aferido: ${m.cet_implicito_motivo}` : null],
                           [m.cet_anual_base === "IMPLICITO" ? `Anualização do CET implícito (${m.cet_anual_base_mensal} a.m.)` : "Anualização do CET mensal declarado", m.cet_anual_calculado ? `${m.cet_anual_calculado} em 365 dias${m.cet_anual_calculado_12m ? ` · ${m.cet_anual_calculado_12m} em 12 meses` : ""}${m.cet_anual_convencao ? ` · contrato usa ${m.cet_anual_convencao}` : ""} · ${ok(m.cet_anual_confere) || "não aferido"}` : null],

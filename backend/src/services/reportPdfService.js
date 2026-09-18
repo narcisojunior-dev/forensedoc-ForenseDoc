@@ -1282,7 +1282,7 @@ function sectionEconomics(ctx, extracted) {
       : null],
     ["Prazo efetivo, da emissão ao último vencimento (dias)", c.prazo_efetivo_dias],
     ["Carência até o 1º vencimento (dias)", c.carencia_dias],
-    ["Juros acumulados na carência", c.juros_carencia],
+    ["Juros estimados na carência (hipótese: liberação na emissão)", c.juros_carencia],
     ["Custo total (somatório − liberado)", c.custo_total ? `${c.custo_total} (${c.custo_total_percentual} do liberado)` : null],
     ["Taxa anual calculada · calculada pelo sistema", c.taxa_juros_anual_calculada],
     [c.prazo_operacao_meses_aprox_origem === "CALCULADO_PELO_SISTEMA" ? "Prazo da operação (meses, aprox.) · calculado pelo sistema" : "Prazo da operação (meses, aprox.)", c.prazo_operacao_meses_aprox],
@@ -1325,11 +1325,11 @@ function sectionEconomics(ctx, extracted) {
     confere("Somatório das parcelas", m.somatorio_confere, m.somatorio_calculado);
     confere("Composição do financiado", m.composicao_confere, m.composicao_financiado_calculada);
     if (m.composicao_nota) paragraph(ctx, m.composicao_nota, { color: MUTED, size: 8.5 });
-    confere("Valor presente pela taxa declarada", m.vp_confere, m.vp_taxa_declarada);
+    confere("Valor presente previsto (hipótese: liberação na emissão)", m.vp_confere, m.vp_taxa_declarada);
     if (m.juros_implicito_mensal) {
       field(
         ctx,
-        "Taxa implícita sobre o valor financiado",
+        "Taxa implícita sobre o financiado (hipótese: liberação na emissão)",
         `${m.juros_implicito_mensal} a.m. · ${m.juros_implicito_confere ? "confere com" : "diverge da"} taxa declarada${m.juros_implicito_delta_pp !== null ? ` (diferença de ${Math.abs(m.juros_implicito_delta_pp).toFixed(3).replace(".", ",")} ponto)` : ""} · valor presente a essa taxa ${m.vp_taxa_implicita}`
       );
     }
@@ -1346,9 +1346,9 @@ function sectionEconomics(ctx, extracted) {
       m.juros_anual_calculado_365 ? `365 dias ${m.juros_anual_calculado_365} · 12 meses ${m.juros_anual_calculado_12m}${m.juros_anual_convencao ? ` · contrato usa ${m.juros_anual_convencao}` : ""}` : null
     );
     if (m.cet_implicito_mensal) {
-      field(ctx, "CET implícito no fluxo", `${m.cet_implicito_mensal} a.m.${m.cet_implicito_veredito ? ` · ${m.cet_implicito_veredito}` : ""}`);
+      field(ctx, "CET implícito no fluxo previsto (hipótese: liberação na emissão)", `${m.cet_implicito_mensal} a.m.${m.cet_implicito_veredito ? ` · ${m.cet_implicito_veredito}` : ""}`);
     } else if (m.cet_implicito_status === "NAO_AFERIDO" && m.cet_implicito_motivo) {
-      field(ctx, "CET implícito no fluxo", `não aferido: ${m.cet_implicito_motivo}`);
+      field(ctx, "CET implícito no fluxo previsto (hipótese: liberação na emissão)", `não aferido: ${m.cet_implicito_motivo}`);
     }
     if (m.cet_implicito_nota) paragraph(ctx, m.cet_implicito_nota, { color: MUTED, size: 8.5 });
     if (m.conclusao) paragraph(ctx, m.conclusao, { size: 9 });
