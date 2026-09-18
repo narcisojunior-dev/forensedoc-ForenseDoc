@@ -145,7 +145,7 @@ const REGRAS = [
     descricao: "Biometria dada como apenas mencionada no clausulado, com evento ou imagem biométrica no arquivo",
     verificar(_result, extracted) {
       const a = extracted.assinatura || {};
-      const soClausulado = (a.metodos_descritos_no_fluxo || []).some((m) => m.codigo === "BIOMETRIA" || /biometr/i.test(m.rotulo || ""));
+      const soClausulado = (a.metodos_descritos_no_fluxo || []).some((m) => /apenas|somente/i.test(m.rotulo || "") && /biometr/i.test(m.rotulo || ""));
       if (!soClausulado) return null;
       const imagens = (extracted.imagens_pdf?.imagens || []).filter((i) => i.biometricaProvavel).length;
       if (a.biometria_registrada_como_evento || imagens) {

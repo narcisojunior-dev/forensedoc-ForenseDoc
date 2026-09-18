@@ -199,7 +199,7 @@ describe("validação cruzada do laudo", () => {
       contrato: { data_contrato: "28/10/2025", produto_codigo: "CONSIGNADO_CLT" },
       metadados_processuais: { data_juntada: "28/10/2025" },
       assinatura: {
-        metodos_descritos_no_fluxo: [{ codigo: "BIOMETRIA", rotulo: "Biometria descrita como etapa do fluxo", trecho: "assinado por meio da coleta da biometria facial" }],
+        metodos_descritos_no_fluxo: [{ codigo: "BIOMETRIA", rotulo: "Biometria apenas no clausulado", trecho: "assinado por meio da coleta da biometria facial" }],
         biometria_registrada_como_evento: true,
         codigo_autenticacao_declarado: null,
         hash_documento_assinado: null,

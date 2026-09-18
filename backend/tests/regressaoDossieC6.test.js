@@ -120,7 +120,8 @@ describe("dossiê C6: testes negativos do relatório de homologação", () => {
 
   it("7. não afirma que a biometria foi apenas descrita no instrumento", () => {
     const rotulos = extraido.assinatura.metodos_descritos_no_fluxo.map((m) => m.rotulo).join(" ");
-    expect(rotulos).not.toMatch(/biometr/i);
+    expect(rotulos).toMatch(/biometr/i);
+    expect(rotulos).not.toMatch(/apenas|somente/i);
     expect(extraido.assinatura.biometria_registrada_como_evento).toBe(true);
   });
 
@@ -128,7 +129,7 @@ describe("dossiê C6: testes negativos do relatório de homologação", () => {
   // dossiê, que não contém a palavra "token" em nenhuma das 27 páginas.
   it("7.1. não afirma fator de autenticação ausente do material", () => {
     expect(JSON.stringify(extraido.assinatura)).not.toMatch(/SMS\s*Token/i);
-    expect(extraido.assinatura.metodos_descritos_estado).toBe("nao_localizado_no_material");
+    expect(extraido.assinatura.metodos_descritos_estado).toBe("LOCALIZADO");
   });
 
   it("protocolo de autenticidade não é tratado como hash declarado", () => {

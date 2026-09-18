@@ -3,7 +3,6 @@ import { inspectPdfImages } from "./pdfForensics.js";
 import { applySourceProvenance, inspectDocumentEligibility } from "./documentEligibility.js";
 import { separarCarimboProcessual } from "./carimboProcessual.js";
 import { analisarBiometria } from "./biometria.js";
-import { ESTADO_METODOS } from "./metodosAutenticacao.js";
 import {
   humanYearsMonthsFromDays, parseFormattedPdfDate, parsePtDate, parsePtDateTime, plural, stripDiacritics,
 } from "./format.js";
@@ -57,11 +56,7 @@ export async function analisarDocumento({
   // dossiê C6 dizia isso no § 4 e inventariava a selfie no § 4.2.
   const imagensBiometricas = (imageAnalysis.imagens || []).filter((imagem) => imagem.biometricaProvavel);
   if (imagensBiometricas.length && fallback.assinatura) {
-    fallback.assinatura.metodos_descritos_no_fluxo = (fallback.assinatura.metodos_descritos_no_fluxo || [])
-      .filter((metodo) => metodo.codigo !== "BIOMETRIA");
-    if (!fallback.assinatura.metodos_descritos_no_fluxo.length) {
-      fallback.assinatura.metodos_descritos_estado = ESTADO_METODOS.NAO_LOCALIZADO_NO_MATERIAL;
-    }
+    // A imagem e a descrição documental coexistem; uma não apaga a outra.
     const metodo = `Artefato biométrico no arquivo: ${imagensBiometricas.length === 1 ? "1 imagem classificada" : `${imagensBiometricas.length} imagens classificadas`} como fotografia ou biometria provável`;
     fallback.assinatura.metodos_autenticacao = [...(fallback.assinatura.metodos_autenticacao || []), metodo];
   }

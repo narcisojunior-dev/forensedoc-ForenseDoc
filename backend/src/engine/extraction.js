@@ -1531,6 +1531,13 @@ export function heuristicExtractionFromText(rawText) {
     flat,
   });
   extracted.trilha_eventos = trilhaEventos ? { ...trilhaEventos, achados: undefined } : null;
+  if (!extracted.assinatura.forma_aceite && extracted.assinatura.biometria_registrada_como_evento) {
+    extracted.assinatura.forma_aceite = "Assinatura eletrônica com validação biométrica (declarada no dossiê)";
+  }
+  const dispositivoRegistrado = trilhaEventos?.eventos?.find(e => e.aparelho)?.aparelho;
+  if (!extracted.assinatura.dispositivo && dispositivoRegistrado) {
+    extracted.assinatura.dispositivo = `Identificador declarado: ${dispositivoRegistrado}; modelo físico não determinado por esse identificador`;
+  }
   for (const a of trilhaEventos?.achados || []) addIssue(a.codigo, a.gravidade, a.titulo, a.texto);
 
   extracted.evidencias_irregularidade = achados.map((issue) => `${issue.titulo}. ${issue.texto}`);
