@@ -24,7 +24,7 @@ export const DEFINICAO_CADEIA_CUSTODIA =
 
 /** Por que a completude importa, em termos de ônus da prova. */
 export const EFEITO_PROCESSUAL_CADEIA =
-  "Impugnada a assinatura pelo consumidor, o ônus de comprovar autenticidade e integridade do documento recai sobre a instituição financeira (STJ, Tema 1.061; CPC, art. 373, e art. 429, II). A assinatura eletrônica sem certificação ICP-Brasil é válida (MP 2.200-2/2001, art. 10, § 2º; Lei 14.063/2020), mas essa validade é CONDICIONADA à demonstração de autoria e integridade, que é precisamente o que a cadeia de custódia documenta. Cada elemento ausente subtrai um meio de prova de que a instituição dispõe para se desincumbir desse ônus.";
+  "Quando o consumidor impugna a autenticidade da assinatura em contrato bancário juntado pela instituição financeira, cabe a ela provar a autenticidade (STJ, Tema 1.061; CPC arts. 6º, 369 e 429, II). O dossiê isolado não demonstra que houve essa impugnação. A falta de certificação ICP-Brasil ou de um item deste checklist não decide, por si só, a validade do ato. A apreciação depende do conjunto probatório.";
 
 /**
  * Os oito elementos, cada um com função probatória, base normativa e efeito da

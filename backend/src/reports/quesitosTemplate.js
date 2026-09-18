@@ -85,7 +85,7 @@ export function generateJudicialQuesitos({
     porAchado.INT1 || {
       numero: 5,
       titulo: "Integridade Criptográfica e Ônus Probatório (Tema 1.061 STJ e MP 2.200-2/2001)",
-      quesito: `Diante da expressa impugnação de autenticidade formulada pelo consumidor (CPC, art. 429, II c/c Tema 1.061 do STJ), queira informar se a assinatura eletrônica utilizada possui certificado emitido sob a infraestrutura ICP-Brasil (assinatura qualificada) ou se depende exclusivamente de meios eletrônicos avançados/simples, especificando se o código hash do contrato original permaneceu inalterado desde a contratação.`,
+      quesito: `Caso haja impugnação da autenticidade pelo consumidor, observada a hipótese do Tema 1.061 do STJ (CPC, art. 429, II), queira informar se a assinatura eletrônica utilizada possui certificado emitido sob a infraestrutura ICP-Brasil (assinatura qualificada) ou se depende exclusivamente de meios eletrônicos avançados/simples, especificando se o código hash do contrato original permaneceu inalterado desde a contratação.`,
       finalidade: "Fixar a incumbência probatória sobre a instituição financeira requerida.",
     },
     ...especificos,
@@ -180,7 +180,7 @@ const MODELOS = {
     const protocolo = e.assinatura?.codigo_autenticacao_declarado;
     return {
       titulo: "Integridade Criptográfica e Ônus Probatório (Tema 1.061 STJ e MP 2.200-2/2001)",
-      quesito: `Diante da expressa impugnação de autenticidade formulada pelo consumidor (CPC, art. 429, II c/c Tema 1.061 do STJ), e considerando que o dossiê não apresenta resumo criptográfico (hash) do documento assinado${protocolo ? `, mas apenas o protocolo interno ${protocolo}, verificável somente no sítio da própria instituição` : ""}, queira informar se a assinatura possui certificado ICP-Brasil e apresentar o hash do arquivo original, calculado no momento da assinatura, com indicação do algoritmo e do meio de conferência por terceiro.`,
+      quesito: `Caso haja impugnação da autenticidade pelo consumidor, observada a hipótese do Tema 1.061 do STJ (CPC, art. 429, II), e considerando que o dossiê não apresenta resumo criptográfico (hash) do documento assinado${protocolo ? `, mas apenas o protocolo interno ${protocolo}, verificável somente no sítio da própria instituição` : ""}, queira informar se a assinatura possui certificado ICP-Brasil e apresentar o hash do arquivo original, calculado no momento da assinatura, com indicação do algoritmo e do meio de conferência por terceiro.`,
       finalidade: "Fixar a incumbência probatória sobre a instituição financeira e afastar a autoverificação.",
     };
   },

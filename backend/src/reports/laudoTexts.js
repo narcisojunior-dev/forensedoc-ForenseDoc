@@ -16,7 +16,7 @@ export const FIRM = {
 
 // §4 — nota sobre validade da assinatura eletrônica.
 export const NOTA_ASSINATURA =
-  "A validade da assinatura eletrônica não depende de certificação ICP-Brasil. A MP 2.200-2/2001 (art. 10, §2º) admite outros meios de comprovação de autoria e integridade, e a Lei 14.063/2020 reconhece as assinaturas simples, avançada e qualificada, todas com validade jurídica. O STJ consolidou esse entendimento no REsp 2.159.442 (rel. Min. Nancy Andrighi) e o reafirmou no REsp 2.205.708. O ponto decisivo não é o selo ICP-Brasil, e sim a completude da cadeia de custódia: demonstrar quem assinou, quando, de onde e com qual integridade.";
+  "A ausência de certificação ICP-Brasil, por si só, não invalida uma assinatura eletrônica (MP 2.200-2/2001, art. 10, § 2º; STJ, REsp 2.159.442 e REsp 2.197.156). A validade no caso concreto depende do método aceito, dos elementos de autoria e integridade e da apreciação do conjunto probatório. A classificação de assinaturas pela Lei 14.063/2020 não dispensa a verificação de seu âmbito de aplicação e dos requisitos do ato. A contagem de itens de um checklist não substitui essa análise.";
 
 // §1 — nota sobre hash calculado pelo sistema quando o documento não traz um.
 export const NOTA_HASH_SISTEMA =
@@ -80,9 +80,9 @@ export const FUNDAMENTACAO = [
     grupo: "Assinatura eletrônica e ônus da prova",
     itens: [
       ["MP 2.200-2/2001, art. 10, § 2º", "Admite outros meios de comprovação de autoria e integridade, além da certificação ICP-Brasil."],
-      ["Lei 14.063/2020", "Classifica as assinaturas em simples, avançada e qualificada, todas com validade jurídica conforme o grau de segurança."],
-      ["STJ, REsp 2.159.442 e REsp 2.205.708", "A ausência de certificação ICP-Brasil não invalida, por si só, a assinatura, desde que comprovadas autoria e integridade."],
-      ["STJ, Tema 1.061, c/c CPC, art. 373", "Impugnada a assinatura em contrato bancário, cabe à instituição financeira comprovar a autenticidade e a integridade do documento."],
+      ["Lei 14.063/2020", "Define categorias de assinatura em seu âmbito de aplicação; a categoria, isoladamente, não comprova validade no caso concreto."],
+      ["STJ, REsp 2.159.442 e REsp 2.197.156", "A ausência de certificação ICP-Brasil não invalida, por si só, a assinatura, desde que comprovadas autoria e integridade."],
+      ["STJ, Tema 1.061, CPC arts. 6º, 369 e 429, II", "Quando o consumidor impugna a autenticidade da assinatura em contrato bancário juntado pela instituição financeira, cabe a ela provar a autenticidade. A existência de impugnação neste caso não foi demonstrada pelo dossiê."],
     ],
   },
   {
