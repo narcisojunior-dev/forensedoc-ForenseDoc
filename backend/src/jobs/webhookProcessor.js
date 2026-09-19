@@ -201,7 +201,15 @@ async function handlePaymentOverdue(payment) {
   await paymentsQueue.add(
     "suspend-if-overdue",
     { tenantId: tenant.id },
-    { delay: 7 * 24 * 60 * 60 * 1000 }
+    {
+      delay: 7 * 24 * 60 * 60 * 1000,
+      // O atraso de 7 dias é intencional e não é afetado por isto: o descarte
+      // só acontece DEPOIS de o job rodar. Sem `removeOnComplete`, cada
+      // inadimplência deixaria um job concluído no Redis para sempre, e como
+      // job de fila não tem TTL, a política `volatile-lru` nunca o despejaria.
+      removeOnComplete: true,
+      removeOnFail: 100,
+    }
   );
 }
 
