@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { api, setAccessToken, clearAccessToken, getAccessToken, bootstrapAuth } from "../lib/axios";
+import { motivoDoErro } from "../lib/logSafe";
 
 export const useAuthStore = create((set) => ({
   user: null,
@@ -76,7 +77,7 @@ export const useAuthStore = create((set) => ({
     try {
       await api.post("/auth/logout");
     } catch (err) {
-      console.error("Logout silencioso falhou:", err);
+      console.error("Logout silencioso falhou:", motivoDoErro(err));
     } finally {
       clearAccessToken();
       set({ user: null, isAuthenticated: false });
@@ -102,7 +103,7 @@ export const useAuthStore = create((set) => ({
       // Busca saldo automaticamente ao logar
       await useAuthStore.getState().fetchBalance();
     } catch (error) {
-      console.error("Sessão inválida ou expirada", error);
+      console.error("Sessão inválida ou expirada:", motivoDoErro(error));
       clearAccessToken();
       set({ user: null, isAuthenticated: false, isLoading: false });
     }
@@ -113,7 +114,7 @@ export const useAuthStore = create((set) => ({
       const response = await api.get("/credits/balance");
       set({ balance: response.data.balance });
     } catch (error) {
-      console.error("Erro ao buscar saldo:", error);
+      console.error("Erro ao buscar saldo:", motivoDoErro(error));
     }
   }
 }));

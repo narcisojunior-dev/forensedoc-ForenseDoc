@@ -166,7 +166,9 @@ export async function exportReportPDF(setBusy, setPdfDownload) {
     link.remove();
     try { window.open(url, "_blank", "noopener,noreferrer"); } catch {}
   } catch (e) {
-    console.error("[ForenseDoc] Falha ao gerar PDF", e);
+    // Só a mensagem: o objeto de erro do html2canvas/jspdf carrega referência ao
+    // DOM capturado, que é o laudo — dado do dossiê no console do navegador.
+    console.error("[ForenseDoc] Falha ao gerar PDF:", e?.message || "erro desconhecido");
     window.alert("Não foi possível gerar o PDF automaticamente. Detalhe: " + (e.message || "erro desconhecido"));
   } finally {
     clearPageSpacers(el);

@@ -244,7 +244,9 @@ export async function exportarLaudoPdf(setBusy, setPdfDownload, { download = tru
     }
     return { blob, filename, totalPages, pagination: {canvasWidth:canvas.width,canvasHeight:canvas.height,pageHeightPx,summaryRanges,pageSlices} };
   } catch (e) {
-    console.error("[ForenseDoc] Falha ao gerar PDF", e);
+    // Só a mensagem: o objeto de erro do html2canvas/jspdf carrega referência ao
+    // DOM capturado, que é o laudo — dado do dossiê no console do navegador.
+    console.error("[ForenseDoc] Falha ao gerar PDF:", e?.message || "erro desconhecido");
     // Quem chama mostra a mensagem no padrão de notificação do SaaS.
     throw new Error("Não foi possível gerar o PDF automaticamente. Detalhe: " + (e.message || "erro desconhecido"));
   } finally {
