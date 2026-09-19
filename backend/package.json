@@ -4,7 +4,7 @@
   "version": "3.0.0",
   "type": "module",
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "scripts": {
     "test": "vitest run",
@@ -21,22 +21,22 @@
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.8.0",
-    "@prisma/client": "^7.8.0",
+    "@prisma/client": "^7.10.0",
     "bcryptjs": "^3.0.3",
     "bullmq": "^5.80.2",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
-    "express": "^4.19.2",
+    "express": "^4.22.3",
     "express-rate-limit": "^8.5.2",
     "helmet": "^8.3.0",
     "ioredis": "^5.11.1",
     "jsonwebtoken": "^9.0.3",
-    "nodemailer": "^9.0.3",
+    "nodemailer": "^10.0.10",
     "pdf-parse": "^2.4.5",
     "pdfkit": "^0.19.1",
     "pg": "^8.22.0",
-    "prisma": "^7.8.0",
+    "prisma": "^7.10.0",
     "qrcode-svg": "^1.1.0",
     "rate-limit-redis": "^5.0.0",
     "tesseract.js": "^7.0.0",
@@ -47,5 +47,9 @@
     "cross-env": "^10.1.0",
     "supertest": "^7.2.2",
     "vitest": "^4.1.10"
+  },
+  "//overrides": "qs está no caminho de TODA requisição: é ele que faz o parse de query string e de corpo urlencoded. O express 4.22.3 já usa o qs corrigido, mas o body-parser 1.20.6 que ele fixa ainda traz o 6.15.3, vulnerável a bypass de limite de array e a DoS por parsing. O body-parser 2.x só existe para o express 5, então subir por ali exigiria trocar de major. 6.16.0 é o mesmo major do que o body-parser espera. Remover quando o projeto migrar para o express 5.",
+  "overrides": {
+    "qs": "^6.16.0"
   }
 }
