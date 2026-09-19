@@ -41,6 +41,32 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
+    # ── Teto de recursos, e por que TODO serviço tem um ──────────────────────
+    #
+    # Num host único, container sem limite compete por toda a RAM da máquina. O
+    # problema não é o serviço que estoura: é QUEM MORRE quando ele estoura. O
+    # OOM killer do kernel escolhe pelo consumo, não pela culpa, e o Postgres é
+    # o alvo grande. Sem limite, um pico do worker derruba o banco.
+    #
+    # Orçamento da KVM 4 (16 GB), medido em 19/09/2026 (ESCALABILIDADE-2026-09-19.md):
+    #
+    #   nginx      256 MB      proxy, consumo desprezível
+    #   backend      1 GB      medido ~200 MB
+    #   worker       2 GB      medido 967 MB em concorrência 4 (2x de folga)
+    #   postgres     3 GB      26 MB em repouso, cresce com shared_buffers
+    #   redis      1,5 GB      maxmemory de 1 GB mais sobrecarga do processo
+    #   ─────────────────
+    #   total     7,75 GB      de 16 GB, sobrando para o cache de página do host
+    #
+    # ATENÇÃO: `mem_limit` é POR CONTAINER. Com `WORKER_REPLICAS=3` são 3 x 2 GB
+    # de worker, e o total sobe para 11,75 GB. Ao escalar réplicas, refaça esta
+    # conta antes, e não depois do primeiro OOM.
+    #
+    # `cpus` é teto, não reserva: um serviço ocioso não segura CPU para si. O do
+    # worker existe para que o OCR, que satura um núcleo inteiro por análise,
+    # não deixe a API sem CPU para responder o polling de status.
+    mem_limit: 256m
+    cpus: 0.5
     networks:
       - forensedoc_net
 
@@ -68,6 +94,12 @@ services:
     # `user: node` (uid 1000, herdado da imagem base) fazia o processo rodar como
     # um usuário sem permissão de escrita no volume, e a gravação do dossiê caía
     # em silêncio para o payload em base64.
+    #
+    # Ver o orçamento completo no serviço `nginx`. A API mede ~200 MB; 1 GB
+    # acomoda o pico do parser da rota de análise, que aceita corpo de até
+    # ~42 MB em base64 e o materializa em memória.
+    mem_limit: 1g
+    cpus: 1.5
     networks:
       - forensedoc_net
 
@@ -100,6 +132,22 @@ services:
         condition: service_healthy
     restart: unless-stopped
     # Ver a nota do serviço `backend`: quem define o usuário é o Dockerfile.
+    #
+    # ── Os dois tetos que mais importam no host ──────────────────────────────
+    #
+    # Memória, medida na curva de carga de 19/09/2026: 391 MB em concorrência 1,
+    # 967 MB em 4, crescendo de forma previsível e sem vazamento. 2 GB dá o dobro
+    # de folga sobre o pior ponto medido.
+    #
+    # É POR RÉPLICA. Com `WORKER_REPLICAS=3` o worker passa a poder usar 6 GB.
+    #
+    # CPU: cada análise satura UM núcleo inteiro (medido: CPU/relógio = 0,97), e
+    # a concorrência padrão numa KVM 4 é 3. O teto de 3 garante que sobre ao
+    # menos um núcleo para nginx, API, Postgres e Redis. Sem ele, três OCR
+    # simultâneos deixam a API sem CPU e o polling de status começa a expirar
+    # enquanto a análise que ele acompanha ainda está rodando.
+    mem_limit: 2g
+    cpus: 3
     networks:
       - forensedoc_net
 
@@ -121,6 +169,15 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    # Ver o orçamento no serviço `nginx`. 26 MB em repouso, mas o teto não é
+    # dimensionado pelo repouso: é `shared_buffers` mais as conexões, e o pool
+    # desta aplicação abre 15 na API mais 24 por réplica de worker.
+    #
+    # Este é o serviço que o limite dos OUTROS protege. Sem teto no worker, era
+    # o Postgres que o OOM killer escolhia, por ser o maior processo da máquina,
+    # e o sintoma (banco reiniciando) não apontava para a causa (OCR em pico).
+    mem_limit: 3g
+    cpus: 2
     networks:
       - forensedoc_net
 
@@ -146,6 +203,14 @@ services:
     # pior caso dele é consultar o serviço externo de novo.
     #
     # Ajuste `REDIS_MAXMEMORY` para cerca de 70% da RAM dedicada ao container.
+    # Essa orientação só passou a fazer sentido agora: antes NÃO existia RAM
+    # dedicada ao container, porque nenhum serviço tinha `mem_limit`, e a conta
+    # de 70% não tinha sobre o que incidir. Com o teto de 1,5 GB abaixo, 70% dá
+    # ~1 GB, que é exatamente o `REDIS_MAXMEMORY=1gb` do `.env.example`.
+    #
+    # Os 30% que sobram não são desperdício: o `maxmemory` limita o conjunto de
+    # dados, e não o processo. Cópia na escrita do fork do AOF, fragmentação do
+    # alocador e buffers de cliente ficam FORA dessa conta, e é aí que moram.
     command: >
       redis-server --requirepass ${REDIS_PASSWORD} --appendonly yes
       --maxmemory ${REDIS_MAXMEMORY:-512mb} --maxmemory-policy volatile-lru
@@ -159,6 +224,12 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    # Ver o orçamento no serviço `nginx`, e a nota de 70% logo acima: o teto do
+    # container precisa ficar ACIMA do `maxmemory`, nunca igual. Igualar faz o
+    # kernel matar o Redis durante o fork do AOF, justamente quando ele está
+    # gravando, e aí a fila de jobs volta ao estado do último snapshot.
+    mem_limit: 1536m
+    cpus: 1
     networks:
       - forensedoc_net
 
