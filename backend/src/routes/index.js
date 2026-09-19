@@ -68,7 +68,19 @@ router.post(
   // trabalho pesado concedido a quem sequer tem conta.
   requireAuth,
   analyzeBodyParser, // única rota que aceita corpo acima do limite global
-  analyzeLimiter, // anti-duplo-clique: 1 análise / 30s por tenant
+  /*
+   * Vazão contratada, resolvida por requisição a partir do plano do tenant
+   * (`analysesPerMinute`, ver rateLimiters.js). NÃO é trava de concorrência:
+   * quem limita análises simultâneas é o semáforo `maxConcurrentAnalyses` em
+   * `analyzeController`, e nem ele garante a corretude do débito de crédito,
+   * que se defende sozinho no WHERE do decremento (ver creditService.js).
+   *
+   * Este comentário já disse "anti-duplo-clique: 1 análise / 30s por tenant",
+   * que deixou de ser verdade quando a vazão virou atributo de plano. A frase
+   * sobreviveu à mudança e fazia parecer que existia uma segunda trava
+   * serializando o débito. Não existe.
+   */
+  analyzeLimiter,
   requireCredit,
   requestTimeout(ANALYZE_TIMEOUT_MS),
   analyzePdf

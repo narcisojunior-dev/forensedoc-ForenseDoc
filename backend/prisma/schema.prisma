@@ -337,6 +337,11 @@ model Subscription {
 // SALDO DE CRÉDITOS
 // ─────────────────────────────────────────────
 
+/// Os quatro contadores têm CHECK `>= 0` no banco, criado pela migration
+/// `20260919140000_credit_balance_nao_negativo`. O Prisma não expressa CHECK no
+/// schema, então ele NÃO aparece aqui: quem reescrever este modelo precisa
+/// preservar a constraint, que é a segunda camada contra débito em corrida
+/// (a primeira é o `updateMany` com `{ gt: 0 }` em `creditService.debitCredit`).
 model CreditBalance {
   id               String    @id @default(uuid())
   tenantId         String    @unique

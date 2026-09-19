@@ -61,50 +61,80 @@ export async function getBalancePublic(tenantId) {
  * um alerta de "créditos acabando" já enviado por um débito que não aconteceu.
  * Quem chama executa `afterDebitCommit` depois do commit.
  */
+/**
+ * Ordem de prioridade de gasto: Mensal -> Emergência -> Avulso -> Manual.
+ * Gasta-se primeiro o que expira antes, para o crédito sem validade sobrar.
+ */
+const PRIORIDADE_DE_GASTO = Object.freeze([
+  ["creditsMonthly", "monthly"],
+  ["creditsEmergency", "emergency"],
+  ["creditsAvulso", "avulso"],
+  ["creditsManual", "manual"],
+]);
+
 export async function debitCredit(tenantId, userId, analysisId, txClient = prisma) {
   const balance = await txClient.creditBalance.findUnique({
     where: { tenantId },
   });
 
+  // Recusa barata, antes de tentar escrever. NÃO é a checagem que garante a
+  // correção: essa é o WHERE do decremento abaixo. Esta só evita trabalho.
   if (getTotalCredits(balance) < 1) {
     throw new Error("INSUFFICIENT_CREDITS");
   }
 
-  let updateField;
-  let creditTypeUsed;
-
-  // Ordem de prioridade de gasto: Mensal -> Emergência -> Avulso/Manual
-  if (balance.creditsMonthly > 0) {
-    updateField = { creditsMonthly: { decrement: 1 } };
-    creditTypeUsed = "monthly";
-  } else if (balance.creditsEmergency > 0) {
-    updateField = { creditsEmergency: { decrement: 1 } };
-    creditTypeUsed = "emergency";
-  } else if (balance.creditsAvulso > 0) {
-    updateField = { creditsAvulso: { decrement: 1 } };
-    creditTypeUsed = "avulso";
-  } else {
-    updateField = { creditsManual: { decrement: 1 } };
-    creditTypeUsed = "manual";
+  /*
+   * ─── Por que a condição vai para o WHERE, e não para um `if` ────────────────
+   *
+   * Antes era ler o saldo, decidir o campo num `if` e só então decrementar. Entre
+   * a leitura e a escrita havia uma janela: duas análises do MESMO tenant entrando
+   * juntas liam saldo 1, as duas passavam pelo `if`, as duas decrementavam. Dois
+   * laudos por um crédito, saldo em -1.
+   *
+   * O que segurava isso era o semáforo `maxConcurrentAnalyses`, externo a esta
+   * função e com default 1. Só que esse campo é atributo COMERCIAL, elevado por
+   * `PATCH /admin/plans/:id` sem deploy: no dia em que um plano vendesse duas
+   * análises simultâneas, a falha passaria a valer dinheiro sem ninguém tocar
+   * aqui. Correção de faturamento não pode depender de configuração de produto.
+   *
+   * `updateMany` com `{ gt: 0 }` no WHERE resolve porque a condição e a escrita
+   * viram um único UPDATE atômico no banco. Perdeu a corrida, `count` é 0 e nada
+   * foi decrementado. É o mesmo idioma já usado em `webhookProcessor.js`
+   * (`status: { not: "PAID" }`) e em `notificationController.js`.
+   *
+   * O laço percorre a prioridade porque perder a corrida num campo não significa
+   * estar sem saldo: quem tinha 1 mensal e 5 avulsos precisa cair para o avulso,
+   * e não receber 402.
+   */
+  let creditTypeUsed = null;
+  for (const [campo, tipo] of PRIORIDADE_DE_GASTO) {
+    const { count } = await txClient.creditBalance.updateMany({
+      where: { tenantId, [campo]: { gt: 0 } },
+      data: { [campo]: { decrement: 1 } },
+    });
+    if (count === 1) {
+      creditTypeUsed = tipo;
+      break;
+    }
   }
 
-  const [, creditTx] = await Promise.all([
-    txClient.creditBalance.update({
-      where: { tenantId },
-      data: updateField,
-    }),
-    txClient.creditTransaction.create({
-      data: {
-        tenantId,
-        userId,
-        type: "SPEND",
-        amount: -1,
-        creditType: creditTypeUsed,
-        source: "analysis",
-        analysisId,
-      },
-    })
-  ]);
+  // Nenhum campo tinha saldo no momento da escrita: ou acabou entre a leitura e
+  // aqui, ou uma análise concorrente levou o último crédito.
+  if (!creditTypeUsed) {
+    throw new Error("INSUFFICIENT_CREDITS");
+  }
+
+  const creditTx = await txClient.creditTransaction.create({
+    data: {
+      tenantId,
+      userId,
+      type: "SPEND",
+      amount: -1,
+      creditType: creditTypeUsed,
+      source: "analysis",
+      analysisId,
+    },
+  });
 
   // Auditoria do gasto (Seção 2.8). Entra na mesma transação do débito para
   // que um rollback não deixe registro de um crédito que nunca saiu.
