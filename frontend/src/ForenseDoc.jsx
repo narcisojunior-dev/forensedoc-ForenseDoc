@@ -209,7 +209,7 @@ export default function ForenseDoc() {
 
           {/* Header */}
           <div style={{ textAlign: "center", marginBottom: 40 }}>
-            <div className="eyebrow">Ronney Menezes Advocacia</div>
+            <div className="eyebrow">Verificação de cadeia de custódia documental</div>
             <div className="wordmark">FORENSEDOC</div>
             <div className="subtitle">Sistema de Análise Forense de Contratos Bancários · v2.2</div>
             <div className="rule" />
@@ -439,20 +439,19 @@ export default function ForenseDoc() {
 
               {/* §2 */}
               <Section title="§ 2 · Dados do instrumento contratual">
+                {/* As condições econômicas da operação não entram: o laudo
+                    verifica a cadeia de custódia do documento. */}
+                <div className="note">
+                  Este laudo verifica e valida a cadeia de custódia do documento. As condições econômicas da
+                  operação (valores, tarifas, tributos, taxas, Custo Efetivo Total e prazos) não integram o exame
+                  e não foram aferidas aqui.
+                </div>
                 {[
                   ["Número do contrato", report.extracted.contrato?.numero],
                   ["Banco / instituição financeira", report.extracted.contrato?.banco],
                   ["Código BACEN", report.extracted.contrato?.codigo_banco_bacen],
                   ["Produto", report.extracted.contrato?.produto],
                   ["Modalidade", report.extracted.contrato?.modalidade],
-                  ["Valor contratado", report.extracted.contrato?.valor_contratado],
-                  ["Valor da parcela", report.extracted.contrato?.valor_parcela],
-                  ["Número de parcelas", report.extracted.contrato?.numero_parcelas],
-                  ["Prazo (meses)", report.extracted.contrato?.prazo_meses],
-                  ["Taxa de juros mensal", report.extracted.contrato?.taxa_juros_mensal],
-                  ["Taxa de juros anual", report.extracted.contrato?.taxa_juros_anual],
-                  ["CET mensal", report.extracted.contrato?.cet_mensal],
-                  ["CET anual", report.extracted.contrato?.cet_anual],
                   ["Data do contrato", report.extracted.contrato?.data_contrato],
                   ["Primeiro vencimento", report.extracted.contrato?.data_primeiro_vencimento],
                   ["Último vencimento", report.extracted.contrato?.data_ultimo_vencimento],
@@ -716,18 +715,15 @@ export default function ForenseDoc() {
               {/* §9 Fundamentação normativa */}
               <Section title="§ 9 · Fundamentação normativa aplicável">
                 {(() => {
-                  const ctr = report.extracted.contrato || {};
                   const declaredHash = report.extracted.assinatura?.hash_documento_assinado;
                   const clsHash = declaredHash ? classifyHashString(declaredHash) : null;
                   const hashDefect = !!(clsHash && !clsHash.isHash);
-                  const cetPresent = !!(ctr.cet_mensal || ctr.cet_anual);
                   const geoRisk =
                     (report.contractGeo?.distance != null && report.contractGeo.distance >= 300) ||
                     report.ipAnalysis.some((ip) => ip.distance != null && ip.distance >= 300);
 
                   const destaques = [];
                   if (hashDefect) destaques.push("defeito formal de integridade do documento");
-                  if (cetPresent) destaques.push("informação e consistência do CET");
                   destaques.push("validade da assinatura eletrônica e ônus da prova");
                   if (geoRisk) destaques.push("incompatibilidade geográfica do ato");
 
@@ -743,11 +739,6 @@ export default function ForenseDoc() {
                       ["Lei 10.820/2003 e Decreto 4.840/2003", "Disciplinam a autorização e os limites do desconto de prestações de empréstimo consignado em folha de pagamento e em benefício previdenciário."],
                       ["Lei 8.213/1991, art. 115", "Define as hipóteses e os limites de desconto sobre o valor do benefício previdenciário."],
                       ["Normas do INSS sobre consignações (Instrução Normativa vigente) e Resoluções do CNPS", "Regulam margem consignável, formalização e averbação. Número da IN vigente: verificar conforme a data do contrato."],
-                    ]],
-                    ["Custo Efetivo Total (CET)", [
-                      ["Resolução CMN 4.881/2020, art. 2º", "Define o CET como a taxa que representa, de forma consolidada, todos os encargos e despesas da operação."],
-                      ["Resolução CMN 4.881/2020, art. 7º", "Obriga a instituição a informar o CET previamente à contratação e a apresentar o demonstrativo de cálculo ao tomador."],
-                      ["CDC, art. 52, c/c Resolução CMN 4.881/2020", "A ausência, a incorreção ou a inconsistência do CET frente à taxa de juros caracteriza falha no dever de informação."],
                     ]],
                     ["Assinatura eletrônica e ônus da prova", [
                       ["MP 2.200-2/2001, art. 10, § 2º", "Admite outros meios de comprovação de autoria e integridade, além da certificação ICP-Brasil."],
@@ -792,7 +783,7 @@ export default function ForenseDoc() {
 
               {/* Legal */}
               <div className="legal">
-                AVISO LEGAL: Este laudo foi gerado automaticamente pelo sistema ForenseDoc (Ronney Menezes Advocacia, OAB/PI 15.508 · OAB/MA 26.102-A) para fins de análise jurídica preliminar. Os hashes criptográficos SHA-256 e SHA-1 foram calculados localmente sobre o arquivo original via Web Crypto API (NIST FIPS 180-4). A geolocalização de IPs é fornecida por serviço de terceiros (ipapi.co) e possui margem de erro inerente; endereços de ISPs e VPNs podem não refletir a localização física real do usuário. A geolocalização declarada da assinatura é extraída do próprio documento e a geocodificação de endereços usa o serviço OpenStreetMap Nominatim. A fórmula de Haversine calcula a distância geodésica sobre a superfície esférica terrestre. A distância geográfica, isoladamente, não constitui prova de fraude e deve ser ponderada com o contexto fático. Este documento deve ser complementado por análise pericial humana qualificada antes de ser utilizado como prova técnica definitiva nos autos. Gerado em {report.timestamp}.
+                AVISO LEGAL: Este laudo foi gerado automaticamente pelo sistema ForenseDoc para fins de verificação técnica preliminar da cadeia de custódia do documento. As condições econômicas da operação não integram o exame. Os hashes criptográficos SHA-256 e SHA-1 foram calculados localmente sobre o arquivo original via Web Crypto API (NIST FIPS 180-4). A geolocalização de IPs é fornecida por serviço de terceiros (ipapi.co) e possui margem de erro inerente; endereços de ISPs e VPNs podem não refletir a localização física real do usuário. A geolocalização declarada da assinatura é extraída do próprio documento e a geocodificação de endereços usa o serviço OpenStreetMap Nominatim. A fórmula de Haversine calcula a distância geodésica sobre a superfície esférica terrestre. A distância geográfica, isoladamente, não constitui prova de fraude e deve ser ponderada com o contexto fático. Este documento deve ser complementado por análise pericial humana qualificada antes de ser utilizado como prova técnica definitiva nos autos. Gerado em {report.timestamp}.
               </div>
 
               </div>

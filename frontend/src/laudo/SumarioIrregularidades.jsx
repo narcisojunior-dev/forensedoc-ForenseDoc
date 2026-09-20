@@ -14,8 +14,8 @@ function SummaryHeader({ summary, pageLabel }) {
   return (
     <div className="summary-header">
       <div>
-        <div className="summary-brand">RONNEY MENEZES ADVOCACIA</div>
-        <div className="summary-brand-sub">DIREITO BANCÁRIO E DO CONSUMIDOR</div>
+        <div className="summary-brand">FORENSEDOC</div>
+        <div className="summary-brand-sub">VERIFICAÇÃO DE CADEIA DE CUSTÓDIA DOCUMENTAL</div>
       </div>
       <div className="summary-header-meta">
         <div>{pageLabel}</div>
@@ -155,7 +155,7 @@ export default function SumarioIrregularidades({ summary }) {
 
         <div className="summary-footer">
           <div>{summary.disclaimer}</div>
-          <div>Ronney Menezes<br />Advocacia</div>
+          <div>ForenseDoc</div>
         </div>
       </div>
     </div>

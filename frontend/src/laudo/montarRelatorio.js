@@ -1,5 +1,6 @@
 import { generateJudicialQuesitos } from "./quesitos.js";
 import { distanciaKm, distanciaSuspeita } from "./distancia.js";
+import { achadoFinanceiro, semCifras } from "./laudoUtils.js";
 
 // Achados e itens do sumário que dependem de distância à residência.
 const CHAVES_DISTANCIA_RESIDENCIA = new Set(["gps-near-home", "gps-home-distance"]);
@@ -58,34 +59,86 @@ function recontarCorte(corte, projecao, findings) {
   };
 }
 
+/** Verificações e diligências do sumário que existem só pelo eixo financeiro. */
+const CHECKS_FINANCEIROS = new Set(["dados-economicos"]);
+const DILIGENCIAS_FINANCEIRAS = new Set(["cet-demo", "iof-proof"]);
+
+/*
+ * A diligência do instrumento completo pedia taxa anual, valor liberado e
+ * demonstrativo do CET. O pedido continua, sem os três itens que o laudo já
+ * não examina.
+ */
+const DILIGENCIA_INSTRUMENTO = "full-contract";
+const TEXTO_INSTRUMENTO_COMPLETO =
+  "Solicitar o instrumento contratual completo e legível, com a qualificação integral do contratante, as páginas de assinatura e o número/espécie do benefício quando aplicável.";
+
+/**
+ * Remove do sumário o que decorre do exame econômico. O laudo verifica cadeia
+ * de custódia; valor, taxa e custo da operação não entram nessa conclusão.
+ * O corte é de apresentação: o resultado gravado continua completo.
+ */
+function semFinanceiro(sumario) {
+  // O que fica também não publica cifra: o sumário imprime o texto do achado
+  // como ele foi gravado, sem passar pelo saneamento do § de achados.
+  const semEixo = (lista) =>
+    Array.isArray(lista)
+      ? lista.filter((f) => !achadoFinanceiro(f.key)).map((f) => (f?.text ? { ...f, text: semCifras(f.text) } : f))
+      : lista;
+  const projecao = semEixo(sumario.projecao ?? sumario.allFindings);
+  const findings = semEixo(sumario.findings);
+  const saneado = {
+    ...sumario,
+    findings,
+    allFindings: semEixo(sumario.allFindings),
+    favorable: semEixo(sumario.favorable),
+    checks: Array.isArray(sumario.checks) ? sumario.checks.filter((c) => !CHECKS_FINANCEIROS.has(c.key)) : sumario.checks,
+    diligences: Array.isArray(sumario.diligences)
+      ? sumario.diligences
+          .filter((d) => !DILIGENCIAS_FINANCEIRAS.has(d.key))
+          .map((d) =>
+            d.key === DILIGENCIA_INSTRUMENTO
+              ? { ...d, text: TEXTO_INSTRUMENTO_COMPLETO }
+              : d?.text ? { ...d, text: semCifras(d.text) } : d)
+      : sumario.diligences,
+    intro: typeof sumario.intro === "string" ? semCifras(sumario.intro) : sumario.intro,
+    synthesis: typeof sumario.synthesis === "string" ? semCifras(sumario.synthesis) : sumario.synthesis,
+  };
+  if (sumario.projecao !== undefined) saneado.projecao = semEixo(sumario.projecao);
+  if (sumario.corte) saneado.corte = recontarCorte(sumario.corte, projecao || [], findings || []);
+  return saneado;
+}
+
 // Cópia no servidor: backend/src/reports/laudoApresentacao.js (sanearSumario).
 function sanearSumario(sumario, home, ipAnalysis, contractGeo) {
   if (!sumario) return sumario;
+  // O corte do eixo financeiro vale para todo sumário, independentemente do que
+  // aconteceu com a referência residencial.
+  const base = semFinanceiro(sumario);
   const recusado = ["RECUSADO_CONFLITO", "INDISPONIVEL_NAO_INFORMADO"].includes(home?.estado_confronto);
   const semDistancia = distanciaKm(contractGeo?.distance) === null && ipAnalysis.every((ip) => distanciaKm(ip.distance) === null);
   const valida = (km) => distanciaKm(km) !== null && !distanciaSuspeita(km);
-  if (sumario.geo?.modo === "pares") {
-    return { ...sumario, geo: { ...sumario.geo, items: (sumario.geo.items || []).filter((i) => distanciaKm(i.distance) !== null) } };
+  if (base.geo?.modo === "pares") {
+    return { ...base, geo: { ...base.geo, items: (base.geo.items || []).filter((i) => distanciaKm(i.distance) !== null) } };
   }
   if (!recusado && !semDistancia) {
-    return { ...sumario, geo: sumario.geo ? { ...sumario.geo, items: (sumario.geo.items || []).filter((i) => valida(i.distance)) } : sumario.geo };
+    return { ...base, geo: base.geo ? { ...base.geo, items: (base.geo.items || []).filter((i) => valida(i.distance)) } : base.geo };
   }
   const semResidencia = (lista = []) => lista.filter((f) => !CHAVES_DISTANCIA_RESIDENCIA.has(f.key));
   // D5: a projeção canônica é a fonte do § 8 e do sumário. Se um achado sai de
   // um, sai dos dois, e o corte declarado é recontado sobre o que sobrou. Caso
   // contrário o corpo do laudo exibiria itens que o sumário removeu.
-  const projecao = semResidencia(sumario.projecao || sumario.allFindings);
-  const findings = semResidencia(sumario.findings);
+  const projecao = semResidencia(base.projecao || base.allFindings);
+  const findings = semResidencia(base.findings);
   return {
-    ...sumario,
+    ...base,
     findings,
-    allFindings: semResidencia(sumario.allFindings),
+    allFindings: semResidencia(base.allFindings),
     projecao,
-    corte: recontarCorte(sumario.corte, projecao, findings),
-    favorable: semResidencia(sumario.favorable),
-    checks: (sumario.checks || []).map((c) => (c.key === "gps-residencia" ? { ...c, status: "INDETERMINADO", detail: "Distância à residência não calculada." } : c)),
-    geo: sumario.geo ? geoMedidoAteOGps(sumario.geo, ipAnalysis, contractGeo) : sumario.geo,
-    ipCards: (sumario.ipCards || []).map((card) => ({
+    corte: recontarCorte(base.corte, projecao, findings),
+    favorable: semResidencia(base.favorable),
+    checks: (base.checks || []).map((c) => (c.key === "gps-residencia" ? { ...c, status: "INDETERMINADO", detail: "Distância à residência não calculada." } : c)),
+    geo: base.geo ? geoMedidoAteOGps(base.geo, ipAnalysis, contractGeo) : base.geo,
+    ipCards: (base.ipCards || []).map((card) => ({
       ...card,
       distance: null,
       text: String(card.text || "").replace(/, [\d.,]+ km da referência residencial/, ""),

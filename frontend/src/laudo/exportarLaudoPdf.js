@@ -165,7 +165,7 @@ export async function exportarLaudoPdf(setBusy, setPdfDownload, { download = tru
       pdf.line(marginX, ph - 9.5, pw - marginX, ph - 9.5);
       pdf.setFontSize(7);
       pdf.setTextColor(104, 115, 123);
-      pdf.text("Ronney Menezes Advocacia | Documento gerado pelo ForenseDoc", marginX, ph - 6.5);
+      pdf.text("Documento gerado pelo ForenseDoc | Verificação de cadeia de custódia documental", marginX, ph - 6.5);
       page += 1;
     };
 
@@ -225,7 +225,7 @@ export async function exportarLaudoPdf(setBusy, setPdfDownload, { download = tru
     pdf.setProperties({
       title: "Laudo técnico pericial - ForenseDoc",
       subject: "Análise forense digital de contrato bancário",
-      author: "Ronney Menezes Advocacia",
+      author: "ForenseDoc",
       creator: "ForenseDoc",
     });
     const blob = pdf.output("blob");

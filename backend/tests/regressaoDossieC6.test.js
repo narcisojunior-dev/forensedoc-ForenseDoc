@@ -241,12 +241,13 @@ describe("dossiê C6: testes negativos do relatório de homologação", () => {
       expect(plano).not.toMatch(/tente novamente|Verifique a grafia/);
       expect(plano.match(/CONFRONTO RECUSADO/g)).toHaveLength(1);
       // A verificação geográfica que não depende da residência continua no PDF.
-      expect(plano).toMatch(/Confronto 3 · geolocalização declarada × origem da conexão \(IP\)/);
+      expect(plano).toMatch(/Confronto 3 · geolocalização declarada × origem da conexão \(IP\)/i);
       // Capa: domicílio pela qualificação do instrumento e GPS do ato presente.
       expect(plano).toMatch(/Domicílio do titular: Manaquiri\/AM \(qualificação do instrumento; o endereço informado não foi utilizado\)/);
       expect(plano).toMatch(/GPS registrado no ato: Manaquiri\/AM \(-?\d/);
       expect(plano).not.toMatch(/Domicílio do titular: Rua|GPS registrado no ato: Não registrado/);
-      expect(plano).toMatch(/Distância entre GPS declarado e consulta do IP: cerca de \d+ km · DISTÂNCIA DESCRITIVA/);
+      // O rótulo e o valor saem em colunas, sem dois-pontos entre eles.
+      expect(plano).toMatch(/Distância entre GPS declarado e consulta do IP[:\s]\s*cerca de \d+ km · DISTÂNCIA DESCRITIVA/);
     });
 
     it("o validador acusa o sumário do laudo da rodada 2 (0,00 km em selo favorável)", async () => {

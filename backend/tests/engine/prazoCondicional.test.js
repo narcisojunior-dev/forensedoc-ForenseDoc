@@ -106,7 +106,13 @@ describe("D4 · os dois renderizadores tratam o prazo condicional", () => {
     expect(rotulo).not.toBe("6 meses");
   });
 
-  it("o PDF publica a linha do prazo como NÃO AFERIDO, com a ressalva", async () => {
+  /*
+   * A aferição matemática saiu do laudo junto com o resto do exame econômico: o
+   * documento verifica cadeia de custódia. O motor continua classificando o
+   * prazo como condicional (casos acima), e é isso que os dois renderizadores
+   * deixam de publicar.
+   */
+  it("o PDF não publica o quadro de aferição do prazo", async () => {
     const { buildReportPdf } = await import("../../src/services/reportPdfService.js");
     const { extractPdfTextDetailed } = await import("../../src/services/pdfService.js");
     const doc = await buildReportPdf({ id: "11111111-2222-3333-4444-555555555555", createdAt: new Date() }, {
@@ -121,8 +127,10 @@ describe("D4 · os dois renderizadores tratam o prazo condicional", () => {
     for await (const parte of doc) partes.push(parte);
     const { text: plano } = await extractPdfTextDetailed(Buffer.concat(partes));
     const limpo = plano.replace(/\s+/g, " ");
-    expect(limpo).toMatch(/NÃO AFERIDO/);
-    expect(limpo).toMatch(/ressalva no próprio texto/i);
-    expect(limpo).not.toMatch(/Prazo declarado × datas[^·]*NÃO CONFERE/);
+    expect(limpo).not.toMatch(/ressalva no próprio texto/i);
+    expect(limpo).not.toMatch(/Prazo declarado × datas/);
+    expect(limpo).not.toMatch(/Aferição matemática/i);
+    // O § 2 continua no laudo, agora só com identificação e cronologia.
+    expect(limpo).toMatch(/§ 2 · Dados do instrumento contratual/i);
   });
 });

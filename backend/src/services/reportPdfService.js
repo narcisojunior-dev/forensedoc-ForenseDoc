@@ -12,6 +12,7 @@ import {
   avisoLegal,
 } from "../reports/laudoTexts.js";
 import { buildCustodyChain } from "../reports/custodyChain.js";
+import * as temaModelo from "../reports/temaModelo.js";
 import { calculateForensicScore } from "../utils/forensicScore.js";
 import { generateJudicialQuesitos } from "../reports/quesitosTemplate.js";
 import { montarConfrontoGeografico } from "../utils/distancia.js";
@@ -22,7 +23,6 @@ import { haversineKm } from "../utils/geoUtils.js";
 import {
   confrontoHash,
   shortHash,
-  nBR,
   formatCnpj,
   formatCpf,
   labelHashState,
@@ -36,7 +36,6 @@ import {
   semPontoFinal,
   labelModalidade,
   formatMetadataWarning,
-  marcarOrigem,
   sanearSumario,
 } from "../reports/laudoApresentacao.js";
 
@@ -74,8 +73,17 @@ const MAP_MIN_SCALE = 0.75;
  * @param {object} analysis linha de Analysis (para id, datas)
  * @param {object} result   Analysis.result já parseado
  */
-export async function buildReportPdf(analysis, result) {
+export async function buildReportPdf(analysis, result, opcoes = {}) {
   exigirEmissaoCoerente(result);
+  /*
+   * `tema` escolhe o desenho do laudo. "modelo" é o padrão: cartões, linha com
+   * o valor à direita, selos em pílula, Inter e JetBrains Mono, o mesmo desenho
+   * que o laudo tinha quando era exportado como imagem pelo navegador, agora em
+   * vetor e com texto pesquisável. "classico" fica disponível para comparação e
+   * para voltar atrás sem reescrever nada. O conteúdo, as regras e a paginação
+   * protegida são os mesmos nos dois.
+   */
+  const tema = opcoes.tema === "classico" ? "classico" : "modelo";
   // Pré-busca dos DOIS mapas do § 5, em paralelo. Cada um responde a uma
   // pergunta pericial distinta (ver staticMapService.js) e nenhum é requisito:
   // se a busca falhar, a seção sai com as coordenadas e as distâncias.
@@ -87,7 +95,9 @@ export async function buildReportPdf(analysis, result) {
 
   const doc = new PDFDocument({
     size: "A4",
-    margins: { top: MARGIN, bottom: MARGIN_BOTTOM, left: MARGIN, right: MARGIN },
+    margins: tema === "modelo"
+      ? { top: temaModelo.MARGEM_TOPO, bottom: temaModelo.MARGEM_RODAPE, left: temaModelo.MARGEM_TEXTO, right: temaModelo.MARGEM_TEXTO }
+      : { top: MARGIN, bottom: MARGIN_BOTTOM, left: MARGIN, right: MARGIN },
     bufferPages: true, // necessário para numerar o rodapé no fim
     info: {
       Title: `Laudo ForenseDoc ${result.reportId || analysis.id}`,
@@ -106,7 +116,22 @@ export async function buildReportPdf(analysis, result) {
     ? new Date(result.generatedAt).toLocaleString("pt-BR", { timeZone: "America/Fortaleza" })
     : new Date(analysis.createdAt).toLocaleString("pt-BR", { timeZone: "America/Fortaleza" });
 
-  const ctx = { doc, contentWidth: doc.page.width - MARGIN * 2 };
+  const ctx = { doc, contentWidth: doc.page.width - MARGIN * 2, tema, cartao: null };
+  if (tema === "modelo") {
+    temaModelo.registrarFontes(doc);
+    // A moldura é pintada a cada página nova; o cartão aberto fecha no pé e
+    // recomeça no topo, para a seção não perder a borda ao virar a folha.
+    doc.on("pageAdded", () => {
+      const { x, y } = doc;
+      temaModelo.pintarMoldura(doc);
+      doc.x = x;
+      doc.y = y;
+      temaModelo.quebrarCartao(ctx);
+    });
+    temaModelo.pintarMoldura(doc);
+    doc.x = temaModelo.MARGEM_TEXTO;
+    doc.y = temaModelo.MARGEM_TOPO;
+  }
   // O sumário passa pelo mesmo saneamento da tela (montarRelatorio.js): item
   // que a tela retira de sumário legado não pode reaparecer no PDF.
   const sumario = sanearSumario(result.sumarioIrregularidades || null, result.home, result.ipAnalysis || [], result.contractGeo);
@@ -118,7 +143,6 @@ export async function buildReportPdf(analysis, result) {
   sectionMetadata(ctx, result.metadata);
   sectionDigitalSignature(ctx, result.metadata);
   sectionContract(ctx, extracted);
-  sectionEconomics(ctx, extracted);
   sectionCreditRelease(ctx, extracted);
   sectionInsurance(ctx, extracted);
   sectionClient(ctx, extracted, result);
@@ -136,7 +160,12 @@ export async function buildReportPdf(analysis, result) {
   sectionImageAnnex(ctx, extracted);
   legalNotice(ctx, timestamp);
 
-  paintFooters(doc, result.hashes?.sha256);
+  if (tema === "modelo") {
+    temaModelo.fecharCartao(ctx);
+    temaModelo.pintarRodapes(doc, result.hashes?.sha256);
+  } else {
+    paintFooters(doc, result.hashes?.sha256);
+  }
 
   doc.end();
   return doc;
@@ -157,6 +186,7 @@ function safeParse(raw) {
 
 /** Subtítulo de subseção (§ 4.1), sem a régua do heading principal. */
 function subheading(ctx, title) {
+  if (ctx.tema === "modelo") return temaModelo.subheading(ctx, title);
   const { doc, contentWidth } = ctx;
   reserve(ctx, 54); // título da subseção + duas linhas do que vem abaixo
   doc.moveDown(0.3);
@@ -169,6 +199,7 @@ function subheading(ctx, title) {
 }
 
 function heading(ctx, title, { danger = false } = {}) {
+  if (ctx.tema === "modelo") return temaModelo.heading(ctx, title, { danger });
   const { doc, contentWidth } = ctx;
   reserve(ctx, 62); // título + régua + duas linhas, para o heading não ficar órfão
   doc.moveDown(0.6);
@@ -191,6 +222,7 @@ function heading(ctx, title, { danger = false } = {}) {
 // o fluxo do PDFKit e gerava uma página por campo.
 function field(ctx, label, value, { mono = false } = {}) {
   if (value === null || value === undefined || value === "") return;
+  if (ctx.tema === "modelo") return temaModelo.field(ctx, label, value, { mono });
   const { doc, contentWidth } = ctx;
   reserve(ctx, 16); // uma linha
   doc
@@ -205,6 +237,7 @@ function field(ctx, label, value, { mono = false } = {}) {
 }
 
 function paragraph(ctx, text, { color = INK, size = 9.5, italic = false } = {}) {
+  if (ctx.tema === "modelo") return temaModelo.paragraph(ctx, text, { color, size, italic });
   const { doc, contentWidth } = ctx;
   // O PDFKit já quebra o parágrafo sozinho no meio; a guarda só evita começar um
   // com menos de duas linhas de espaço, o que deixaria uma viúva no pé.
@@ -249,6 +282,7 @@ function espacoLivre(doc) {
 }
 
 function badge(ctx, label, value, ok) {
+  if (ctx.tema === "modelo") return temaModelo.badge(ctx, label, value, ok);
   const { doc, contentWidth } = ctx;
   reserve(ctx, 16);
   doc
@@ -274,6 +308,7 @@ const FUNDO_DESTAQUE = "#fef2f2";
  * fora. `colunas` traz a largura como fração da coluna de texto.
  */
 function table(ctx, colunas, linhas, { size = 7.5, destaque = null } = {}) {
+  if (ctx.tema === "modelo") return temaModelo.table(ctx, colunas, linhas, { size, destaque });
   const { doc, contentWidth } = ctx;
   if (!linhas.length) return;
   const PAD = 3;
@@ -316,6 +351,7 @@ function table(ctx, colunas, linhas, { size = 7.5, destaque = null } = {}) {
 
 /** Item de lista com marcador, usado para achados e diligências. */
 function bullet(ctx, text, { color = INK, size = 9 } = {}) {
+  if (ctx.tema === "modelo") return temaModelo.bullet(ctx, text, { color, size });
   const { doc, contentWidth } = ctx;
   reserve(ctx, 24);
   // "•" existe na codificação WinAnsi das fontes padrão; "▸" não.
@@ -332,12 +368,73 @@ function bullet(ctx, text, { color = INK, size = 9 } = {}) {
 
 function cover(ctx, analysis, result, timestamp, extracted = {}) {
   const { doc, contentWidth } = ctx;
+
+  // ─── Visual Law: Resumo Executivo para o Magistrado / Perito ────────────────
+  // Distâncias do confronto canônico: recusado o confronto, não há índice.
+  const confrontoCapa = result.confronto_geografico || montarConfrontoGeografico(result);
+  const distKmIp = confrontoCapa.distancias.ips_residencia[0]?.km ?? null;
+  const distKmGps = confrontoCapa.distancias.gps_residencia;
+  const distKmIpVsGps = confrontoCapa.gps_ip;
+  const scoreObj = calculateForensicScore({ distKmIp, distKmGps, distKmIpVsGps });
+
+  const ipLoc = result.ipAnalysis?.[0]?.geo?.city
+    ? `${result.ipAnalysis[0].geo.city}/${result.ipAnalysis[0].geo.region || ""}`
+    : "Não localizada";
+  // Referência recusada não é domicílio: a capa usa a qualificação do
+  // instrumento e diz que o endereço informado não foi utilizado.
+  const recusada = confrontoCapa.status === "RECUSADO_CONFLITO" || confrontoCapa.status === "INDISPONIVEL_NAO_INFORMADO";
+  const inst = result.home?.instrumento || {};
+  const cidadeInstrumento = [inst.cidade, inst.uf].filter(Boolean).join("/");
+  const homeLoc = recusada
+    ? `${cidadeInstrumento || "não identificado no instrumento"} (qualificação do instrumento; o endereço informado não foi utilizado)`
+    : result.home?.geo?.display || result.home?.query || "Domicílio declarado";
+  const km = (v) => `${v.toFixed(1).replace(".", ",")} km`;
+  const cg = result.contractGeo;
+  const temGps = cg && Number.isFinite(cg.lat) && Number.isFinite(cg.lon);
+  const origemDetalhe = distKmIp !== null
+    ? `${km(distKmIp)} do domicílio`
+    : distKmIpVsGps !== null
+      ? `${km(distKmIpVsGps)} do GPS declarado no ato`
+      : "N/D";
+  const gpsTexto = !temGps
+    ? "Não registrado"
+    : `${cg.municipio ? `${cg.municipio}${cg.uf ? `/${cg.uf}` : ""} ` : ""}(${cg.lat}, ${cg.lon})${distKmGps !== null ? `, ${km(distKmGps)} do domicílio` : ", confronto com a residência não aferido"}`;
+
+  const resumoTitulo = "Resumo executivo · índice de anomalia forense";
+  const resumoValor = scoreObj.score === null ? scoreObj.rotulo : `${scoreObj.score}/100 · ${scoreObj.rotulo}`;
+  const resumoLinhas = [
+    `Domicílio do titular: ${homeLoc}`,
+    `Estimativa da consulta do IP: ${ipLoc} (${origemDetalhe})`,
+    `GPS registrado no ato: ${gpsTexto}`,
+  ];
+  const tamanhoArquivo = result.file?.sizeBytes
+    ? `${(result.file.sizeBytes / 1024).toFixed(2)} KB (${result.file.sizeBytes.toLocaleString("pt-BR")} bytes)`
+    : null;
+  const escopo = "Integridade criptográfica · Metadados e OCR · Cadeia de custódia · Confronto geográfico";
+
+  if (ctx.tema === "modelo") {
+    return temaModelo.capa(ctx, {
+      protocolo: result.reportId || analysis.id,
+      emissao: `${timestamp}\n(Fortaleza, BRT)`,
+      arquivo: result.file?.name || "nome não informado",
+      tamanho: tamanhoArquivo,
+      sha256: result.hashes?.sha256,
+      produto: extracted.contrato?.produto || "Instrumento de crédito",
+      ocr: result.usedOcr ? `Aplicado em ${result.ocrPages} página(s)` : null,
+      escopo,
+      resumoTitulo,
+      resumoValor,
+      resumoLinhas,
+      alerta: scoreObj.score !== null && scoreObj.score >= 80,
+    });
+  }
+
   doc.fontSize(11).font("Helvetica-Bold").fillColor(ACCENT).text(FIRM.sistema.toUpperCase(), { align: "center" });
   doc.moveDown(0.3);
   doc.fontSize(19).font("Helvetica-Bold").fillColor(INK).text("Laudo Técnico Pericial", { align: "center" });
   doc.fontSize(11).font("Helvetica").fillColor(MUTED).text("Exame automatizado de integridade, autoria e consistência documental", { align: "center" });
   doc.moveDown(0.5);
-  doc.fontSize(8.5).fillColor(MUTED).text(`${FIRM.nome} · ${FIRM.oab}`, { align: "center" });
+  doc.fontSize(8.5).fillColor(MUTED).text(FIRM.descricao, { align: "center" });
   doc.moveDown(1);
 
   doc.moveTo(MARGIN, doc.y).lineTo(MARGIN + contentWidth, doc.y).strokeColor(RULE).lineWidth(1).stroke();
@@ -350,14 +447,6 @@ function cover(ctx, analysis, result, timestamp, extracted = {}) {
   field(ctx, "Data de geração", `${timestamp} (Fortaleza, BRT)`);
   if (result.usedOcr) field(ctx, "OCR", `Aplicado em ${result.ocrPages} página(s)`);
   field(ctx, "Escopo do exame", "Integridade criptográfica · Metadados e OCR · Cadeia de custódia · Confronto geográfico");
-
-  // ─── Visual Law: Resumo Executivo para o Magistrado / Perito ────────────────
-  // Distâncias do confronto canônico: recusado o confronto, não há índice.
-  const confrontoCapa = result.confronto_geografico || montarConfrontoGeografico(result);
-  const distKmIp = confrontoCapa.distancias.ips_residencia[0]?.km ?? null;
-  const distKmGps = confrontoCapa.distancias.gps_residencia;
-  const distKmIpVsGps = confrontoCapa.gps_ip;
-  const scoreObj = calculateForensicScore({ distKmIp, distKmGps, distKmIpVsGps });
 
   doc.moveDown(0.6);
   const boxX = MARGIN;
@@ -383,29 +472,6 @@ function cover(ctx, analysis, result, timestamp, extracted = {}) {
     .font("Helvetica-Bold")
     .fillColor(scoreObj.score >= 80 ? DANGER : INK)
     .text(scoreObj.score === null ? scoreObj.rotulo : `${scoreObj.score}/100 · ${scoreObj.rotulo}`, boxX + 12, boxY + 26);
-
-  const ipLoc = result.ipAnalysis?.[0]?.geo?.city
-    ? `${result.ipAnalysis[0].geo.city}/${result.ipAnalysis[0].geo.region || ""}`
-    : "Não localizada";
-  // Referência recusada não é domicílio: a capa usa a qualificação do
-  // instrumento e diz que o endereço informado não foi utilizado.
-  const recusada = confrontoCapa.status === "RECUSADO_CONFLITO" || confrontoCapa.status === "INDISPONIVEL_NAO_INFORMADO";
-  const inst = result.home?.instrumento || {};
-  const cidadeInstrumento = [inst.cidade, inst.uf].filter(Boolean).join("/");
-  const homeLoc = recusada
-    ? `${cidadeInstrumento || "não identificado no instrumento"} (qualificação do instrumento; o endereço informado não foi utilizado)`
-    : result.home?.geo?.display || result.home?.query || "Domicílio declarado";
-  const km = (v) => `${v.toFixed(1).replace(".", ",")} km`;
-  const cg = result.contractGeo;
-  const temGps = cg && Number.isFinite(cg.lat) && Number.isFinite(cg.lon);
-  const origemDetalhe = distKmIp !== null
-    ? `${km(distKmIp)} do domicílio`
-    : distKmIpVsGps !== null
-      ? `${km(distKmIpVsGps)} do GPS declarado no ato`
-      : "N/D";
-  const gpsTexto = !temGps
-    ? "Não registrado"
-    : `${cg.municipio ? `${cg.municipio}${cg.uf ? `/${cg.uf}` : ""} ` : ""}(${cg.lat}, ${cg.lon})${distKmGps !== null ? `, ${km(distKmGps)} do domicílio` : ", confronto com a residência não aferido"}`;
 
   doc
     .fontSize(8.5)
@@ -592,24 +658,24 @@ function sectionMetadata(ctx, metadata) {
 function sectionContract(ctx, extracted) {
   const c = extracted.contrato || {};
   heading(ctx, "§ 2 · Dados do instrumento contratual");
-  if (c.condicoes_financeiras_nota) paragraph(ctx, c.condicoes_financeiras_nota, { color: DANGER, size: 8.5 });
+  // O objeto do laudo é a cadeia de custódia. Valor, taxa, CET e prazo da
+  // operação não entram: o leitor precisa saber que a ausência é deliberada, e
+  // não falha de extração.
+  paragraph(
+    ctx,
+    "Este laudo verifica e valida a cadeia de custódia do documento. As condições econômicas da operação " +
+      "(valores, tarifas, tributos, taxas, Custo Efetivo Total e prazos) não integram o exame e não foram aferidas aqui.",
+    { color: MUTED, size: 8.5 }
+  );
   field(ctx, "Número do contrato", c.numero);
   field(ctx, "Banco / instituição financeira", c.banco);
   field(ctx, "CNPJ da instituição", formatCnpj(c.cnpj_instituicao));
   field(ctx, "Código BACEN", c.codigo_banco_bacen);
   field(ctx, "Produto", c.produto);
   field(ctx, "Modalidade", labelModalidade(c.modalidade));
+  field(ctx, "Tipo de operação", c.tipo_operacao);
+  field(ctx, "Operação portada", c.operacao_portada === true ? "Sim" : c.operacao_portada === false ? "Não" : null);
   if (c.empregador) field(ctx, "Empregador declarado", `${c.empregador.literal}${c.empregador.identificado ? "" : " (sem razão social e sem CNPJ)"}`);
-  field(ctx, "Valor contratado", c.valor_contratado);
-  field(ctx, "Valor dos novos recursos / total financiado", c.valor_novos_recursos);
-  field(ctx, "Valor total do empréstimo", c.valor_total_emprestimo);
-  field(ctx, "Valor de entrada", c.valor_entrada);
-  field(ctx, "Valor da parcela", c.valor_parcela);
-  field(ctx, "Quantidade de parcelas mensais", c.parcelas_mensais || c.numero_parcelas);
-  field(ctx, "Taxa de juros mensal", c.taxa_juros_mensal);
-  field(ctx, "Taxa de juros anual", c.taxa_juros_anual);
-  field(ctx, "CET mensal", c.cet_mensal);
-  field(ctx, "CET anual", c.cet_anual);
   field(ctx, "Credor original / cedente", c.credor_original);
   field(ctx, "Agência", c.agencia);
   field(ctx, "Conta-corrente", c.conta_corrente);
@@ -620,6 +686,9 @@ function sectionContract(ctx, extracted) {
   if (c.data_contrato_nota) paragraph(ctx, c.data_contrato_nota, { color: DANGER, size: 8.5 });
   field(ctx, "Primeiro vencimento", c.data_primeiro_vencimento);
   field(ctx, "Último vencimento", c.data_ultimo_vencimento);
+  field(ctx, "Modalidade de desconto provável", c.modalidade_desconto_provavel);
+  // A nota das datas vinha do § de dados econômicos, que saiu do laudo.
+  if (c.datas_nota) paragraph(ctx, c.datas_nota, { color: DANGER, size: 8.5 });
 }
 
 function sectionClient(ctx, extracted, result = {}) {
@@ -1411,32 +1480,30 @@ function sectionDigitalSignature(ctx, metadata) {
   // prova de vida, como na tela.
 }
 
-const pctBR = (v, casas = 1) => (v == null ? null : `${(v * 100).toFixed(casas).replace(".", ",")}%`);
-
-/** § 2.2: forma de liberação declarada e comprovante do crédito. */
+/** § 2.1: forma de liberação declarada e comprovante do crédito. */
 function sectionCreditRelease(ctx, extracted) {
   const l = extracted.liberacao_credito;
   if (!l?.declarada) return;
-  heading(ctx, "§ 2.2 · Liberação do crédito e comprovante", { danger: !l.comprovante });
+  heading(ctx, "§ 2.1 · Liberação do crédito e comprovante", { danger: !l.comprovante });
   field(ctx, "Forma de liberação declarada", l.declarada.forma);
   field(ctx, "Banco / agência / conta", [l.declarada.banco && `Banco ${l.declarada.banco}`, l.declarada.agencia && `agência ${l.declarada.agencia}`, l.declarada.conta && `conta ${l.declarada.conta}`].filter(Boolean).join(" · "));
-  field(ctx, "Valor a ser creditado", extracted.contrato?.valor_liberado);
+  // A existência do comprovante é prova documental; o quanto foi creditado é
+  // matéria econômica e não entra no laudo.
   badge(ctx, "Comprovante de transferência no arquivo", l.comprovante ? "LOCALIZADO" : "AUSENTE", Boolean(l.comprovante));
-  if (l.comprovante) field(ctx, "   Comprovante", [l.comprovante.pagina && `pág. ${l.comprovante.pagina}`, l.comprovante.valor, l.comprovante.data].filter(Boolean).join(" · "));
+  if (l.comprovante) field(ctx, "   Comprovante", [l.comprovante.pagina && `pág. ${l.comprovante.pagina}`, l.comprovante.data].filter(Boolean).join(" · "));
 }
 
-/** § 2.3: seguro prestamista vinculado. */
+/** § 2.2: seguro prestamista vinculado. */
 function sectionInsurance(ctx, extracted) {
   const sg = extracted.seguro_prestamista;
   if (!sg) return;
-  heading(ctx, "§ 2.3 · Seguro prestamista vinculado à operação", { danger: (sg.achados || []).some((a) => a.gravidade === "ALTA") });
+  heading(ctx, "§ 2.2 · Seguro prestamista vinculado à operação", { danger: (sg.achados || []).some((a) => a.gravidade === "ALTA") });
   field(ctx, "Proposta", sg.proposta);
   field(ctx, "Forma de pagamento", sg.forma_pagamento);
   field(ctx, "Vigência", sg.vigencia?.premissa);
   field(ctx, "Marcos de contagem", sg.marcos_temporais);
-  field(ctx, "Prêmio", sg.premio ? `${sg.premio}${sg.premio_sobre_liberado != null ? ` (${pctBR(sg.premio_sobre_liberado, 2)} do valor liberado)` : ""}` : null);
-  field(ctx, "IOF do seguro", sg.iof);
-  field(ctx, "Pró-labore", sg.pro_labore ? `${sg.pro_labore}${sg.pro_labore_sobre_premio != null ? ` (${pctBR(sg.pro_labore_sobre_premio)} do prêmio)` : ""}` : null);
+  // Prêmio, IOF e pró-labore são preço do seguro: saem do laudo. Ficam a
+  // estrutura da apólice e os prazos, que sustentam a adesão e a vigência.
   field(ctx, "Seguradora", sg.seguradora ? `${sg.seguradora.nome}${sg.seguradora.cnpj ? `, CNPJ ${sg.seguradora.cnpj}` : ""}` : null);
   field(ctx, "Corretora", sg.corretora ? `${sg.corretora.nome}, CNPJ ${sg.corretora.cnpj}, SUSEP ${sg.corretora.susep}` : null);
   field(ctx, "Estipulante", sg.estipulante ? `${sg.estipulante.nome}, CNPJ ${sg.estipulante.cnpj}` : null);
@@ -1445,7 +1512,7 @@ function sectionInsurance(ctx, extracted) {
     field(
       ctx,
       `   ${c.nome}`,
-      [c.premio, c.participacao_premio != null ? `${pctBR(c.participacao_premio)} do prêmio` : null, `carência ${c.carencia_dias == null ? "não identificada" : c.carencia_dias ? `${c.carencia_dias} dias` : "não há"}`, `franquia ${c.franquia_dias == null ? "não identificada" : c.franquia_dias ? `${c.franquia_dias} dias` : "não há"}`, c.teto_parcelas ? `até ${c.teto_parcelas} parcelas` : null].filter(Boolean).join(" · ")
+      [`carência ${c.carencia_dias == null ? "não identificada" : c.carencia_dias ? `${c.carencia_dias} dias` : "não há"}`, `franquia ${c.franquia_dias == null ? "não identificada" : c.franquia_dias ? `${c.franquia_dias} dias` : "não há"}`, c.teto_parcelas ? `até ${c.teto_parcelas} parcelas` : null].filter(Boolean).join(" · ")
     );
   }
 }
@@ -1649,114 +1716,12 @@ function sectionImageAnnex(ctx, extracted) {
   table(ctx, COLUNAS_IMAGEM, lista.map(linhaImagem));
 }
 
-/** § 2.1 — dados econômicos complementares e aferição matemática. */
-function sectionEconomics(ctx, extracted) {
-  const c = extracted.contrato || {};
-  const m = extracted.afericao_matematica;
-  const cartao = c.cartao;
-  const linhas = [
-    ["Valor liberado", c.valor_liberado],
-    ["Saldo portado / refinanciado", c.saldo_portado],
-    ["Tarifa de cadastro", c.tarifa_cadastro],
-    ["Seguros", c.seguros],
-    ["IOF financiado", c.iof_financiado],
-    ["Somatório das parcelas", c.valor_total_parcelas],
-    // D6: o rótulo segue a origem. Chamar de "declarado" um valor que o sistema
-    // calculou afirma que o instrumento o trouxe, e não trouxe.
-    [c.prazo_dias_origem === "CALCULADO_PELO_SISTEMA" ? "Prazo da operação (dias) · calculado pelo sistema" : "Prazo declarado (dias)", nBR(c.prazo_dias)],
-    // D4: a ficha publica o token completo. Reduzir a "6 meses" um campo que diz
-    // "6 meses ou até o pagamento da última parcela" reproduz, na apresentação,
-    // exatamente o corte que o comparador fazia.
-    ["Prazo total declarado", c.prazo_total_declarado
-      ? (c.prazo_total_declarado.condicional
-        ? `${c.prazo_total_declarado.texto} · declaração condicional`
-        : `${c.prazo_total_declarado.quantidade} ${c.prazo_total_declarado.unidade}`)
-      : null],
-    ["Prazo efetivo, da emissão ao último vencimento (dias)", nBR(c.prazo_efetivo_dias)],
-    ["Carência até o 1º vencimento (dias)", nBR(c.carencia_dias)],
-    ["Juros estimados na carência (hipótese: liberação na emissão)", c.juros_carencia],
-    ["Custo total (somatório − liberado)", c.custo_total ? `${c.custo_total} (${c.custo_total_percentual} do liberado)` : null],
-    [marcarOrigem("Taxa de juros anual calculada", c.taxa_juros_anual_calculada_origem || "CALCULADO_PELO_SISTEMA"), c.taxa_juros_anual_calculada],
-    [c.prazo_operacao_meses_aprox_origem === "CALCULADO_PELO_SISTEMA" ? "Prazo da operação (meses, aprox.) · calculado pelo sistema" : "Prazo da operação (meses, aprox.)", nBR(c.prazo_operacao_meses_aprox, 1)],
-    ["Tipo de operação", c.tipo_operacao ? `${c.tipo_operacao}${c.tipo_operacao_desmarcadas?.length ? ` (desmarcadas: ${c.tipo_operacao_desmarcadas.join(", ").toLowerCase()})` : ""}` : null],
-    ["Operação portada", c.operacao_portada === true ? "Sim" : c.operacao_portada === false ? "Não" : null],
-    ["Modalidade de desconto provável", c.modalidade_desconto_provavel],
-  ].filter(([, v]) => v !== null && v !== undefined && v !== "");
-  if (!linhas.length && !m && !cartao && !c.datas_nota) return;
-
-  heading(ctx, "§ 2.1 · Dados econômicos complementares e aferição matemática");
-  for (const [rotulo, valor] of linhas) field(ctx, rotulo, valor);
-  if (c.datas_nota) paragraph(ctx, c.datas_nota, { color: DANGER, size: 8.5 });
-
-  if (cartao) {
-    subheading(ctx, "Cartão consignado de benefício");
-    field(ctx, "Limite do cartão", cartao.limiteCartao);
-    field(ctx, "Valor máximo de saque", cartao.valorMaximoSaque);
-    field(ctx, "Valor consignado mensal", cartao.valorConsignadoMensal);
-    field(ctx, "Prazo previsto de liquidação (meses)", cartao.prazoPrevistoLiquidacaoMeses);
-    field(ctx, "Tarifa de emissão", cartao.tarifaEmissao);
-  }
-
-  if (m) {
-    subheading(ctx, "Aferição matemática");
-    const confere = (rotulo, valor, detalhe) => {
-      if (valor === null || valor === undefined) return;
-      badge(ctx, `${rotulo}${detalhe ? ` (${detalhe})` : ""}`, valor ? "CONFERE" : "NÃO CONFERE", valor);
-    };
-    // D4: prazo condicional não é CONFERE nem NÃO CONFERE, e também não pode
-    // sumir. Omitir a linha esconderia do laudo o campo que motivou o achado.
-    if (m.prazo_declarado_condicional) {
-      badge(ctx, `Prazo declarado × datas${m.prazo_descricao ? ` (${m.prazo_descricao})` : ""}`, "NÃO AFERIDO", null);
-      if (m.prazo_declarado_ressalva) {
-        paragraph(ctx, `O campo de prazo traz ressalva no próprio texto: "${m.prazo_declarado_ressalva}". Não há prazo fechado a confrontar com as datas.`, { color: MUTED, size: 8.5 });
-      }
-    } else {
-      confere(
-        "Prazo declarado × datas",
-        m.prazo_confere,
-        m.prazo_descricao ||
-          (m.prazo_calculado_dias != null
-            ? `${nBR(m.prazo_calculado_dias)} dias calculados${m.prazo_declarado_dias != null ? ` contra ${nBR(m.prazo_declarado_dias)} declarados` : ", prazo declarado não localizado"}`
-            : null)
-      );
-    }
-    confere("Somatório das parcelas", m.somatorio_confere, m.somatorio_calculado ? `${m.somatorio_calculado} calculado${m.somatorio_declarado ? ` contra ${m.somatorio_declarado} declarado` : ""}` : null);
-    confere("Composição do financiado", m.composicao_confere, m.composicao_financiado_calculada);
-    if (m.composicao_componentes?.length) {
-      field(ctx, "   Componentes do financiado", m.composicao_componentes.map((c) => `${c.rotulo} ${c.localizado ? c.valor : "não localizado"}`).join(" + "));
-    }
-    if (m.composicao_nota) paragraph(ctx, m.composicao_nota, { color: MUTED, size: 8.5 });
-    confere("Valor presente previsto (hipótese: liberação na emissão)", m.vp_confere, m.vp_taxa_declarada);
-    if (m.juros_implicito_mensal) {
-      field(
-        ctx,
-        "Taxa implícita sobre o financiado (hipótese: liberação na emissão)",
-        `${m.juros_implicito_mensal} a.m. · ${m.juros_implicito_confere ? "confere com" : "diverge da"} taxa declarada${m.juros_implicito_delta_pp !== null ? ` (diferença de ${Math.abs(m.juros_implicito_delta_pp).toFixed(3).replace(".", ",")} ponto)` : ""} · valor presente a essa taxa ${m.vp_taxa_implicita}`
-      );
-    }
-    // As duas convenções lado a lado: a diferença entre elas não é divergência.
-    confere(
-      m.cet_anual_base === "IMPLICITO" ? `CET anual × CET implícito ${m.cet_anual_base_mensal} a.m.` : "CET anual × CET mensal",
-      m.cet_anual_confere,
-      m.cet_anual_calculado ? `365 dias ${m.cet_anual_calculado} · 12 meses ${m.cet_anual_calculado_12m}${m.cet_anual_convencao ? ` · contrato usa ${m.cet_anual_convencao}` : ""}` : null
-    );
-    if (m.cet_anual_calculado_declarado) field(ctx, "Anualização do CET mensal declarado, arredondado (informativa)", `${m.cet_anual_calculado_declarado} em 365 dias`);
-    confere(
-      "Juros anual × juros mensal",
-      m.juros_anual_confere,
-      m.juros_anual_calculado_365 ? `365 dias ${m.juros_anual_calculado_365} · 12 meses ${m.juros_anual_calculado_12m}${m.juros_anual_convencao ? ` · contrato usa ${m.juros_anual_convencao}` : ""}` : null
-    );
-    if (m.cet_implicito_mensal) {
-      field(ctx, "CET implícito no fluxo previsto (hipótese: liberação na emissão)", `${m.cet_implicito_mensal} a.m.${m.cet_implicito_veredito ? ` · ${m.cet_implicito_veredito}` : ""}`);
-    } else if (m.cet_implicito_status === "NAO_AFERIDO" && m.cet_implicito_motivo) {
-      field(ctx, "CET implícito no fluxo previsto (hipótese: liberação na emissão)", `não aferido: ${m.cet_implicito_motivo}`);
-    }
-    if (m.cet_implicito_nota) paragraph(ctx, m.cet_implicito_nota, { color: MUTED, size: 8.5 });
-    if (m.cet_implicito_anual_calculado) field(ctx, "CET implícito anualizado", `${m.cet_implicito_anual_calculado} a.a. em 365 dias`);
-    confere("CET maior que a taxa de juros", m.cet_maior_que_juros);
-    if (m.conclusao) paragraph(ctx, m.conclusao, { size: 9 });
-  }
-}
+/*
+ * O § de dados econômicos complementares e de aferição matemática (somatório,
+ * composição do financiado, valor presente, taxa implícita, CET) saiu do laudo:
+ * é exame econômico da operação, não verificação de cadeia de custódia. O motor
+ * continua calculando e gravando a aferição, que fica disponível no resultado.
+ */
 
 /** § 4.2 — trilha da contratação. */
 function sectionContractingTrail(ctx, extracted, result = {}) {
@@ -2166,11 +2131,9 @@ function sectionQuesitos(ctx, extracted, result) {
 function sectionLegal(ctx, extracted = {}, result = {}) {
   heading(ctx, "§ 9 · Fundamentação normativa aplicável");
   // Mesma síntese da tela: quais achados têm maior aderência normativa.
-  const ctr = extracted.contrato || {};
   const hashDeclarado = extracted.assinatura?.hash_documento_assinado;
   const destaques = [];
   if (hashDeclarado && !confrontoHash(String(hashDeclarado).trim(), result.hashes?.sha256).ehHash) destaques.push("defeito formal de integridade do documento");
-  if (ctr.cet_mensal || ctr.cet_anual) destaques.push("informação e consistência do CET");
   destaques.push("validade da assinatura eletrônica e ônus da prova");
   const longe = (km) => distanciaKm(km) !== null && distanciaKm(km) >= 300;
   if (longe(result.contractGeo?.distance) || (result.ipAnalysis || []).some((ip) => longe(ip.distance))) destaques.push("incompatibilidade geográfica do ato");

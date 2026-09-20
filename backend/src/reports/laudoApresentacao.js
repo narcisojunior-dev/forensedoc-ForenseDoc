@@ -106,11 +106,11 @@ export function noteForDeclaredHashState(state, calc, assinatura = null) {
 }
 
 export function cleanIssueText(value) {
-  return String(value || "")
+  return semCifras(String(value || "")
     .replace(/\b(?:CET1|FIN\d|IMG\d|INT\d|TRB\d|CAD\d|CUS\d|LOG\d)\s+(?:ALTA|MEDIA|MÉDIA|MÉDIO|INFO|CRITICO|CRÍTICO)\s*:\s*/g, "")
     .replace(/\b(?:CET1|FIN\d|IMG\d|INT\d|TRB\d|CAD\d|CUS\d|LOG\d)\s*:\s*/g, "")
     .replace(/\s+/g, " ")
-    .trim();
+    .trim());
 }
 
 function normalizeIssue(issue, index = 0) {
@@ -127,13 +127,107 @@ function normalizeIssue(issue, index = 0) {
   return { codigo: `LEGADO${index}`, gravidade: "MÉDIA", titulo: (title || "Achado técnico").replace(/\.+$/, ""), texto: rest.join(". ") };
 }
 
+/*
+ * Cifra que sobra no texto de um achado ou de uma diligência.
+ *
+ * Alguns achados que ficam no laudo, como a ausência de comprovante de
+ * transferência, citavam o valor da operação no meio da frase. O achado
+ * continua: o que sai é a cifra. As orações inteiras de valor são removidas,
+ * para a frase seguir correndo bem; a cifra solta que escapar vira uma marca
+ * explícita, porque publicar o número é o que não pode acontecer.
+ */
+const CIFRA = "R\\$\\s?\\d[\\d.]*(?:,\\d{1,2})?";
+const CLAUSULAS_DE_VALOR = [
+  new RegExp(`,?\\s*n[oa]\\s+(?:valor|montante|import[âa]ncia)\\s+de\\s+${CIFRA}`, "gi"),
+  new RegExp(`,?\\s*de\\s+${CIFRA}\\s+(?=na\\s|para\\s)`, "gi"),
+  new RegExp(`\\s*\\(\\s*${CIFRA}\\s*\\)`, "g"),
+];
+
+export function semCifras(texto) {
+  let t = String(texto || "");
+  for (const re of CLAUSULAS_DE_VALOR) t = t.replace(re, "");
+  return t
+    .replace(new RegExp(CIFRA, "g"), "valor suprimido")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([,.;:])/g, "$1")
+    .trim();
+}
+
+/**
+ * Achados de valor, taxa e custo ficam fora do laudo.
+ *
+ * O objeto do laudo é a verificação e a validação da cadeia de custódia. O que
+ * a operação cobra não confirma nem afasta autoria e integridade do documento,
+ * e levar esses números ao juízo abre uma discussão revisional que este exame
+ * não fez. DAT fica fora da lista: data de contratação divergente é cronologia,
+ * não preço.
+ *
+ * O corte é de apresentação, não de motor: o resultado gravado continua
+ * completo, e laudos já emitidos passam a sair sem os valores ao serem
+ * reabertos ou reexportados.
+ *
+ * SEG2, SEG5, SEG6, SEG7 e SEG8 tratam de prêmio, pró-labore e diferença de
+ * centavos: são preço do seguro. SEG1, SEG3, SEG4 e SEG9 seguem no laudo,
+ * porque tratam de carência, vigência, papéis das partes e rotulagem.
+ */
+const CODIGOS_FINANCEIROS = /^(CET\d|FIN\d|PRZ\d|TRB\d|TET\d|RMC\d|TAR\d|SEG[25678](?!\d)|economics)/i;
+
+export function achadoFinanceiro(codigo) {
+  return CODIGOS_FINANCEIROS.test(String(codigo || ""));
+}
+
+/** Verificações e diligências do sumário que existem só pelo eixo financeiro. */
+const CHECKS_FINANCEIROS = new Set(["dados-economicos"]);
+const DILIGENCIAS_FINANCEIRAS = new Set(["cet-demo", "iof-proof"]);
+
+/*
+ * A diligência do instrumento completo pedia taxa anual, valor liberado e
+ * demonstrativo do CET. O pedido continua, sem os três itens que o laudo já
+ * não examina.
+ */
+const DILIGENCIA_INSTRUMENTO = "full-contract";
+const TEXTO_INSTRUMENTO_COMPLETO =
+  "Solicitar o instrumento contratual completo e legível, com a qualificação integral do contratante, as páginas de assinatura e o número/espécie do benefício quando aplicável.";
+
+/** Remove do sumário o que decorre do exame econômico. */
+function semFinanceiro(sumario) {
+  // O que fica também não publica cifra: o sumário imprime o texto do achado
+  // como ele foi gravado, sem passar pelo saneamento do § de achados.
+  const semEixo = (lista) =>
+    Array.isArray(lista)
+      ? lista.filter((f) => !achadoFinanceiro(f.key)).map((f) => (f?.text ? { ...f, text: semCifras(f.text) } : f))
+      : lista;
+  const projecao = semEixo(sumario.projecao ?? sumario.allFindings);
+  const findings = semEixo(sumario.findings);
+  const saneado = {
+    ...sumario,
+    findings,
+    allFindings: semEixo(sumario.allFindings),
+    favorable: semEixo(sumario.favorable),
+    checks: Array.isArray(sumario.checks) ? sumario.checks.filter((c) => !CHECKS_FINANCEIROS.has(c.key)) : sumario.checks,
+    diligences: Array.isArray(sumario.diligences)
+      ? sumario.diligences
+          .filter((d) => !DILIGENCIAS_FINANCEIRAS.has(d.key))
+          .map((d) =>
+            d.key === DILIGENCIA_INSTRUMENTO
+              ? { ...d, text: TEXTO_INSTRUMENTO_COMPLETO }
+              : d?.text ? { ...d, text: semCifras(d.text) } : d)
+      : sumario.diligences,
+    intro: typeof sumario.intro === "string" ? semCifras(sumario.intro) : sumario.intro,
+    synthesis: typeof sumario.synthesis === "string" ? semCifras(sumario.synthesis) : sumario.synthesis,
+  };
+  if (sumario.projecao !== undefined) saneado.projecao = semEixo(sumario.projecao);
+  if (sumario.corte) saneado.corte = recontarCorte(sumario.corte, projecao || [], findings || []);
+  return saneado;
+}
+
 /**
  * Lista única de achados do corpo do laudo (D5). Com a projeção canônica, ela
  * é a fonte; sem ela, o legado de `extracted`. Projeção vazia é resposta.
  */
 export function reportIssues(extracted = {}, projecao = null) {
   if (Array.isArray(projecao)) {
-    return ordenarAchados(projecao.map((f) => ({
+    return ordenarAchados(projecao.filter((f) => !achadoFinanceiro(f.key)).map((f) => ({
       codigo: f.key,
       gravidade: f.severity,
       titulo: cleanIssueText(f.title || "Achado técnico").replace(/\.+$/, ""),
@@ -144,6 +238,7 @@ export function reportIssues(extracted = {}, projecao = null) {
   const legacy = structured.length ? [] : (extracted.evidencias_irregularidade || []);
   const seen = new Set();
   const issues = [...structured, ...legacy].map(normalizeIssue).filter((issue) => {
+    if (achadoFinanceiro(issue.codigo)) return false;
     if (!issue.titulo && !issue.texto) return false;
     if (seen.has(issue.codigo)) return false;
     seen.add(issue.codigo);
@@ -253,28 +348,31 @@ function recontarCorte(corte, projecao, findings) {
  */
 export function sanearSumario(sumario, home, ipAnalysis = [], contractGeo = null) {
   if (!sumario) return sumario;
+  // O corte do eixo financeiro vale para todo sumário, independentemente do que
+  // aconteceu com a referência residencial.
+  const base = semFinanceiro(sumario);
   const recusado = ["RECUSADO_CONFLITO", "INDISPONIVEL_NAO_INFORMADO"].includes(home?.estado_confronto);
   const semDistancia = distanciaKm(contractGeo?.distance) === null && ipAnalysis.every((ip) => distanciaKm(ip.distance) === null);
   const valida = (km) => distanciaKm(km) !== null && !distanciaSuspeita(km);
-  if (sumario.geo?.modo === "pares") {
-    return { ...sumario, geo: { ...sumario.geo, items: (sumario.geo.items || []).filter((i) => distanciaKm(i.distance) !== null) } };
+  if (base.geo?.modo === "pares") {
+    return { ...base, geo: { ...base.geo, items: (base.geo.items || []).filter((i) => distanciaKm(i.distance) !== null) } };
   }
   if (!recusado && !semDistancia) {
-    return { ...sumario, geo: sumario.geo ? { ...sumario.geo, items: (sumario.geo.items || []).filter((i) => valida(i.distance)) } : sumario.geo };
+    return { ...base, geo: base.geo ? { ...base.geo, items: (base.geo.items || []).filter((i) => valida(i.distance)) } : base.geo };
   }
   const semResidencia = (lista = []) => lista.filter((f) => !CHAVES_DISTANCIA_RESIDENCIA.has(f.key));
-  const projecao = semResidencia(sumario.projecao || sumario.allFindings);
-  const findings = semResidencia(sumario.findings);
+  const projecao = semResidencia(base.projecao || base.allFindings);
+  const findings = semResidencia(base.findings);
   return {
-    ...sumario,
+    ...base,
     findings,
-    allFindings: semResidencia(sumario.allFindings),
+    allFindings: semResidencia(base.allFindings),
     projecao,
-    corte: recontarCorte(sumario.corte, projecao, findings),
-    favorable: semResidencia(sumario.favorable),
-    checks: (sumario.checks || []).map((c) => (c.key === "gps-residencia" ? { ...c, status: "INDETERMINADO", detail: "Distância à residência não calculada." } : c)),
-    geo: sumario.geo ? geoMedidoAteOGps(sumario.geo, ipAnalysis, contractGeo) : sumario.geo,
-    ipCards: (sumario.ipCards || []).map((card) => ({
+    corte: recontarCorte(base.corte, projecao, findings),
+    favorable: semResidencia(base.favorable),
+    checks: (base.checks || []).map((c) => (c.key === "gps-residencia" ? { ...c, status: "INDETERMINADO", detail: "Distância à residência não calculada." } : c)),
+    geo: base.geo ? geoMedidoAteOGps(base.geo, ipAnalysis, contractGeo) : base.geo,
+    ipCards: (base.ipCards || []).map((card) => ({
       ...card,
       distance: null,
       text: String(card.text || "").replace(/, [\d.,]+ km da referência residencial/, ""),

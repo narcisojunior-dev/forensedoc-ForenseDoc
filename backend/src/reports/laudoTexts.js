@@ -8,9 +8,14 @@
  * servidor faria as duas versões divergirem com o tempo.
  */
 
+/*
+ * O laudo é emitido pelo sistema, não por um escritório: quem responde pelo
+ * método e pelo resultado é o ForenseDoc. A qualificação do advogado que usa o
+ * sistema, quando necessária, é dele e entra na peça processual, não aqui.
+ */
 export const FIRM = {
-  nome: "Ronney Menezes Advocacia",
-  oab: "OAB/PI 15.508 · OAB/MA 26.102-A",
+  nome: "ForenseDoc",
+  descricao: "Verificação técnica e validação de cadeia de custódia documental",
   sistema: "ForenseDoc",
 };
 
@@ -69,14 +74,6 @@ export const FUNDAMENTACAO = [
   },
   GRUPO_CONSIGNADO,
   {
-    grupo: "Custo Efetivo Total (CET)",
-    itens: [
-      ["Resolução CMN 4.881/2020, art. 2º", "Define o CET como a taxa que representa, de forma consolidada, todos os encargos e despesas da operação."],
-      ["Resolução CMN 4.881/2020, art. 7º", "Obriga a instituição a informar o CET previamente à contratação e a apresentar o demonstrativo de cálculo ao tomador."],
-      ["CDC, art. 52, c/c Resolução CMN 4.881/2020", "A ausência, a incorreção ou a inconsistência do CET frente à taxa de juros caracteriza falha no dever de informação."],
-    ],
-  },
-  {
     grupo: "Assinatura eletrônica e ônus da prova",
     itens: [
       ["MP 2.200-2/2001, art. 10, § 2º", "Admite outros meios de comprovação de autoria e integridade, além da certificação ICP-Brasil."],
@@ -120,8 +117,9 @@ export const NOTA_FUNDAMENTACAO_RESSALVA =
 
 export function avisoLegal(timestamp) {
   return (
-    `AVISO LEGAL: Este laudo foi gerado automaticamente pelo sistema ForenseDoc (${FIRM.nome}, ${FIRM.oab}) ` +
-    "para fins de análise jurídica preliminar. Os hashes criptográficos SHA-256 e SHA-1 foram calculados pelo " +
+    `AVISO LEGAL: Este laudo foi gerado automaticamente pelo sistema ${FIRM.sistema} ` +
+    "para fins de verificação técnica preliminar da cadeia de custódia do documento. As condições econômicas da " +
+    "operação não integram o exame. Os hashes criptográficos SHA-256 e SHA-1 foram calculados pelo " +
     "servidor sobre o arquivo original recebido (NIST FIPS 180-4). A geolocalização de IPs é fornecida por " +
     "serviço de terceiros (ipapi.co) e possui margem de erro inerente; endereços de ISPs e VPNs podem não " +
     "refletir a localização física real do usuário. A geolocalização declarada da assinatura é extraída do " +

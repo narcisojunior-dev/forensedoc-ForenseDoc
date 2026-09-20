@@ -14,9 +14,14 @@ import { ArrowLeft, ShieldCheck } from "lucide-react";
  */
 export const VIGENCIA = "31 de julho de 2026";
 
+/*
+ * A plataforma se identifica por si: o laudo e as páginas públicas respondem
+ * pelo ForenseDoc, não por um escritório. Mesma decisão de
+ * backend/src/reports/laudoTexts.js (FIRM).
+ */
 export const FIRM = {
-  nome: "Ronney Menezes Advocacia",
-  oab: "OAB/PI 15.508 · OAB/MA 26.102-A",
+  nome: "ForenseDoc",
+  descricao: "verificação técnica e validação de cadeia de custódia documental",
   sistema: "ForenseDoc",
 };
 
@@ -109,7 +114,7 @@ export default function LegalLayout({ titulo, resumo, children }) {
 
         <footer className="mt-14 border-t border-surface-border pt-6 text-[13px] text-zinc-500">
           <p>
-            {FIRM.sistema} é um sistema de {FIRM.nome} ({FIRM.oab}).
+            {FIRM.sistema}: {FIRM.descricao}.
           </p>
           <p className="mt-2">
             Dúvidas sobre este documento ou sobre tratamento de dados pessoais:{" "}

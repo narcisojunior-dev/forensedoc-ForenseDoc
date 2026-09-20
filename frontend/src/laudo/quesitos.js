@@ -118,11 +118,10 @@ const dias = (n) => `${n} ${n === 1 ? "dia" : "dias"}`;
 const MODELOS = {
   LIB1(e, { bancoRef, contratoRef }) {
     const d = e.liberacao_credito?.declarada || {};
-    const valor = e.contrato?.valor_liberado;
     const destino = [d.conta ? `conta ${d.conta}` : null, d.agencia ? `agência ${d.agencia}` : null, d.banco ? `Banco ${d.banco}` : null].filter(Boolean).join(", ");
     return {
       titulo: "Comprovação do Crédito Liberado",
-      quesito: `Queira ${bancoRef} apresentar o comprovante de transferência relativo ao crédito${valor ? ` de ${valor}` : ""}${destino ? ` na ${destino}` : ""}${contratoRef ? `, ${contratoRef}` : ""}, com identificação do lançamento, data, valor e titularidade da conta de destino.`.replace(/\s+,/g, ",").replace(/\s{2,}/g, " "),
+      quesito: `Queira ${bancoRef} apresentar o comprovante de transferência relativo ao crédito${destino ? ` na ${destino}` : ""}${contratoRef ? `, ${contratoRef}` : ""}, com identificação do lançamento, data, valor e titularidade da conta de destino.`.replace(/\s+,/g, ",").replace(/\s{2,}/g, " "),
       finalidade: "Exigir a prova da efetiva disponibilização do crédito, que cabe a quem afirma tê-lo realizado.",
     };
   },
@@ -157,8 +156,8 @@ const MODELOS = {
     const estipulante = sg.estipulante?.nome;
     return {
       titulo: "Seguro Prestamista Vinculado à Operação",
-      quesito: `Queira a seguradora ou o estipulante apresentar a apólice, o certificado individual e a comprovação da opção de ${nomeRef} pela cobertura de ${cobertura.nome}, esclarecer o início e o fim da vigência e os marcos de contagem da carência de ${dias(cobertura.carencia_dias)} e da franquia de ${dias(cobertura.franquia_dias || 0)}${sg.pro_labore ? `, além da memória do pró-labore de ${sg.pro_labore}` : ""}. Os dois prazos têm marcos próprios e não fixam, por soma automática, a primeira indenização.`,
-      finalidade: "Conferir adesão, vigência, condições de cobertura e remuneração, sem presumir parcelas descobertas.",
+      quesito: `Queira a seguradora ou o estipulante apresentar a apólice, o certificado individual e a comprovação da opção de ${nomeRef} pela cobertura de ${cobertura.nome}, esclarecer o início e o fim da vigência e os marcos de contagem da carência de ${dias(cobertura.carencia_dias)} e da franquia de ${dias(cobertura.franquia_dias || 0)}. Os dois prazos têm marcos próprios e não fixam, por soma automática, a primeira indenização.`,
+      finalidade: "Conferir adesão, vigência e condições de cobertura, sem presumir parcelas descobertas.",
     };
   },
   "TRL1-CCB"(e, { bancoRef }) {

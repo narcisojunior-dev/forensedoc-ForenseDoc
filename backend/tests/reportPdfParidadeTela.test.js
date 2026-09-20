@@ -29,6 +29,15 @@ const servidor = await import("../src/reports/laudoApresentacao.js");
 const tela = await import("../../frontend/src/laudo/laudoUtils.js");
 const { montarRelatorio } = await import("../../frontend/src/laudo/montarRelatorio.js");
 
+/**
+ * O desenho do laudo separa rótulo e valor pela coluna, não por dois-pontos, e
+ * imprime os títulos de seção em versalete. O que este teste tranca é o DADO
+ * chegar ao PDF; a pontuação e a caixa são do tema.
+ */
+function comoNoLaudo(trecho) {
+  return new RegExp(trecho.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/:\s+/g, "[:\\s]\\s*"), "i");
+}
+
 async function textoDoPdf(result) {
   const doc = await buildReportPdf({ id: "11111111-2222-3333-4444-555555555555", createdAt: new Date() }, result);
   const partes = [];
@@ -189,7 +198,7 @@ describe("o PDF leva os dados exibidos na tela", () => {
       "Não foi anexado PDF do processo",
       "Achados deste laudo com maior aderência normativa",
     ]) {
-      expect(texto, trecho).toContain(trecho);
+      expect(texto, trecho).toMatch(comoNoLaudo(trecho));
     }
   });
 
@@ -201,7 +210,7 @@ describe("o PDF leva os dados exibidos na tela", () => {
     result.cadeiaCustodia = buildCustodyChain(extracted, result.ipAnalysis, false);
     result.sumarioIrregularidades = buildSummaryForResult(result, extracted);
     const texto = await textoDoPdf(result);
-    expect(texto).toContain("Confronto · hash informado × hash encontrado");
-    expect(texto).toContain("Resultado da comparação: HASHES CONFEREM");
+    expect(texto).toMatch(comoNoLaudo("Confronto · hash informado × hash encontrado"));
+    expect(texto).toMatch(comoNoLaudo("Resultado da comparação: HASHES CONFEREM"));
   });
 });
