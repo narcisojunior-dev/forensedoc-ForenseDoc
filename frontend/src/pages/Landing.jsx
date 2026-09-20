@@ -567,6 +567,9 @@ export default function Landing() {
             <Link to="/privacidade" className="transition-colors hover:text-foreground">
               Política de Privacidade
             </Link>
+            <Link to="/verificar" className="transition-colors hover:text-foreground">
+              Verificar laudo
+            </Link>
           </nav>
         </div>
       </footer>

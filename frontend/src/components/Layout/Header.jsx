@@ -46,6 +46,12 @@ export default function Header() {
           <a href="#planos" className="text-sm font-medium text-zinc-400 hover:text-foreground transition-colors">
             Planos
           </a>
+          {/* Quem chega para conferir um laudo não é visitante de vendas: em
+              geral recebeu o documento de outra pessoa e quer saber se é
+              legítimo. Precisa achar a entrada sem rolar a página. */}
+          <Link to="/verificar" className="text-sm font-medium text-zinc-400 hover:text-foreground transition-colors">
+            Verificar laudo
+          </Link>
         </nav>
 
         {/* Auth Buttons */}
@@ -76,6 +82,7 @@ export default function Header() {
           <a href="#solucao" className="text-sm font-medium text-zinc-400 p-2 rounded hover:bg-surface">O laudo</a>
           <a href="#como-funciona" className="text-sm font-medium text-zinc-400 p-2 rounded hover:bg-surface">Como funciona</a>
           <a href="#planos" className="text-sm font-medium text-zinc-400 p-2 rounded hover:bg-surface">Planos</a>
+          <Link to="/verificar" className="text-sm font-medium text-zinc-400 p-2 rounded hover:bg-surface">Verificar laudo</Link>
           <div className="h-px bg-surface-border my-2" />
           <Link to="/login" className="text-sm font-medium text-zinc-300 p-2 rounded hover:bg-surface text-center">Entrar</Link>
           <Link to="/register" className="text-sm font-medium bg-primary text-white p-2 rounded text-center">Gerar laudos grátis</Link>
