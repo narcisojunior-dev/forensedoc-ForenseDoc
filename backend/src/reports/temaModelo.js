@@ -18,7 +18,7 @@
  * mudam: só o desenho muda.
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -95,28 +95,38 @@ export function cor(valor) {
  * fonte nesses pontos sem reescrevê-los. Sem os arquivos, o laudo sai nas
  * fontes padrão em vez de falhar.
  */
+const ARQUIVOS_DE_FONTE = {
+  Helvetica: "Inter-Regular.ttf",
+  "Helvetica-Bold": "Inter-SemiBold.ttf",
+  "Helvetica-Oblique": "Inter-Italic.ttf",
+  Courier: "JetBrainsMono-Regular.ttf",
+  "Courier-Bold": "JetBrainsMono-Bold.ttf",
+};
+
+/*
+ * Os arquivos são lidos uma vez por processo. O PDFKit reabriria cada um a
+ * cada laudo emitido.
+ */
+const FONTES = new Map();
+for (const [nome, arquivo] of Object.entries(ARQUIVOS_DE_FONTE)) {
+  const caminho = join(RAIZ_FONTES, arquivo);
+  if (existsSync(caminho)) FONTES.set(nome, readFileSync(caminho));
+}
+
 export function registrarFontes(doc) {
-  const arquivos = {
-    Helvetica: "Inter-Regular.ttf",
-    "Helvetica-Bold": "Inter-SemiBold.ttf",
-    "Helvetica-Oblique": "Inter-Italic.ttf",
-    "Helvetica-BoldOblique": "Inter-Bold.ttf",
-    Courier: "JetBrainsMono-Regular.ttf",
-    "Courier-Bold": "JetBrainsMono-Bold.ttf",
-    Inter: "Inter-Regular.ttf",
-    "Inter-Bold": "Inter-SemiBold.ttf",
-    "Inter-Forte": "Inter-Bold.ttf",
-    Mono: "JetBrainsMono-Regular.ttf",
-    "Mono-Bold": "JetBrainsMono-Bold.ttf",
-  };
-  let registradas = 0;
-  for (const [nome, arquivo] of Object.entries(arquivos)) {
-    const caminho = join(RAIZ_FONTES, arquivo);
-    if (!existsSync(caminho)) continue;
-    doc.registerFont(nome, caminho);
-    registradas += 1;
+  for (const [nome, conteudo] of FONTES) {
+    doc.registerFont(nome, conteudo);
+    /*
+     * O PDFKit resolve "Helvetica" no construtor e guarda a fonte padrão no
+     * cache de famílias. O apelido registrado depois nunca chegava a ser
+     * consultado para esse nome: o laudo saía com o texto regular em
+     * Helvetica não embutida no meio da Inter, e só o negrito e o
+     * monoespaçado vinham das fontes do desenho.
+     */
+    if (doc._fontFamilies) delete doc._fontFamilies[nome];
   }
-  return registradas > 0;
+  if (FONTES.size) doc.font("Helvetica");
+  return FONTES.size > 0;
 }
 
 // ─── Moldura da página ───────────────────────────────────────────────────────
@@ -129,7 +139,7 @@ export function pintarMoldura(doc) {
 
   doc
     .fontSize(7.5)
-    .font("Inter")
+    .font("Helvetica")
     .fillColor(COR.rotulo)
     .text("FORENSEDOC  |  LAUDO TÉCNICO PERICIAL", CARTAO_X, 26, {
       width: LARGURA_CARTAO,
@@ -161,7 +171,7 @@ export function pintarRodapes(doc, sha256) {
 
     doc
       .fontSize(7.5)
-      .font("Inter")
+      .font("Helvetica")
       .fillColor(COR.rotulo)
       .text(`Página ${i + 1} de ${intervalo.count}`, CARTAO_X, 26, {
         width: LARGURA_CARTAO,
@@ -173,7 +183,7 @@ export function pintarRodapes(doc, sha256) {
     doc.moveTo(CARTAO_X, y).lineTo(CARTAO_X + LARGURA_CARTAO, y).lineWidth(0.5).strokeColor(COR.borda).stroke();
     doc
       .fontSize(7)
-      .font("Inter")
+      .font("Helvetica")
       .fillColor(COR.vazio)
       .text("Documento gerado pelo ForenseDoc", CARTAO_X, y + 7, {
         width: LARGURA_CARTAO,
@@ -183,7 +193,7 @@ export function pintarRodapes(doc, sha256) {
     if (sha256) {
       doc
         .fontSize(6.5)
-        .font("Mono")
+        .font("Courier")
         .fillColor(COR.vazio)
         .text(`SHA-256 ${sha256}`, CARTAO_X, y + 7, { width: LARGURA_CARTAO, align: "right", lineBreak: false });
     }
@@ -343,7 +353,7 @@ export function achadoPlacar(ctx, { severidade, titulo, texto }) {
 
   const larguraSelo = 54;
   const larguraTexto = LARGURA_TEXTO - larguraSelo - 10;
-  doc.fontSize(8.2).font("Inter");
+  doc.fontSize(8.2).font("Helvetica");
   const alturaTexto = doc.heightOfString(`${titulo} ${texto || ""}`.trim(), { width: larguraTexto, lineGap: 1.3 });
   const altura = Math.max(alturaTexto, 14) + 8;
 
@@ -360,7 +370,7 @@ export function achadoPlacar(ctx, { severidade, titulo, texto }) {
   doc.restore();
   doc
     .fontSize(6.6)
-    .font("Inter-Bold")
+    .font("Helvetica-Bold")
     .fillColor(paleta.tinta)
     .text(String(severidade || "").toUpperCase(), MARGEM_TEXTO, y + 5, {
       width: larguraSelo,
@@ -369,10 +379,10 @@ export function achadoPlacar(ctx, { severidade, titulo, texto }) {
     });
 
   const x = MARGEM_TEXTO + larguraSelo + 10;
-  doc.fontSize(8.2).font("Inter-Bold").fillColor(COR.texto);
+  doc.fontSize(8.2).font("Helvetica-Bold").fillColor(COR.texto);
   if (texto) {
     doc.text(`${titulo} `, x, y + 1, { width: larguraTexto, lineGap: 1.3, continued: true });
-    doc.font("Inter").fillColor(COR.notaTexto).text(texto, { width: larguraTexto, lineGap: 1.3 });
+    doc.font("Helvetica").fillColor(COR.notaTexto).text(texto, { width: larguraTexto, lineGap: 1.3 });
   } else {
     doc.text(titulo, x, y + 1, { width: larguraTexto, lineGap: 1.3 });
   }
@@ -395,7 +405,7 @@ export function heading(ctx, titulo, { danger = false } = {}) {
 
   doc
     .fontSize(9.5)
-    .font("Inter-Bold")
+    .font("Helvetica-Bold")
     .fillColor(tinta)
     .text(titulo.toUpperCase(), MARGEM_TEXTO + 11, y, {
       width: LARGURA_TEXTO - 11,
@@ -423,7 +433,7 @@ export function subheading(ctx, titulo) {
   fundo(doc, doc.y, 18);
   doc
     .fontSize(7.5)
-    .font("Mono")
+    .font("Courier")
     .fillColor(COR.sub)
     .text(String(titulo).toUpperCase(), MARGEM_TEXTO, y, {
       width: LARGURA_TEXTO,
@@ -455,7 +465,7 @@ export function field(ctx, rotulo, valor, { mono = false } = {}) {
   let larguraRotulo = LARGURA_ROTULO;
   let corpoValor = mono ? 7.8 : 9;
   if (mono) {
-    doc.font("Mono");
+    doc.font("Courier");
     for (const tentativa of [7.8, 7.2, 6.8, 6.4]) {
       doc.fontSize(tentativa);
       const disponivel = LARGURA_TEXTO - (texto.length > 40 ? 150 : LARGURA_ROTULO) - 12;
@@ -470,9 +480,9 @@ export function field(ctx, rotulo, valor, { mono = false } = {}) {
   }
   const larguraValor = LARGURA_TEXTO - larguraRotulo - 12;
 
-  doc.fontSize(8.4).font("Inter");
+  doc.fontSize(8.4).font("Helvetica");
   const altRotulo = doc.heightOfString(`${rotulo}`, { width: larguraRotulo });
-  doc.fontSize(corpoValor).font(mono ? "Mono" : "Inter-Bold");
+  doc.fontSize(corpoValor).font(mono ? "Courier" : "Helvetica-Bold");
   const altValor = doc.heightOfString(texto, { width: larguraValor, align: "right" });
   const altura = Math.max(altRotulo, altValor) + 5;
 
@@ -483,13 +493,13 @@ export function field(ctx, rotulo, valor, { mono = false } = {}) {
 
   doc
     .fontSize(8.4)
-    .font("Inter")
+    .font("Helvetica")
     .fillColor(COR.rotulo)
     .text(rotulo, MARGEM_TEXTO, y + 3.5, { width: larguraRotulo });
 
   doc
     .fontSize(corpoValor)
-    .font(mono ? "Mono" : "Inter-Bold")
+    .font(mono ? "Courier" : "Helvetica-Bold")
     .fillColor(mono ? COR.mono : COR.texto)
     .text(texto, MARGEM_TEXTO + larguraRotulo + 12, y + 3.5, { width: larguraValor, align: "right" });
 
@@ -516,7 +526,7 @@ export function badge(ctx, rotulo, valor, ok) {
       : { fundo: COR.alertaFundo, borda: COR.alertaBorda, tinta: COR.alertaTexto };
 
   const texto = String(valor).toUpperCase();
-  doc.fontSize(7.2).font("Inter-Bold");
+  doc.fontSize(7.2).font("Helvetica-Bold");
   const largura = doc.widthOfString(texto, { characterSpacing: 0.4 }) + 18;
   const alturaPilula = 13;
   const altura = 20;
@@ -528,7 +538,7 @@ export function badge(ctx, rotulo, valor, ok) {
 
   doc
     .fontSize(8.6)
-    .font("Inter")
+    .font("Helvetica")
     .fillColor(COR.rotulo)
     .text(rotulo, MARGEM_TEXTO, y + 5, { width: LARGURA_TEXTO - largura - 10 });
 
@@ -543,7 +553,7 @@ export function badge(ctx, rotulo, valor, ok) {
   doc.restore();
   doc
     .fontSize(7.2)
-    .font("Inter-Bold")
+    .font("Helvetica-Bold")
     .fillColor(paleta.tinta)
     .text(texto, x, y + 5.6, { width: largura, align: "center", characterSpacing: 0.4, lineBreak: false });
 
@@ -567,7 +577,7 @@ export function paragraph(ctx, texto, { color, size = 9.5, italic = false } = {}
   const tinta = cor(color);
   const nota = tinta === COR.texto || tinta === COR.perigoTexto || tinta === COR.tituloAlerta;
   const corpo = nota ? 8.4 : 8;
-  const fonte = italic ? "Helvetica-Oblique" : "Inter";
+  const fonte = italic ? "Helvetica-Oblique" : "Helvetica";
 
   doc.fontSize(corpo).font(fonte);
   const largura = nota ? LARGURA_TEXTO - 22 : LARGURA_TEXTO;
@@ -611,7 +621,7 @@ export function bullet(ctx, texto, { color, size = 9 } = {}) {
   const { doc } = ctx;
   garantirCartao(ctx);
   const tinta = cor(color) || COR.texto;
-  doc.fontSize(8.2).font("Inter");
+  doc.fontSize(8.2).font("Helvetica");
   const alturaTexto = doc.heightOfString(String(texto), { width: LARGURA_TEXTO - 14, lineGap: 1.4 });
   const altura = alturaTexto + 6;
 
@@ -625,7 +635,7 @@ export function bullet(ctx, texto, { color, size = 9 } = {}) {
   doc.restore();
   doc
     .fontSize(8.2)
-    .font("Inter")
+    .font("Helvetica")
     .fillColor(tinta)
     .text(String(texto), MARGEM_TEXTO + 12, y + 1, { width: LARGURA_TEXTO - 14, lineGap: 1.4 });
 
@@ -642,7 +652,7 @@ export function table(ctx, colunas, linhas, { size = 7.5, destaque = null } = {}
 
   const cabecalho = () => {
     const y = doc.y;
-    doc.fontSize(6.2).font("Inter-Bold");
+    doc.fontSize(6.2).font("Helvetica-Bold");
     // Título de coluna longo ("DATA/HORA (GMT)") ocupa duas linhas em vez de
     // ser cortado: a altura da faixa vem da medida, não de um valor fixo.
     const alturaFaixa =
@@ -659,7 +669,7 @@ export function table(ctx, colunas, linhas, { size = 7.5, destaque = null } = {}
     colunas.forEach((coluna, i) => {
       doc
         .fontSize(6.2)
-        .font("Inter-Bold")
+        .font("Helvetica-Bold")
         .fillColor(COR.sub)
         .text(String(coluna.titulo).toUpperCase(), x + 4, y + 4, {
           width: larguras[i] - 6,
@@ -676,7 +686,7 @@ export function table(ctx, colunas, linhas, { size = 7.5, destaque = null } = {}
 
   linhas.forEach((linha, indice) => {
     const celulas = linha.map((valor) => (valor === null || valor === undefined ? "" : String(valor)));
-    doc.fontSize(corpo).font("Inter");
+    doc.fontSize(corpo).font("Helvetica");
     const altura =
       Math.max(
         ...celulas.map((texto, i) => doc.heightOfString(texto, { width: larguras[i] - 6 })),
@@ -701,7 +711,7 @@ export function table(ctx, colunas, linhas, { size = 7.5, destaque = null } = {}
     celulas.forEach((texto, i) => {
       doc
         .fontSize(corpo)
-        .font(colunas[i].mono ? "Mono" : "Inter")
+        .font(colunas[i].mono ? "Courier" : "Helvetica")
         .fillColor(colunas[i].mono ? COR.mono : COR.texto)
         .text(texto, x + 4, y + 3, { width: larguras[i] - 6 });
       x += larguras[i];
@@ -775,7 +785,7 @@ export function capa(ctx, dados) {
   const subtitulo = "EXAME AUTOMATIZADO DE INTEGRIDADE, AUTORIA E COERÊNCIA GEOGRÁFICA";
   // O título ocupa uma linha só: reduz o corpo até caber na largura do cartão.
   let corpoTitulo = 12;
-  doc.font("Mono-Bold");
+  doc.font("Courier-Bold");
   while (corpoTitulo > 8) {
     doc.fontSize(corpoTitulo);
     if (doc.widthOfString(titulo, { characterSpacing: 0.6 }) <= LARGURA_TEXTO) break;
@@ -792,7 +802,7 @@ export function capa(ctx, dados) {
 
   doc
     .fontSize(corpoTitulo)
-    .font("Mono-Bold")
+    .font("Courier-Bold")
     .fillColor(COR.titulo)
     .text(titulo, MARGEM_TEXTO, y0 + 22, {
       width: LARGURA_TEXTO,
@@ -802,7 +812,7 @@ export function capa(ctx, dados) {
     });
   doc
     .fontSize(7)
-    .font("Mono")
+    .font("Courier")
     .fillColor(COR.rotulo)
     .text(subtitulo, MARGEM_TEXTO, y0 + 44, {
       width: LARGURA_TEXTO,
@@ -822,7 +832,7 @@ export function capa(ctx, dados) {
     ["IMPRESSÃO DIGITAL", `SHA-256\n${sha256 ? `${sha256.slice(0, 22)}…` : "não calculada"}`],
   ];
   const largura = LARGURA_TEXTO / 4;
-  doc.fontSize(7.4).font("Mono");
+  doc.fontSize(7.4).font("Courier");
   const alturaQuadro =
     Math.max(...celulas.map(([, v]) => doc.heightOfString(String(v), { width: largura - 16 }))) + 30;
 
@@ -846,12 +856,12 @@ export function capa(ctx, dados) {
     }
     doc
       .fontSize(6.2)
-      .font("Mono")
+      .font("Courier")
       .fillColor(COR.rotulo)
       .text(rotulo, x + 8, yq + 8, { width: largura - 16, characterSpacing: 0.4, lineBreak: false });
     doc
       .fontSize(7.4)
-      .font("Mono")
+      .font("Courier")
       .fillColor(COR.mono)
       .text(String(valor), x + 8, yq + 20, { width: largura - 16, lineGap: 1.5 });
   });
@@ -862,7 +872,7 @@ export function capa(ctx, dados) {
   // Pastilhas de escopo.
   const pastilhas = String(escopo || "").split("·").map((s) => s.trim()).filter(Boolean);
   if (pastilhas.length) {
-    doc.fontSize(7).font("Inter");
+    doc.fontSize(7).font("Helvetica");
     const alturas = 15;
     fundo(doc, doc.y, alturas + 10);
     const larguras = pastilhas.map((p) => doc.widthOfString(p) + 16);
@@ -880,7 +890,7 @@ export function capa(ctx, dados) {
       doc.restore();
       doc
         .fontSize(7)
-        .font("Inter")
+        .font("Helvetica")
         .fillColor(COR.sub)
         .text(texto, x, y + 4.5, { width: larguras[i], align: "center", lineBreak: false });
       x += larguras[i] + 6;
@@ -898,7 +908,7 @@ export function capa(ctx, dados) {
   heading(ctx, resumoTitulo, { danger: alerta });
   doc
     .fontSize(14)
-    .font("Inter-Forte")
+    .font("Helvetica-Bold")
     .fillColor(alerta ? COR.tituloAlerta : COR.titulo);
   const alturaValor = doc.heightOfString(String(resumoValor), { width: LARGURA_TEXTO });
   fundo(doc, doc.y, alturaValor + 8);
