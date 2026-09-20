@@ -488,8 +488,21 @@ export async function getAnalysisPdf(req, res) {
     if (analysis.status !== "COMPLETED" || !analysis.result) {
       return res.status(409).json({ error: "Laudo indisponível: análise não concluída.", status: analysis.status });
     }
+    /*
+     * A verificação pública vai para dentro do PDF. É buscada aqui, e não no
+     * gerador, porque o gerador não consulta banco: quem monta o documento
+     * recebe pronto o que vai imprimir.
+     *
+     * Laudo anterior ao backfill não tem registro, e nesse caso o PDF sai sem
+     * o bloco em vez de falhar: melhor um laudo sem QR do que nenhum laudo.
+     */
+    const verificacao = await prisma.laudoVerification.findFirst({
+      where: { analysisId: analysis.id, status: "VALIDO" },
+      select: { codigo: true, laudoHash: true },
+    });
+
     // buildReportPdf valida o snapshot atual antes de gerar bytes ou cabeçalhos.
-    const pdf = await buildReportPdf(analysis, analysis.result);
+    const pdf = await buildReportPdf(analysis, analysis.result, { verificacao });
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="laudo-${analysis.id.slice(0, 8)}.pdf"`);
 

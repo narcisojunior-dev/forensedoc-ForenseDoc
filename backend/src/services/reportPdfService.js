@@ -13,6 +13,7 @@ import {
 } from "../reports/laudoTexts.js";
 import { buildCustodyChain } from "../reports/custodyChain.js";
 import * as temaModelo from "../reports/temaModelo.js";
+import { desenharQr, urlDeVerificacao } from "../reports/qrVerificacao.js";
 import { calculateForensicScore } from "../utils/forensicScore.js";
 import { generateJudicialQuesitos } from "../reports/quesitosTemplate.js";
 import { montarConfrontoGeografico } from "../utils/distancia.js";
@@ -84,6 +85,15 @@ export async function buildReportPdf(analysis, result, opcoes = {}) {
    * protegida são os mesmos nos dois.
    */
   const tema = opcoes.tema === "classico" ? "classico" : "modelo";
+  /*
+   * Registro de verificação pública do laudo (código + SHA-256 do conteúdo).
+   * Vem de fora porque o PDF não deve consultar o banco: quem monta o
+   * documento recebe pronto o que vai imprimir.
+   *
+   * É opcional de propósito. Laudo antigo, anterior ao backfill, continua
+   * sendo gerado sem o bloco em vez de falhar.
+   */
+  const verificacao = opcoes.verificacao || null;
   // Pré-busca dos DOIS mapas do § 5, em paralelo. Cada um responde a uma
   // pergunta pericial distinta (ver staticMapService.js) e nenhum é requisito:
   // se a busca falhar, a seção sai com as coordenadas e as distâncias.
@@ -137,6 +147,7 @@ export async function buildReportPdf(analysis, result, opcoes = {}) {
   const sumario = sanearSumario(result.sumarioIrregularidades || null, result.home, result.ipAnalysis || [], result.contractGeo);
 
   cover(ctx, analysis, result, timestamp, extracted);
+  sectionVerificacao(ctx, verificacao);
   sectionProcessingNotices(ctx, result, Boolean(extraido));
   sectionReview(ctx, result);
   sectionIdentity(ctx, result, extracted);
@@ -558,6 +569,66 @@ function sectionReview(ctx, result) {
     ctx,
     "A conferência humana é requisito de uso deste sistema, e não uma exceção: o laudo é instrumento de apoio e depende de validação por quem o utiliza. O registro acima documenta que essa validação ocorreu.",
     { color: MUTED, size: 8.5 }
+  );
+}
+
+/**
+ * Bloco de verificação pública: código, hash do laudo e QR Code.
+ *
+ * Fica no fluxo comum, logo depois da capa, e não dentro dela. Os dois temas
+ * desenham a capa de formas muito diferentes ("modelo" monta um cartão com
+ * degradê e medidas próprias, protegido por teste de regressão), e duplicar o
+ * bloco nas duas implementações significaria manter duas versões da mesma
+ * coisa. Como seção própria, ele sai igual nos dois e é fácil de achar no
+ * documento impresso, que é onde alguém vai procurá-lo.
+ */
+function sectionVerificacao(ctx, verificacao) {
+  if (!verificacao) return;
+  const { doc, contentWidth } = ctx;
+
+  const LADO_QR = 74;
+  reserve(ctx, LADO_QR + 46);
+
+  heading(ctx, "Verificação de autenticidade");
+
+  const yTopo = doc.y;
+  const { lado } = desenharQr(doc, {
+    conteudo: urlDeVerificacao(verificacao.codigo),
+    x: MARGIN,
+    y: yTopo,
+    lado: LADO_QR,
+  });
+
+  const xTexto = MARGIN + lado + 16;
+  const larguraTexto = contentWidth - lado - 16;
+
+  doc.fontSize(8).font("Helvetica").fillColor(MUTED)
+    .text("CÓDIGO DE VERIFICAÇÃO", xTexto, yTopo, { width: larguraTexto, characterSpacing: 0.4 });
+  doc.fontSize(12).font("Courier-Bold").fillColor(INK)
+    .text(verificacao.codigo, xTexto, doc.y + 1, { width: larguraTexto });
+
+  doc.fontSize(8).font("Helvetica").fillColor(MUTED)
+    .text("SHA-256 DESTE LAUDO", xTexto, doc.y + 6, { width: larguraTexto, characterSpacing: 0.4 });
+  doc.fontSize(7).font("Courier").fillColor(INK)
+    .text(verificacao.laudoHash, xTexto, doc.y + 1, { width: larguraTexto });
+
+  doc.fontSize(7.5).font("Helvetica").fillColor(MUTED)
+    .text(
+      `Aponte a câmera para o código ao lado ou informe o código de verificação em ${urlDeVerificacao("").replace(/\/$/, "")}. A conferência é pública e não exige cadastro.`,
+      xTexto,
+      doc.y + 6,
+      { width: larguraTexto }
+    );
+
+  // O texto pode ser mais curto que o QR: a linha de baixo tem que começar
+  // depois do mais alto dos dois, senão a próxima seção invade o código.
+  doc.y = Math.max(doc.y, yTopo + lado) + 8;
+  doc.x = MARGIN;
+
+  paragraph(
+    ctx,
+    "O código acima confere o CONTEÚDO do laudo, não o arquivo. O PDF é remontado a cada download e seus bytes mudam a cada geração, o que tornaria o resumo do arquivo inútil como prova de integridade. Na página de verificação constam os mesmos resumos criptográficos impressos aqui e o nome do titular de forma parcial, para conferência.",
+    { size: 8 }
   );
 }
 
