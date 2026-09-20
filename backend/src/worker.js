@@ -6,7 +6,6 @@ import { processCreditExpirations } from "./jobs/expireCredits.js";
 import { processWebhook, suspendIfStillOverdue } from "./jobs/webhookProcessor.js";
 import { processAnalysis } from "./jobs/analysisWorker.js";
 import { processProcessComparison } from "./jobs/processComparisonWorker.js";
-import { processReplica } from "./jobs/replicaWorker.js";
 import { processEmail } from "./jobs/emailWorker.js";
 import { processRenewalReminders, processOverdueReminders } from "./jobs/reminders.js";
 import { startQueueWatch } from "./services/queueMetricsService.js";
@@ -89,7 +88,8 @@ const HANDLERS = {
     "process-pdf": (job) => processAnalysis(job),
     // Motor pericial v2: mesmo perfil de CPU da análise, mesma fila.
     "compare-process": (job) => processProcessComparison(job),
-    "replica-analyze": (job) => processReplica(job),
+    // "replica-analyze" sai junto com a rota: sem quem enfileire, um handler
+    // registrado só serviria para processar job antigo represado no Redis.
   },
   [QUEUE_NAMES.payments]: {
     "process-webhook": (job) => processWebhook(job),
