@@ -1,4 +1,4 @@
-import LegalLayout, { Secao, Destaque, Tabela, FIRM } from "./LegalLayout.jsx";
+import LegalLayout, { Secao, Destaque, Tabela, FIRM, QUALIFICACAO } from "./LegalLayout.jsx";
 
 /**
  * Termos de Uso.
@@ -28,8 +28,9 @@ export default function Termos() {
     >
       <Secao numero="1" titulo="Quem somos e o que estes termos regem">
         <p>
-          O {FIRM.sistema} é uma plataforma de {FIRM.descricao}. Estes termos regem o uso da
-          plataforma e formam contrato entre você, ou o escritório que você representa, e nós.
+          O {FIRM.sistema} é uma plataforma de {FIRM.descricao}, produto de {QUALIFICACAO}. Estes
+          termos regem o uso da plataforma e formam contrato entre você, ou o escritório que você
+          representa, e nós.
         </p>
         <p>Ao criar uma conta, você declara ter lido e aceito estes termos.</p>
       </Secao>

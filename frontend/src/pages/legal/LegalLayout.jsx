@@ -15,15 +15,31 @@ import { ArrowLeft, ShieldCheck } from "lucide-react";
 export const VIGENCIA = "31 de julho de 2026";
 
 /*
- * A plataforma se identifica por si: o laudo e as páginas públicas respondem
- * pelo ForenseDoc, não por um escritório. Mesma decisão de
- * backend/src/reports/laudoTexts.js (FIRM).
+ * O laudo se identifica pelo sistema (backend/src/reports/laudoTexts.js); as
+ * páginas públicas precisam nomear quem responde juridicamente por ele, que é
+ * a empresa titular do produto.
+ *
+ * TODO(jurídico): preencher `cnpj` assim que a Star Juri for registrada. Até
+ * lá, as páginas dizem que a inscrição está em abertura, em vez de omitir o
+ * dado e deixar o titular sem saber a quem se dirigir (LGPD, art. 9º).
+ *
+ * A versão dos documentos (VIGENCIA aqui e TERMS_VERSION no servidor) NÃO foi
+ * incrementada de propósito. Nomear a parte contratante é mudança relevante e
+ * exige o aviso de 30 dias que os próprios Termos prometem; o momento natural
+ * para isso é a entrada do CNPJ, que é quando a qualificação fica completa.
  */
 export const FIRM = {
-  nome: "ForenseDoc",
+  nome: "Star Juri",
+  cnpj: null,
+  produto: "ForenseDoc",
   descricao: "verificação técnica e validação de cadeia de custódia documental",
   sistema: "ForenseDoc",
 };
+
+/** Qualificação da empresa, com a ressalva enquanto não há CNPJ registrado. */
+export const QUALIFICACAO = FIRM.cnpj
+  ? `${FIRM.nome}, CNPJ ${FIRM.cnpj}`
+  : `${FIRM.nome} (CNPJ em processo de abertura; será informado aqui assim que registrado)`;
 
 export function Secao({ numero, titulo, children }) {
   return (
@@ -114,7 +130,7 @@ export default function LegalLayout({ titulo, resumo, children }) {
 
         <footer className="mt-14 border-t border-surface-border pt-6 text-[13px] text-zinc-500">
           <p>
-            {FIRM.sistema}: {FIRM.descricao}.
+            {FIRM.sistema}: {FIRM.descricao}. Produto de {QUALIFICACAO}.
           </p>
           <p className="mt-2">
             Dúvidas sobre este documento ou sobre tratamento de dados pessoais:{" "}

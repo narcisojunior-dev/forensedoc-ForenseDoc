@@ -1,4 +1,4 @@
-import LegalLayout, { Secao, Destaque, Tabela, FIRM } from "./LegalLayout.jsx";
+import LegalLayout, { Secao, Destaque, Tabela, FIRM, QUALIFICACAO } from "./LegalLayout.jsx";
 
 /**
  * Política de Privacidade.
@@ -38,7 +38,8 @@ export default function Privacidade() {
           linhas={[
             [
               "Seus dados de cadastro e uso da plataforma",
-              `${FIRM.sistema}`,
+              // Quem responde como controlador é a empresa, não o produto.
+              `${FIRM.nome}, titular do ${FIRM.sistema}`,
               "Controlador (art. 5º, VI)",
             ],
             [
@@ -204,7 +205,8 @@ export default function Privacidade() {
         <p>
           O art. 18 da LGPD assegura a você, quanto aos dados de que somos controladores,
           confirmação da existência de tratamento, acesso, correção, anonimização, portabilidade,
-          eliminação, informação sobre compartilhamento e revogação do consentimento.
+          eliminação, informação sobre compartilhamento e revogação do consentimento. O controlador
+          é {QUALIFICACAO}.
         </p>
         <p>
           Para exercer qualquer deles, escreva para{" "}
