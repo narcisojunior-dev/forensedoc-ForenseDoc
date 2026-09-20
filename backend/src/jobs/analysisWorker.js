@@ -8,6 +8,7 @@ import { extractPdfMetadata } from "../services/pdfService.js";
 import { enrichGeography } from "../services/geoEnrichmentService.js";
 import { cleanPdfBase64 } from "../utils/stringUtils.js";
 import { buildCustodyChain } from "../reports/custodyChain.js";
+import { emitirVerificacao } from "../services/verificacaoStore.js";
 import { getPdf } from "../services/objectStorageService.js";
 import { analisarDocumento } from "../engine/analisarDocumento.js";
 import { verificarCoerencia, coerenciaBloqueante } from "../engine/coerenciaLaudo.js";
@@ -19,6 +20,25 @@ function fileHashes(buffer) {
     sha256: crypto.createHash("sha256").update(buffer).digest("hex").toUpperCase(),
     sha1: crypto.createHash("sha1").update(buffer).digest("hex").toUpperCase(),
   };
+}
+
+/**
+ * Emite o registro de verificação pública do laudo.
+ *
+ * Roda em try/catch PRÓPRIO, pelo mesmo motivo do enriquecimento geográfico:
+ * neste ponto o laudo já está COMPLETED e o crédito já foi cobrado. Deixar a
+ * exceção subir cairia no catch do handler, que estorna o crédito e marca
+ * REFUNDED, punindo o cliente por uma falha de registro que não afeta o laudo.
+ * O backfill (`scripts/backfill-verificacoes.js`) recupera o que ficou para
+ * trás.
+ */
+export async function emitirParaAnalise({ analysisId, tenantId, result, substituindo = null }) {
+  try {
+    return await emitirVerificacao({ analysisId, tenantId, result, substituindo });
+  } catch (erro) {
+    console.error(`[AnalysisWorker] Verificação pública não emitida para ${analysisId}:`, erro.message);
+    return null;
+  }
 }
 
 export async function processAnalysis(job) {
@@ -113,6 +133,9 @@ export async function processAnalysis(job) {
       where: { id: analysisId },
       data: { status: "COMPLETED", result, processingCompletedAt: new Date() },
     });
+
+    // Identidade pública do laudo: código, hash e QR só existem a partir daqui.
+    await emitirParaAnalise({ analysisId, tenantId, result });
 
     // Só in-app: o usuário está olhando a tela fazendo polling, um e-mail a
     // cada laudo concluído seria ruído.
