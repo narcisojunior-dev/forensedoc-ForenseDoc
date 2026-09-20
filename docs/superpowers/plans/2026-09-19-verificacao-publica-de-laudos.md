@@ -1666,7 +1666,7 @@ Criar `frontend/src/tests/verificarLaudo.test.jsx`:
 ```jsx
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
 const http = vi.hoisted(() => ({ get: vi.fn() }));
 vi.mock("../lib/axios", () => ({ api: http }));
@@ -1699,14 +1699,21 @@ const valido = {
   },
 };
 
-beforeEach(() => http.get.mockReset());
+/*
+ * NÃO há limpeza do mock entre os testes, e isso é deliberado. No vitest
+ * 4.1.10, limpar (mockClear ou mockReset) um mock que registrou uma chamada
+ * rejeitada faz esse resultado ser relatado como erro do teste que o produziu,
+ * mesmo com a rejeição capturada. O isolamento vem de cada teste definir a sua
+ * implementação e de as asserções olharem a ÚLTIMA chamada.
+ */
+const ultimaChamada = () => http.get.mock.calls.at(-1)?.[0];
 
 describe("VerificarLaudo", () => {
   it("consulta sozinha quando a chave vem na URL do QR", async () => {
     http.get.mockResolvedValue(valido);
     renderizar("/verificar/FD-7KQ2-9XMR-4TVB");
 
-    await waitFor(() => expect(http.get).toHaveBeenCalledWith("/public/laudos/FD-7KQ2-9XMR-4TVB"));
+    await waitFor(() => expect(ultimaChamada()).toBe("/public/laudos/FD-7KQ2-9XMR-4TVB"));
     expect(await screen.findByText(/laudo aut[êe]ntico/i)).toBeInTheDocument();
   });
 
@@ -1733,11 +1740,17 @@ describe("VerificarLaudo", () => {
     fireEvent.change(screen.getByLabelText(/c[óo]digo ou hash/i), { target: { value: "  " + "a".repeat(64) + " " } });
     fireEvent.click(screen.getByRole("button", { name: /verificar/i }));
 
-    await waitFor(() => expect(http.get).toHaveBeenCalledWith(`/public/laudos/${"a".repeat(64)}`));
+    await waitFor(() => expect(ultimaChamada()).toBe(`/public/laudos/${"a".repeat(64)}`));
   });
 
   it("diz que não encontrou sem sugerir que a chave existe", async () => {
-    http.get.mockRejectedValue({ response: { status: 404 } });
+    // O axios rejeita com um Error que carrega `.response`, não com um objeto
+    // simples. Rejeitar objeto puro escapa da detecção de erro do vitest e o
+    // teste falha por motivo que não existe em produção.
+    const erro404 = Object.assign(new Error("Request failed with status code 404"), {
+      response: { status: 404 },
+    });
+    http.get.mockRejectedValue(erro404);
     renderizar("/verificar/FD-0000-0000-0000");
 
     expect(await screen.findByText(/nenhum laudo/i)).toBeInTheDocument();

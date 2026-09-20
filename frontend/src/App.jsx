@@ -1,4 +1,4 @@
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "react-hot-toast";
 import { captureFounderCode } from "./utils/founderInvite.js";
 
@@ -23,7 +23,6 @@ import DashboardLayout from "./components/Layout/DashboardLayout.jsx";
 // Rotas Privadas (SaaS)
 import Dashboard from "./pages/Dashboard.jsx";
 import Analyze from "./pages/Analyze.jsx";
-import Replica from "./pages/Replica.jsx";
 import Laudo from "./pages/Laudo.jsx";
 import History from "./pages/History.jsx";
 import Plans from "./pages/Plans.jsx";
@@ -36,6 +35,7 @@ import AdminRoute from "./components/AdminRoute.jsx";
 import ForenseDocOld from "./ForenseDoc.jsx";
 import Termos from "./pages/legal/Termos.jsx";
 import Privacidade from "./pages/legal/Privacidade.jsx";
+import VerificarLaudo from "./pages/VerificarLaudo.jsx";
 
 function App() {
   return (
@@ -55,6 +55,12 @@ function App() {
             num contrato analisado não tem conta aqui (LGPD, art. 9º). */}
         <Route path="/termos" element={<Termos />} />
         <Route path="/privacidade" element={<Privacidade />} />
+
+        {/* Verificação de laudo. Pública pelo mesmo motivo das páginas
+            jurídicas: quem confere autenticidade não tem conta aqui. A rota
+            com parâmetro é o destino do QR impresso no PDF. */}
+        <Route path="/verificar" element={<VerificarLaudo />} />
+        <Route path="/verificar/:chave" element={<VerificarLaudo />} />
         {/* A v2.2 continua acessível, mas atrás de login.
             Como rota pública ela aceitava upload de contrato — documento com
             dados pessoais do cliente — de qualquer visitante, e o enviava para
@@ -85,7 +91,16 @@ function App() {
           <Route index element={<Dashboard />} />
           <Route path="analyze" element={<Analyze />} />
           <Route path="history" element={<History />} />
-          <Route path="replica" element={<Replica />} />
+          {/*
+            /dashboard/replica desligada: o Motor de Réplicas ainda está em
+            desenvolvimento e não vai ao ar nesta versão.
+
+            O redirecionamento fica no lugar da rota porque quem tem a URL
+            salva cairia na casca do dashboard com o miolo vazio — sem rota
+            filha correspondente o <Outlet> não renderiza nada, e uma tela em
+            branco parece defeito, não recurso indisponível.
+          */}
+          <Route path="replica" element={<Navigate to="/dashboard" replace />} />
           <Route path="laudo/:id" element={<Laudo />} />
           <Route path="plans" element={<Plans />} />
           <Route path="settings" element={<Settings />} />
