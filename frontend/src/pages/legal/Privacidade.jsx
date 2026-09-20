@@ -231,7 +231,36 @@ export default function Privacidade() {
         </Destaque>
       </Secao>
 
-      <Secao numero="8" titulo="Cookies">
+      <Secao numero="8" titulo="Verificação pública de laudo">
+        <p>
+          Cada laudo emitido recebe um código de verificação e um resumo criptográfico SHA-256 do
+          seu conteúdo, impressos no documento junto de um QR Code. Qualquer pessoa pode consultar
+          esse código em nossa página de verificação, sem cadastro, para confirmar que o laudo em
+          mãos foi realmente emitido por nós e não foi alterado.
+        </p>
+        <p>
+          A consulta exibe a situação do laudo, a data de emissão, os resumos criptográficos e o
+          nome e o CPF do titular <strong>parcialmente ocultos</strong>. O mascaramento é aplicado
+          no momento da emissão e gravado assim: a página não tem acesso ao dado completo. Exibimos
+          o mínimo necessário para que quem já tem o laudo confirme que se trata do mesmo documento,
+          sem revelar a identidade a quem não a conhece (art. 6º, III). A página não informa o
+          resultado da perícia: autenticidade e conteúdo são perguntas distintas, e só a primeira é
+          pública.
+        </p>
+        <p>
+          O código de verificação tem entropia suficiente para não ser adivinhado, e a consulta é
+          limitada por origem. Registramos cada consulta em nossa trilha de auditoria, com o
+          endereço IP, pelo prazo de 12 meses, para identificar tentativas de varredura.
+        </p>
+        <p>
+          Atendido o pedido de eliminação do titular, os dados pessoais saem do registro de
+          verificação e a página passa a exibir apenas os resumos criptográficos e a confirmação de
+          que o laudo foi emitido. Os resumos permanecem porque não identificam ninguém isoladamente
+          e são o que permite a quem recebeu o documento continuar conferindo sua integridade.
+        </p>
+      </Secao>
+
+      <Secao numero="9" titulo="Cookies">
         <p>
           Utilizamos apenas armazenamento estritamente necessário ao funcionamento: um cookie de
           sessão que mantém você conectado. Ele é restrito ao nosso domínio, inacessível a scripts e
@@ -240,7 +269,7 @@ export default function Privacidade() {
         <p>Não utilizamos cookies de publicidade nem de rastreamento de terceiros.</p>
       </Secao>
 
-      <Secao numero="9" titulo="Alterações">
+      <Secao numero="10" titulo="Alterações">
         <p>
           Esta política pode ser atualizada para refletir mudanças no serviço ou na legislação.
           Alterações relevantes serão comunicadas por e-mail e pela plataforma, com antecedência

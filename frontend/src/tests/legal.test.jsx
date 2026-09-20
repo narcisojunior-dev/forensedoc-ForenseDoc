@@ -87,6 +87,16 @@ describe("Política de Privacidade", () => {
     expect(screen.getByText(/art\. 33, IX/i)).toBeInTheDocument();
   });
 
+  it("declara a página pública de verificação de laudo", () => {
+    renderizar(<Privacidade />);
+    expect(screen.getByText(/verifica(ç|c)ão p(ú|u)blica de laudo/i)).toBeInTheDocument();
+  });
+
+  it("explica que o titular aparece de forma parcial e por quê", () => {
+    renderizar(<Privacidade />);
+    expect(screen.getByText(/parcialmente ocultos/i)).toBeInTheDocument();
+  });
+
   it("explica que o laudo sobrevive ao expurgo do original", () => {
     renderizar(<Privacidade />);
     expect(screen.getByText(/SHA-256 e SHA-1 do arquivo analisado/i)).toBeInTheDocument();
