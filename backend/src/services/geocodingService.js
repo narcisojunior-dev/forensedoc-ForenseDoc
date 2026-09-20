@@ -51,8 +51,11 @@ function sameCity(a, b) {
 }
 
 export function extractCep(text) {
-  const m = String(text || "").match(/\b(\d{5})-?(\d{3})\b/);
-  return m ? `${m[1]}${m[2]}` : null;
+  // O ponto de milhar aparece com frequência no endereço digitado ("69.435-000")
+  // e, sem ele no padrão, o CEP não era reconhecido e a residência ficava sem
+  // coordenada de referência.
+  const m = String(text || "").match(/\b(\d{2}\.?\d{3})-?(\d{3})\b/);
+  return m ? `${m[1].replace(".", "")}${m[2]}` : null;
 }
 
 // Cidade e UF pedidas no endereço, para verificar o retorno do Nominatim.

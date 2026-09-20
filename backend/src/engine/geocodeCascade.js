@@ -92,7 +92,7 @@ export function geocodeResultMatches(rawQuery, displayName) {
     if (!ufMatches) return false;
   }
 
-  const cep = raw.match(/\b\d{5}\s*-?\s*\d{3}\b/)?.[0]?.replace(/\D/g, "");
+  const cep = raw.match(/\b\d{2}\.?\d{3}\s*-?\s*\d{3}\b/)?.[0]?.replace(/\D/g, "");
   if (cep && display.replace(/\D/g, "").includes(cep)) return true;
 
   const cityCandidates = extractCityCandidates(raw);
