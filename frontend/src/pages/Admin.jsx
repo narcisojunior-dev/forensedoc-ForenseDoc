@@ -17,7 +17,8 @@ const TABS = [
 
 export default function Admin() {
   const [active, setActive] = useState("dashboard");
-  const ActiveComponent = TABS.find((t) => t.id === active).Component;
+  const abaAtiva = TABS.find((t) => t.id === active) || TABS[0];
+  const ActiveComponent = abaAtiva.Component;
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -31,25 +32,44 @@ export default function Admin() {
         </p>
       </header>
 
-      <div className="flex gap-1 border-b border-surface-border">
-        {TABS.map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActive(tab.id)}
-            className={cn(
-              "flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors",
-              active === tab.id
-                ? "border-primary text-primary"
-                : "border-transparent text-zinc-400 hover:text-zinc-200"
-            )}
-          >
-            <tab.icon className="w-4 h-4" />
-            {tab.label}
-          </button>
-        ))}
+      {/*
+        A faixa rola na horizontal no lugar de quebrar em duas linhas: cinco
+        abas não cabem na largura de um celular, e uma segunda linha de abas
+        empurra o conteúdo para fora da primeira dobra justo quando o operador
+        está consultando o painel no meio de um incidente.
+      */}
+      <div
+        role="tablist"
+        aria-label="Seções da administração"
+        className="flex gap-1 overflow-x-auto border-b border-surface-border [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
+        {TABS.map((tab) => {
+          const selecionada = active === tab.id;
+          return (
+            <button
+              key={tab.id}
+              role="tab"
+              id={`aba-${tab.id}`}
+              aria-selected={selecionada}
+              aria-controls={`painel-${tab.id}`}
+              onClick={() => setActive(tab.id)}
+              className={cn(
+                "flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors",
+                selecionada
+                  ? "border-primary text-primary"
+                  : "border-transparent text-zinc-400 hover:text-zinc-200"
+              )}
+            >
+              <tab.icon className="w-4 h-4" />
+              {tab.label}
+            </button>
+          );
+        })}
       </div>
 
-      <ActiveComponent />
+      <div role="tabpanel" id={`painel-${abaAtiva.id}`} aria-labelledby={`aba-${abaAtiva.id}`}>
+        <ActiveComponent />
+      </div>
     </div>
   );
 }
