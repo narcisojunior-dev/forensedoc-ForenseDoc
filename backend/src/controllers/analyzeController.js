@@ -15,6 +15,7 @@ import { validatePdfPayload } from "../utils/pdfValidation.js";
 import { buildReportPdf } from "../services/reportPdfService.js";
 import { haversineKm } from "../utils/geoUtils.js";
 import { recomputeDerived } from "../services/analysisRecompute.js";
+import { substituirVerificacaoVigente } from "../services/verificacaoStore.js";
 import { coerenciaBloqueante } from "../engine/coerenciaLaudo.js";
 import { geocodeAddress, reverseGeocode } from "../services/geocodingService.js";
 import { ESTADO_CONFRONTO, avaliarConflitoReferencia, descreverEstadoConfronto, validarFormaDaReferencia } from "../utils/referenciaResidencial.js";
@@ -453,6 +454,10 @@ export async function correctAnalysisGeo(req, res) {
 
     await prisma.analysis.update({ where: { id: analysis.id }, data: { result: corrigido } });
 
+    // O laudo mudou de conteúdo: o que foi impresso antes deixa de valer, e a
+    // página pública precisa apontar para a emissão nova.
+    await substituirVerificacaoVigente(analysis.id, req.tenantId, corrigido);
+
     await prisma.auditLog
       .create({
         data: {
@@ -691,6 +696,10 @@ export async function reviewAnalysisFields(req, res) {
     const corrigido = recomputeDerived(result, extracted);
 
     await prisma.analysis.update({ where: { id: analysis.id }, data: { result: corrigido } });
+
+    // O laudo mudou de conteúdo: o que foi impresso antes deixa de valer, e a
+    // página pública precisa apontar para a emissão nova.
+    await substituirVerificacaoVigente(analysis.id, req.tenantId, corrigido);
 
     await prisma.auditLog
       .create({
