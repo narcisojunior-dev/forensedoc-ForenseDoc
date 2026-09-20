@@ -1976,6 +1976,10 @@ function sectionExecutiveSummary(ctx, sumario, reportId) {
     paragraph(ctx, "Sem irregularidade crítica automática conclusiva. Os dados disponíveis não produziram alerta grave, sem prejuízo da revisão humana do contrato e dos logs originais.", { size: 9 });
   }
   for (const f of sumario.findings || []) {
+    if (ctx.tema === "modelo") {
+      temaModelo.achadoPlacar(ctx, { severidade: f.severity, titulo: f.title, texto: f.text });
+      continue;
+    }
     reserve(ctx, 52);
     const { doc, contentWidth } = ctx;
     doc
@@ -2035,6 +2039,7 @@ function geoScale(ctx, geo) {
   const { doc, contentWidth } = ctx;
   const H = 165;
   reserve(ctx, H + 8);
+  if (ctx.tema === "modelo") temaModelo.fundoParaBloco(ctx, H + 8);
   const y0 = doc.y + 4;
   const xIni = MARGIN + 30;
   const xFim = MARGIN + contentWidth - 30;
@@ -2156,6 +2161,7 @@ function sectionLegal(ctx, extracted = {}, result = {}) {
 }
 
 function legalNotice(ctx, timestamp) {
+  if (ctx.tema === "modelo") return temaModelo.avisoLegalBloco(ctx, avisoLegal(timestamp));
   const { doc, contentWidth } = ctx;
   doc.moveDown(0.5);
   reserve(ctx, 96); // régua + aviso legal inteiro, que não se divide bem

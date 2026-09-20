@@ -67,8 +67,8 @@ export const LARGURA_TEXTO = LARGURA_CARTAO - PAD_X * 2;
 export const MARGEM_TOPO = 62;
 export const MARGEM_RODAPE = 58;
 
-const PAD_TOPO = 12;
-const PAD_BASE = 12;
+const PAD_TOPO = 10;
+const PAD_BASE = 9;
 const RAIO = 4;
 
 /** Cores do tema clássico traduzidas para a paleta do modelo. */
@@ -206,7 +206,7 @@ export function pintarRodapes(doc, sha256) {
 export function abrirCartao(ctx) {
   fecharCartao(ctx);
   const { doc } = ctx;
-  if (espacoLivre(doc) < 54) doc.addPage();
+  if (espacoLivre(doc) < 40) doc.addPage();
   ctx.cartao = { pagina: paginaAtual(doc), y0: doc.y - PAD_TOPO, segmentos: [] };
   fundo(doc, doc.y - PAD_TOPO, PAD_TOPO, { topo: true });
 }
@@ -229,7 +229,7 @@ export function fecharCartao(ctx) {
     doc.restore();
   }
   irParaPagina(doc, atual);
-  doc.y = segmentos.at(-1).y1 + 10;
+  doc.y = segmentos.at(-1).y1 + 7;
   doc.x = MARGEM_TEXTO;
   ctx.cartao = null;
 }
@@ -314,13 +314,79 @@ function reservar(ctx, pontos) {
 
 // ─── Primitivas de conteúdo ──────────────────────────────────────────────────
 
+/**
+ * Fundo do cartão para um bloco desenhado fora das primitivas, como o gráfico
+ * de distâncias do sumário. Sem isto o desenho cai sobre o cinza da página.
+ */
+export function fundoParaBloco(ctx, altura) {
+  garantirCartao(ctx);
+  fundoDoBloco(ctx.doc, altura);
+}
+
+/**
+ * Linha do placar de gravidade do sumário executivo.
+ *
+ * A gravidade fica numa coluna própria, como na tela, e o texto corre alinhado
+ * à esquerda. Em prosa justificada, as linhas curtas do placar abriam vãos
+ * enormes entre as palavras.
+ */
+export function achadoPlacar(ctx, { severidade, titulo, texto }) {
+  const { doc } = ctx;
+  garantirCartao(ctx);
+  const paleta = {
+    ALTA: { fundo: COR.perigoFundo, tinta: COR.perigoTexto },
+    CRÍTICO: { fundo: COR.perigoFundo, tinta: COR.perigoTexto },
+    MÉDIA: { fundo: COR.alertaFundo, tinta: COR.alertaTexto },
+    INFO: { fundo: "#eef3f5", tinta: COR.sub },
+    FAVORÁVEL: { fundo: COR.okFundo, tinta: COR.okTexto },
+  }[String(severidade || "").toUpperCase()] || { fundo: "#eef3f5", tinta: COR.rotulo };
+
+  const larguraSelo = 54;
+  const larguraTexto = LARGURA_TEXTO - larguraSelo - 10;
+  doc.fontSize(8.2).font("Inter");
+  const alturaTexto = doc.heightOfString(`${titulo} ${texto || ""}`.trim(), { width: larguraTexto, lineGap: 1.3 });
+  const altura = Math.max(alturaTexto, 14) + 8;
+
+  reservar(ctx, altura + 4);
+  const pagina = paginaAtual(doc);
+  const y = doc.y;
+  fundoDoBloco(doc, altura);
+
+  doc.save();
+  doc
+    .roundedRect(MARGEM_TEXTO, y + 1.5, larguraSelo, 12, 2)
+    .fillColor(paleta.fundo)
+    .fill();
+  doc.restore();
+  doc
+    .fontSize(6.6)
+    .font("Inter-Bold")
+    .fillColor(paleta.tinta)
+    .text(String(severidade || "").toUpperCase(), MARGEM_TEXTO, y + 5, {
+      width: larguraSelo,
+      align: "center",
+      lineBreak: false,
+    });
+
+  const x = MARGEM_TEXTO + larguraSelo + 10;
+  doc.fontSize(8.2).font("Inter-Bold").fillColor(COR.texto);
+  if (texto) {
+    doc.text(`${titulo} `, x, y + 1, { width: larguraTexto, lineGap: 1.3, continued: true });
+    doc.font("Inter").fillColor(COR.notaTexto).text(texto, { width: larguraTexto, lineGap: 1.3 });
+  } else {
+    doc.text(titulo, x, y + 1, { width: larguraTexto, lineGap: 1.3 });
+  }
+
+  fecharBloco(doc, pagina, y + altura, 3);
+}
+
 /** Título de seção: bolinha, texto em versalete e filete, dentro do cartão. */
 export function heading(ctx, titulo, { danger = false } = {}) {
   const { doc } = ctx;
   abrirCartao(ctx);
   const tinta = danger ? COR.tituloAlerta : COR.titulo;
   const y = doc.y;
-  const altura = 22;
+  const altura = 20;
   fundo(doc, y, altura);
 
   doc.save();
@@ -408,7 +474,7 @@ export function field(ctx, rotulo, valor, { mono = false } = {}) {
   const altRotulo = doc.heightOfString(`${rotulo}`, { width: larguraRotulo });
   doc.fontSize(corpoValor).font(mono ? "Mono" : "Inter-Bold");
   const altValor = doc.heightOfString(texto, { width: larguraValor, align: "right" });
-  const altura = Math.max(altRotulo, altValor) + 7;
+  const altura = Math.max(altRotulo, altValor) + 5;
 
   reservar(ctx, altura + 4);
   const pagina = paginaAtual(doc);
@@ -453,7 +519,7 @@ export function badge(ctx, rotulo, valor, ok) {
   doc.fontSize(7.2).font("Inter-Bold");
   const largura = doc.widthOfString(texto, { characterSpacing: 0.4 }) + 18;
   const alturaPilula = 13;
-  const altura = 22;
+  const altura = 20;
 
   reservar(ctx, altura + 4);
   const pagina = paginaAtual(doc);
@@ -506,7 +572,7 @@ export function paragraph(ctx, texto, { color, size = 9.5, italic = false } = {}
   doc.fontSize(corpo).font(fonte);
   const largura = nota ? LARGURA_TEXTO - 22 : LARGURA_TEXTO;
   const alturaTexto = doc.heightOfString(String(texto), { width: largura, align: "justify", lineGap: 1.6 });
-  const altura = nota ? alturaTexto + 18 : alturaTexto + 8;
+  const altura = nota ? alturaTexto + 14 : alturaTexto + 6;
 
   // Bloco inteiro na mesma folha sempre que couber: a caixa da nota é desenhada
   // com a altura medida, e parti-la deixaria a metade de baixo sem fundo.
@@ -547,7 +613,7 @@ export function bullet(ctx, texto, { color, size = 9 } = {}) {
   const tinta = cor(color) || COR.texto;
   doc.fontSize(8.2).font("Inter");
   const alturaTexto = doc.heightOfString(String(texto), { width: LARGURA_TEXTO - 14, lineGap: 1.4 });
-  const altura = alturaTexto + 7;
+  const altura = alturaTexto + 6;
 
   reservar(ctx, altura + 4);
   const pagina = paginaAtual(doc);
@@ -652,6 +718,39 @@ export function table(ctx, colunas, linhas, { size = 7.5, destaque = null } = {}
     doc.y = y + altura;
   });
   doc.moveDown(0.3);
+}
+
+/**
+ * Aviso legal do fim do laudo.
+ *
+ * Desenhado como bloco próprio: escrito direto no documento, ele ficava sem o
+ * fundo do cartão e a borda do cartão cortava a última linha ao meio.
+ */
+export function avisoLegalBloco(ctx, texto) {
+  const { doc } = ctx;
+  garantirCartao(ctx);
+  doc.fontSize(7.2).font("Helvetica-Oblique");
+  const alturaTexto = doc.heightOfString(String(texto), { width: LARGURA_TEXTO, align: "justify", lineGap: 1.2 });
+  const altura = alturaTexto + 14;
+
+  reservar(ctx, altura + 6);
+  const pagina = paginaAtual(doc);
+  const y = doc.y;
+  fundoDoBloco(doc, altura);
+
+  doc
+    .moveTo(MARGEM_TEXTO, y + 4)
+    .lineTo(MARGEM_TEXTO + LARGURA_TEXTO, y + 4)
+    .lineWidth(0.5)
+    .strokeColor(COR.borda)
+    .stroke();
+  doc
+    .fontSize(7.2)
+    .font("Helvetica-Oblique")
+    .fillColor(COR.vazio)
+    .text(String(texto), MARGEM_TEXTO, y + 10, { width: LARGURA_TEXTO, align: "justify", lineGap: 1.2 });
+
+  fecharBloco(doc, pagina, y + altura, 4);
 }
 
 // ─── Capa ────────────────────────────────────────────────────────────────────
