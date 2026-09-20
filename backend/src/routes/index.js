@@ -8,7 +8,7 @@ import billingRoutes from "./billingRoutes.js";
 import webhookRoutes from "./webhookRoutes.js";
 import notificationRoutes from "./notificationRoutes.js";
 import adminRoutes from "./adminRoutes.js";
-import replicaRoutes from "./replicaRoutes.js";
+import publicRoutes from "./publicRoutes.js";
 import { startProcessComparison } from "../controllers/processComparisonController.js";
 import { getMapTile } from "../controllers/mapTileController.js";
 import { requireAuth } from "../middleware/auth.js";
@@ -49,6 +49,10 @@ function requestTimeout(ms) {
 router.use("/auth", authRoutes);
 router.use("/webhooks", webhookRoutes);
 
+// Verificação pública de laudo. Fica ao lado de /auth e /webhooks porque, como
+// elas, não passa pelo tenantLimiter: não há tenant no request.
+router.use("/public", publicRoutes);
+
 // Os demais aplicam requireAuth + tenantLimiter internamente (o limitador
 // precisa do req.tenantId que o requireAuth injeta).
 router.use("/tenant", tenantRoutes);
@@ -56,8 +60,10 @@ router.use("/credits", creditRoutes);
 router.use("/billing", billingRoutes);
 router.use("/notifications", notificationRoutes);
 router.use("/admin", adminRoutes);
-// Réplica processual (Motor de Réplicas). Autenticação e limites por rota.
-router.use("/replicas", replicaRoutes);
+// Réplica processual (Motor de Réplicas): NÃO montada. O motor ainda está em
+// desenvolvimento e não vai ao ar nesta versão, então /api/replicas responde
+// 404 como qualquer rota inexistente. O controller, o store e o engine seguem
+// no repositório; religar é devolver o import e o router.use aqui.
 
 // Rotas de Análise (Módulo 4 — assíncrono via BullMQ, ver worker.js)
 router.post(

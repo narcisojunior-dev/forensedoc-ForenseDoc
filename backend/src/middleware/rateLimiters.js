@@ -139,3 +139,17 @@ export const analyzeLimiter = createLimiter({
   },
   prefix: "rl:analyze:",
 });
+
+/**
+ * Consulta pública de laudo.
+ *
+ * O código tem 60 bits, então não é enumerável nem sem limite. O limite existe
+ * para o outro risco: alguém varrendo a rota para medir tempo de resposta ou
+ * para derrubar o banco com consultas de graça, sem precisar de conta.
+ */
+export const verificacaoLimiter = createLimiter({
+  windowMs: 60 * 1000,
+  max: 20,
+  message: { error: "Muitas consultas. Aguarde um momento." },
+  prefix: "rl:verificacao:",
+});
