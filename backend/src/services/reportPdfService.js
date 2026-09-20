@@ -2015,15 +2015,74 @@ function sectionProcessComparison(ctx, confronto) {
 }
 
 /** Sumário executivo de irregularidades, ao final do laudo. */
+/** Identificação que abre a folha do sumário, igual à da tela. */
+function identificacaoDoSumario(sumario, reportId) {
+  const contrato = [sumario.bank, sumario.contractNumber].filter(Boolean).join(" ");
+  return {
+    marca: "ForenseDoc",
+    subMarca: "Verificação de cadeia de custódia documental",
+    etiqueta: "Sumário executivo",
+    linhas: [
+      reportId ? `Laudo ${reportId}` : null,
+      [contrato || null, sumario.cpf ? `CPF ${sumario.cpf}` : null].filter(Boolean).join(" · ") || null,
+    ].filter(Boolean),
+  };
+}
+
+/** Cabeçalho da folha no tema clássico, sem os recursos do cartão. */
+function cabecalhoSumarioClassico(ctx, dados) {
+  const { doc, contentWidth } = ctx;
+  const altura = 46;
+  reserve(ctx, altura + 90);
+  const y = doc.y;
+  const meia = contentWidth / 2;
+
+  doc.save();
+  doc.rect(MARGIN, y, contentWidth, 2).fillColor(ACCENT).fill();
+  doc.restore();
+
+  doc.fontSize(10).font("Helvetica-Bold").fillColor(ACCENT)
+    .text(dados.marca.toUpperCase(), MARGIN, y + 10, { width: meia, characterSpacing: 0.8, lineBreak: false });
+  doc.fontSize(6).font("Helvetica").fillColor(MUTED)
+    .text(dados.subMarca.toUpperCase(), MARGIN, y + 24, { width: meia + 40, characterSpacing: 0.4, lineBreak: false });
+
+  doc.fontSize(7).font("Helvetica-Bold").fillColor(INK)
+    .text(dados.etiqueta.toUpperCase(), MARGIN + meia, y + 9, { width: meia, align: "right", characterSpacing: 0.6, lineBreak: false });
+  let linhaY = y + 20;
+  for (const linha of dados.linhas) {
+    doc.fontSize(6.6).font("Helvetica").fillColor(MUTED)
+      .text(linha, MARGIN + meia - 60, linhaY, { width: meia + 60, align: "right", lineBreak: false });
+    linhaY += 9;
+  }
+
+  doc.moveTo(MARGIN, y + altura - 5).lineTo(MARGIN + contentWidth, y + altura - 5)
+    .lineWidth(0.7).strokeColor(RULE).stroke();
+  doc.x = MARGIN;
+  doc.y = y + altura;
+}
+
 function sectionExecutiveSummary(ctx, sumario, reportId) {
   if (!sumario) return;
-  // Mesma regra do anexo: o sumário ganha página limpa quando sobra pouco, e
-  // segue na página corrente quando ela mal foi usada.
-  reserve(ctx, 260);
-  heading(ctx, `Sumário executivo de irregularidades${reportId ? ` · ${reportId}` : ""}`);
-  // Não exibir classificações agregadas antigas ao emitir resultado legado.
-  field(ctx, "Instituição / contrato", [sumario.bank, sumario.contractNumber].filter(Boolean).join(" · "));
-  field(ctx, "CPF", sumario.cpf);
+  /*
+   * O sumário abre com o MESMO cabeçalho da tela, e não com um título de seção
+   * qualquer. Na tela ele é peça destacável, e é por "FORENSEDOC · VERIFICAÇÃO
+   * DE CADEIA DE CUSTÓDIA DOCUMENTAL · SUMÁRIO EXECUTIVO" que o operador o
+   * procura. O conteúdo já saía no PDF antes disto, mas como seção corrida no
+   * meio do laudo: quem folheava não reconhecia o bloco e concluía que o
+   * sumário não tinha sido impresso.
+   *
+   * O cabeçalho reserva a própria altura mais o começo do conteúdo, pelo mesmo
+   * motivo do anexo de imagens: cabeçalho sozinho no pé da página é pior que
+   * nenhum cabeçalho, e a quebra incondicional abriria folha em branco sempre
+   * que o corpo do laudo terminasse no alto da página.
+   */
+  const identificacao = identificacaoDoSumario(sumario, reportId);
+  if (ctx.tema === "modelo") temaModelo.cabecalhoSumario(ctx, identificacao);
+  else cabecalhoSumarioClassico(ctx, identificacao);
+
+  heading(ctx, "Irregularidades do laudo ForenseDoc, em síntese");
+  // Banco, contrato e CPF já estão no cabeçalho: repeti-los aqui como campos
+  // duplicaria a mesma identificação a duas linhas de distância.
   field(ctx, "Orientação de revisão", "REVISÃO DOCUMENTAL NECESSÁRIA");
   paragraph(ctx, "Conferir as evidências e diligências de cada item. As classificações individuais orientam a revisão; não atestam fraude, autoria ou validade jurídica.", { color: MUTED, size: 8.5 });
   if (sumario.intro) paragraph(ctx, sumario.intro, { size: 9 });

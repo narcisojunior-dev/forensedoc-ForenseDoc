@@ -390,6 +390,90 @@ export function achadoPlacar(ctx, { severidade, titulo, texto }) {
   fecharBloco(doc, pagina, y + altura, 3);
 }
 
+/**
+ * Cabeçalho da folha do sumário executivo.
+ *
+ * Na tela o sumário é uma peça destacável: tem marca própria, a etiqueta
+ * "SUMÁRIO EXECUTIVO" e a linha de banco, contrato e CPF. É por esse cabeçalho
+ * que o operador reconhece o bloco ao folhear. Sem ele, o sumário virava mais
+ * uma seção corrida no meio do laudo e quem procurava concluía que não tinha
+ * sido impresso.
+ *
+ * A identificação vai no cabeçalho, e não em linhas de campo abaixo dele, pelo
+ * mesmo motivo da tela: quem confere precisa ver de relance se está olhando o
+ * laudo certo, sem ler a seção inteira.
+ */
+export function cabecalhoSumario(ctx, { marca, subMarca, etiqueta, linhas = [] }) {
+  const { doc } = ctx;
+  abrirCartao(ctx);
+  const altura = 46;
+  // Reserva a folha inteira do cabeçalho mais o começo do conteúdo: cabeçalho
+  // sozinho no pé da página é pior que não ter cabeçalho.
+  reservar(ctx, altura + 90);
+  const y = doc.y;
+  fundo(doc, y, altura);
+
+  // Faixa no alto, como na capa: marca visualmente o início de uma peça nova.
+  doc.save();
+  const degrade = doc.linearGradient(MARGEM_TEXTO, 0, MARGEM_TEXTO + LARGURA_TEXTO, 0);
+  degrade.stop(0, "#0b88aa").stop(0.7, "#0b5f78").stop(1, "#d7a13a");
+  doc.rect(MARGEM_TEXTO, y, LARGURA_TEXTO, 2.5).fill(degrade);
+  doc.restore();
+
+  const meia = LARGURA_TEXTO / 2;
+
+  doc
+    .fontSize(10)
+    .font("Courier-Bold")
+    .fillColor(COR.titulo)
+    .text(String(marca).toUpperCase(), MARGEM_TEXTO, y + 10, {
+      width: meia,
+      characterSpacing: 0.8,
+      lineBreak: false,
+    });
+  doc
+    .fontSize(6)
+    .font("Courier")
+    .fillColor(COR.rotulo)
+    .text(String(subMarca).toUpperCase(), MARGEM_TEXTO, y + 24, {
+      width: meia + 40,
+      characterSpacing: 0.4,
+      lineBreak: false,
+    });
+
+  const xDireita = MARGEM_TEXTO + meia;
+  doc
+    .fontSize(7)
+    .font("Courier-Bold")
+    .fillColor(COR.sub)
+    .text(String(etiqueta).toUpperCase(), xDireita, y + 9, {
+      width: meia,
+      align: "right",
+      characterSpacing: 0.6,
+      lineBreak: false,
+    });
+
+  let linhaY = y + 20;
+  for (const linha of linhas.filter(Boolean)) {
+    doc
+      .fontSize(6.6)
+      .font("Courier")
+      .fillColor(COR.rotulo)
+      .text(linha, xDireita - 60, linhaY, { width: meia + 60, align: "right", lineBreak: false });
+    linhaY += 9;
+  }
+
+  doc
+    .moveTo(MARGEM_TEXTO, y + altura - 5)
+    .lineTo(MARGEM_TEXTO + LARGURA_TEXTO, y + altura - 5)
+    .lineWidth(0.7)
+    .strokeColor(COR.borda)
+    .stroke();
+
+  doc.x = MARGEM_TEXTO;
+  doc.y = y + altura;
+}
+
 /** Título de seção: bolinha, texto em versalete e filete, dentro do cartão. */
 export function heading(ctx, titulo, { danger = false } = {}) {
   const { doc } = ctx;
