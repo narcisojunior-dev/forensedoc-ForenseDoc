@@ -26,6 +26,7 @@ export const ESTADO_CONFRONTO = {
   RECUSADO_CONFLITO: "RECUSADO_CONFLITO",
   LIBERADO_PELO_OPERADOR: "LIBERADO_PELO_OPERADOR",
   INDISPONIVEL_NAO_INFORMADO: "INDISPONIVEL_NAO_INFORMADO",
+  DIVERGENCIA_CADASTRAL: "DIVERGENCIA_CADASTRAL",
 };
 
 const UFS = ["AC", "AL", "AM", "AP", "BA", "CE", "DF", "ES", "GO", "MA", "MG", "MS", "MT", "PA", "PB", "PE", "PI", "PR", "RJ", "RN", "RO", "RR", "RS", "SC", "SE", "SP", "TO"];
@@ -156,6 +157,13 @@ export function descreverEstadoConfronto(home) {
         ? ` O instrumento registra o endereço do contratante como "${home.endereco_literal || "não informado"}", de modo que o confronto de residência não pode ser feito a partir deste arquivo; essa lacuna é atribuível à instituição.`
         : "";
       return `CONFRONTO RECUSADO: ${home.conflito?.descricao || "conflito entre o endereço informado e o do instrumento"}. Nenhuma distância, mapa ou selo de risco é calculado a partir de uma referência que o próprio instrumento contradiz. Endereço informado: ${home.conflito?.manual?.texto || "coordenada informada pelo operador"}. Cidade, UF e CEP do instrumento: ${instrumentoTexto}.${semEnderecoNoInstrumento}`;
+    }
+    case ESTADO_CONFRONTO.DIVERGENCIA_CADASTRAL: {
+      const distTexto = home.distancia_divergencia_cadastral != null
+        ? ` distantes em aproximadamente ${home.distancia_divergencia_cadastral.toFixed(1).replace(".", ",")} km`
+        : "";
+      const justTexto = home.justificativa ? ` Justificativa registrada: "${home.justificativa}".` : "";
+      return `DIVERGÊNCIA CADASTRAL: ${home.conflito?.descricao || "o endereço informado diverge da qualificação extraída do instrumento"}.${distTexto}. Endereço informado: ${home.conflito?.manual?.texto || home.query || "coordenada informada"}. Cidade, UF e CEP do instrumento: ${instrumentoTexto}. O laudo apresenta o confronto geográfico e as distâncias calculadas em relação a ambas as referências.${justTexto}`;
     }
     case ESTADO_CONFRONTO.LIBERADO_PELO_OPERADOR:
       return `REFERÊNCIA LIBERADA PELO OPERADOR: ${home.conflito?.descricao || "conflito entre o endereço informado e o do instrumento"}. O operador declarou contestado o endereço do instrumento, com a seguinte justificativa: "${home.justificativa}". As distâncias abaixo usam o endereço informado e devem ser lidas com essa ressalva.`;

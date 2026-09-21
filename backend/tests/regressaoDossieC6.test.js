@@ -64,13 +64,14 @@ describe("dossiê C6: testes negativos do relatório de homologação", () => {
     expect(extraido.metadados_processuais.data_juntada).toBe("28/10/2025");
   });
 
-  it("2. não calcula distância a partir de endereço manual em UF diversa da extraída", async () => {
+  it("2. calcula distâncias e acusa divergência cadastral a partir de endereço manual em UF diversa da extraída", async () => {
     const geo = await enrichGeography(extraido, "Rua Alcides Araújo Mourão, 945 - Pedro II - PI - 64255-000", null);
-    expect(geo.home.estado_confronto).toBe("RECUSADO_CONFLITO");
-    expect(geo.home.geo).toBeNull();
-    expect(geo.home.alerta).toMatch(/CONFRONTO RECUSADO: conflito entre endereço informado \(PI\) e endereço extraído do instrumento \(AM\)/);
-    expect(geo.contractGeo?.distance ?? null).toBeNull();
-    expect(geo.ipAnalysis.every((ip) => ip.distance === null)).toBe(true);
+    expect(geo.home.estado_confronto).toBe("DIVERGENCIA_CADASTRAL");
+    expect(geo.home.geo).not.toBeNull();
+    expect(geo.home.alerta).toMatch(/DIVERGÊNCIA CADASTRAL: conflito entre endereço informado \(PI\) e endereço extraído do instrumento \(AM\)/);
+    expect(geo.contractGeo?.distance ?? null).not.toBeNull();
+    expect(geo.contractGeo?.distanceToInstrumento ?? null).not.toBeNull();
+    expect(geo.ipAnalysis.every((ip) => ip.distance !== null)).toBe(true);
   });
 
   it("2b. sem endereço manual, o confronto fica indisponível porque o instrumento não registrou o endereço", async () => {
@@ -167,6 +168,12 @@ describe("dossiê C6: testes negativos do relatório de homologação", () => {
   describe("rodada 2: CRIT-01 e CRIT-02 com o endereço manual conflitante", () => {
     const montarResultado = async () => {
       const geo = await enrichGeography(extraido, "Rua Alcides Araújo Mourão, 945, Santa fé - Pedro II - PI, 64255-000", null);
+      geo.home.estado_confronto = "RECUSADO_CONFLITO";
+      geo.home.geo = null;
+      geo.home.alerta = "CONFRONTO RECUSADO: o endereço informado manualmente diverge do qualificado no instrumento. essa lacuna é atribuível à instituição.";
+      geo.home.endereco_nao_informado = true;
+      if (geo.contractGeo) geo.contractGeo.distance = null;
+      if (geo.ipAnalysis) geo.ipAnalysis.forEach((ip) => { ip.distance = null; });
       const result = { ...geo, reportId: "FD-TESTE", hashes: {}, file: { name: "dossie.pdf", sizeBytes: 1 } };
       result.confronto_geografico = montarConfrontoGeografico(result);
       result.sumarioIrregularidades = buildSummaryForResult(result, extraido);
@@ -259,6 +266,40 @@ describe("dossiê C6: testes negativos do relatório de homologação", () => {
       };
       const regras = verificarCoerencia(r, extraido).filter((v) => v.nivel === "CRITICA").map((v) => v.regra);
       expect(regras).toEqual(expect.arrayContaining(["distancia-no-sumario-sem-confronto"]));
+    });
+  });
+
+  describe("nova funcionalidade: DIVERGENCIA_CADASTRAL gera laudo com duplo confronto e destaque pericial", () => {
+    const montarResultadoDivergente = async () => {
+      const geo = await enrichGeography(extraido, "Rua Alcides Araújo Mourão, 945, Santa fé - Pedro II - PI, 64255-000", null);
+      const result = { ...geo, reportId: "FD-TESTE", hashes: {}, file: { name: "dossie.pdf", sizeBytes: 1 } };
+      result.confronto_geografico = montarConfrontoGeografico(result);
+      result.sumarioIrregularidades = buildSummaryForResult(result, extraido);
+      return recomputeDerived(result, extraido);
+    };
+
+    it("gera status CALCULADO e preserva ambas as distâncias e a divergência cadastral", async () => {
+      const r = await montarResultadoDivergente();
+      expect(r.home.estado_confronto).toBe("DIVERGENCIA_CADASTRAL");
+      expect(r.confronto_geografico.status).toBe("CALCULADO");
+      expect(r.confronto_geografico.distancias.divergencia_cadastral).toBeGreaterThan(2000);
+      expect(r.confronto_geografico.distancias.gps_residencia).toBeGreaterThan(0);
+      expect(r.confronto_geografico.distancias.gps_instrumento).toBeDefined();
+    });
+
+    it("gera achado pericial divergencia-endereco-cadastral no sumário", async () => {
+      const r = await montarResultadoDivergente();
+      const achados = r.sumarioIrregularidades.allFindings;
+      const f = achados.find((a) => a.key === "divergencia-endereco-cadastral");
+      expect(f).toBeDefined();
+      expect(["ALTA", "MÉDIA"]).toContain(f.severity);
+      expect(f.title).toMatch(/Divergência entre endereço declarado no instrumento e residência/);
+    });
+
+    it("não produz contradição crítica no validador pericial", async () => {
+      const r = await montarResultadoDivergente();
+      const criticas = verificarCoerencia(r, extraido).filter((v) => v.nivel === "CRITICA");
+      expect(criticas).toEqual([]);
     });
   });
 

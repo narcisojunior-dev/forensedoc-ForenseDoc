@@ -207,15 +207,9 @@ export async function analyzePdf(req, res) {
     // O slot limita a leitura/OCR preliminar; ainda não há débito nem análise
     // pericial. O worker reutiliza esta extração, em vez de reler o documento.
     const preflight = await preflightReference(Buffer.from(validation.base64, "base64"), home, extractPdfTextWithOcr);
-    if (preflight.conflito && !(homeContestacao?.contestado && homeContestacao.justificativa.length >= 15)) {
-      await releaseSlot(analysisLockKey(tenantId), lockToken);
-      lockToken = null;
-      return res.status(409).json({
-        code: "CONFLITO_REFERENCIA",
-        error: `${preflight.conflito.descricao}. Corrija ou remova a referência residencial antes de iniciar a análise, ou declare o endereço do instrumento contestado com justificativa.`,
-        conflito: preflight.conflito,
-      });
-    }
+    // Divergências entre o endereço informado e o do instrumento não bloqueiam
+    // mais a análise: o laudo é gerado calculando as distâncias para ambos os
+    // endereços e registrando a divergência cadastral.
 
     const debit = await prisma.$transaction(async (tx) => {
       const created = await tx.analysis.create({
@@ -410,13 +404,15 @@ export async function correctAnalysisGeo(req, res) {
       pontoManual: coord,
       servicos: { geocodeAddress, reverseGeocode },
     });
-    if (conflito && !(contestacao && contestacao.justificativa.length >= 15)) {
-      return res.status(409).json({
-        error: `A coordenada conflita com o endereço do instrumento: ${conflito.descricao}. Para usá-la, declare o endereço do instrumento contestado e escreva a justificativa (pelo menos 15 caracteres).`,
-        code: "CONFLITO_REFERENCIA",
-        conflito,
-      });
-    }
+    const estadoConfronto = contestacao && contestacao.justificativa?.length >= 15
+      ? ESTADO_CONFRONTO.LIBERADO_PELO_OPERADOR
+      : conflito
+        ? ESTADO_CONFRONTO.DIVERGENCIA_CADASTRAL
+        : ESTADO_CONFRONTO.DISPONIVEL;
+
+    const distanciaDivergencia = result.home?.instrumento_geo && Number.isFinite(result.home.instrumento_geo.lat)
+      ? haversineKm(coord.lat, coord.lon, result.home.instrumento_geo.lat, result.home.instrumento_geo.lon)
+      : null;
 
     // Substitui a residência pela coordenada confirmada e recalcula distâncias.
     result.home = {
@@ -431,9 +427,10 @@ export async function correctAnalysisGeo(req, res) {
         source: "manual",
         cityMatch: true,
       },
-      estado_confronto: conflito ? ESTADO_CONFRONTO.LIBERADO_PELO_OPERADOR : ESTADO_CONFRONTO.DISPONIVEL,
+      estado_confronto: estadoConfronto,
       conflito,
-      justificativa: conflito ? contestacao.justificativa : null,
+      justificativa: contestacao?.justificativa || null,
+      distancia_divergencia_cadastral: distanciaDivergencia,
       instrumento: result.home?.instrumento || null,
       endereco_literal: result.home?.endereco_literal || null,
       endereco_nao_informado: Boolean(result.home?.endereco_nao_informado),
@@ -496,10 +493,15 @@ export async function getAnalysisPdf(req, res) {
      * Laudo anterior ao backfill não tem registro, e nesse caso o PDF sai sem
      * o bloco em vez de falhar: melhor um laudo sem QR do que nenhum laudo.
      */
-    const verificacao = await prisma.laudoVerification.findFirst({
-      where: { analysisId: analysis.id, status: "VALIDO" },
-      select: { codigo: true, laudoHash: true },
-    });
+    let verificacao = null;
+    try {
+      verificacao = await prisma.laudoVerification.findFirst({
+        where: { analysisId: analysis.id, status: "VALIDO" },
+        select: { codigo: true, laudoHash: true },
+      });
+    } catch (verifErr) {
+      console.warn("[Analyze] Falha ao consultar registro de verificação para PDF:", verifErr.message);
+    }
 
     // buildReportPdf valida o snapshot atual antes de gerar bytes ou cabeçalhos.
     const pdf = await buildReportPdf(analysis, analysis.result, { verificacao });

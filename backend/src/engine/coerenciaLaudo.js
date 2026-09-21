@@ -134,7 +134,7 @@ const REGRAS = [
       if (!achado || !cidade) return null;
       const citado = achado.text?.match(/domic[ií]lio do cliente \(([^/)]+)/i)?.[1];
       if (!citado || normalizar(citado) === normalizar(cidade)) return null;
-      const referenciaValida = ["DISPONIVEL", "LIBERADO_PELO_OPERADOR"].includes(result.home?.estado_confronto || "DISPONIVEL")
+      const referenciaValida = ["DISPONIVEL", "LIBERADO_PELO_OPERADOR", "DIVERGENCIA_CADASTRAL"].includes(result.home?.estado_confronto || "DISPONIVEL")
         && normalizar(result.home?.geo?.matchedCity) === normalizar(citado);
       return referenciaValida ? null : `sumário cita domicílio em ${citado}; § 3 registra ${cidade}`;
     },

@@ -446,6 +446,27 @@ export function buildIrregularitySummary(report = {}) {
     addCheck("F", "gps-municipio", "PRÓ-BANCO", "Mesmo município do domicílio.");
   }
 
+  if (report.home?.estado_confronto === "DIVERGENCIA_CADASTRAL" || (report.home?.conflito && report.home?.estado_confronto !== "RECUSADO_CONFLITO")) {
+    const conflito = report.home.conflito;
+    const kmCadastral = report.home.distancia_divergencia_cadastral != null
+      ? report.home.distancia_divergencia_cadastral
+      : conflito?.km;
+    const ufManual = conflito?.manual?.uf;
+    const ufInst = conflito?.instrumento?.uf;
+    const ufsDivergentes = ufManual && ufInst && ufManual !== ufInst;
+    const severidade = (ufsDivergentes || (kmCadastral !== null && kmCadastral >= 300)) ? "ALTA" : "MÉDIA";
+    const detalheKm = kmCadastral !== null ? `, a aproximadamente ${formatKm(kmCadastral)} de distância` : "";
+    const textoManual = conflito?.manual?.texto || report.home.query || "endereço informado";
+    const textoInst = [conflito?.instrumento?.cidade, conflito?.instrumento?.uf].filter(Boolean).join("/") || "município do contrato";
+    addFinding(
+      severidade,
+      "divergencia-endereco-cadastral",
+      "Divergência entre endereço declarado no instrumento e residência informada.",
+      `O endereço fornecido como residência do cliente (${textoManual}) difere da qualificação cadastral registrada no contrato (${textoInst})${detalheKm}. O laudo analisa as distâncias para ambos os locais. Essa divergência pode indicar fraude cadastral na contratação ou desatualização documental.`
+    );
+    addCheck("F", "divergencia-cadastral", "ALERTA", `${textoManual} ≠ ${textoInst}`);
+  }
+
   const ipCards = (report.ipAnalysis || []).map((ip, indice) => {
     const role = classifyIpRole(ip, report);
     const km = residenciaCalculada ? distanciaKm(confronto.distancias.ips_residencia[indice]?.km) : null;

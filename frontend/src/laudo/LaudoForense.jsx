@@ -667,6 +667,20 @@ export default function LaudoForense({ report }) {
                   <>
                     <Row label="Endereço adotado" value={report.home.query} nullText="Nenhum endereço informado ou extraído" />
                     <Row label="Origem do endereço" value={report.home.source} />
+                    {(report.home.estado_confronto === "DIVERGENCIA_CADASTRAL" || report.home.conflito) && report.home.instrumento && (
+                      <>
+                        <Row
+                          label="Endereço extraído do contrato"
+                          value={[report.home.instrumento.cidade, report.home.instrumento.uf, report.home.instrumento.cep].filter(Boolean).join(", ") || "município do contrato"}
+                        />
+                        {report.home.distancia_divergencia_cadastral != null && (
+                          <Row
+                            label="Divergência entre os endereços"
+                            value={`${report.home.distancia_divergencia_cadastral.toFixed(1).replace(".", ",")} km`}
+                          />
+                        )}
+                      </>
+                    )}
                   </>
                 )}
                 {referenciaRecusada(report.home) ? null : report.home.geo && (report.ipAnalysis.length > 0 || report.contractGeo) ? (
@@ -1132,6 +1146,11 @@ export default function LaudoForense({ report }) {
                 {report.contractGeo ? (
                   <>
                     <div className="sub-head">Confronto · residência do cliente × geolocalização declarada no contrato</div>
+                    {report.home.distancia_divergencia_cadastral != null && (
+                      <div className="note" style={{ borderLeftColor: "var(--crit)", background: "rgba(240,99,99,0.08)", marginBottom: 14 }}>
+                        <strong>Divergência Cadastral Identificada:</strong> O endereço fornecido como residência do cliente ({report.home.query || report.home.conflito?.manual?.texto}) difere da qualificação cadastral extraída do contrato ({[report.home.instrumento?.cidade, report.home.instrumento?.uf].filter(Boolean).join("/") || "município do contrato"}), distantes em aproximadamente <strong>{report.home.distancia_divergencia_cadastral.toFixed(1).replace(".", ",")} km</strong>. O laudo analisa as distâncias para ambas as referências.
+                      </div>
+                    )}
                     <div className="grid-2">
                       <div className="geo-card" style={{ borderTopColor: "var(--accent)" }}>
                         <div className="gtitle" style={{ color: "var(--accent)" }}>Residência do cliente (referência)</div>
@@ -1169,6 +1188,12 @@ export default function LaudoForense({ report }) {
                     {distanciaKm(report.contractGeo.distance) !== null ? (
                       <div className="geo-visual-block">
                         <DistanceBanner label="Distância: residência do cliente → local declarado da assinatura" km={report.contractGeo.distance} />
+                        {report.contractGeo.distanceToInstrumento != null && (
+                          <div className="row" style={{ marginTop: 6, marginBottom: 8, padding: "6px 12px", background: "rgba(133,149,168,0.08)", borderRadius: 6 }}>
+                            <span className="row-label" style={{ fontSize: 12 }}>Distância: endereço extraído do contrato → local declarado da assinatura</span>
+                            <span className="row-value" style={{ fontWeight: 700, fontSize: 13, color: "var(--accent)" }}>{report.contractGeo.distanceToInstrumento.toFixed(2).replace(".", ",")} km</span>
+                          </div>
+                        )}
                         <GeoMap
                           home={report.home.geo}
                           sign={{ lat: report.contractGeo.lat, lon: report.contractGeo.lon }}
@@ -1208,6 +1233,12 @@ export default function LaudoForense({ report }) {
                               <span className="row-label">Distância entre o local declarado e a origem do IP {ipRef.endereco}</span>
                               <span className="row-value" style={{ color: cor, fontWeight: 700 }}>{distanciaKm(ipRef.distanceToSignature).toFixed(2).replace(".", ",")} km{d?.rotulo ? ` · ${d.rotulo}` : ""}</span>
                             </div>
+                            {ipRef.distanceToInstrumento != null && (
+                              <div className="row" style={{ marginTop: 4, padding: "4px 8px", background: "rgba(133,149,168,0.06)", borderRadius: 4 }}>
+                                <span className="row-label" style={{ fontSize: 12 }}>Distância entre a origem do IP e o endereço extraído do contrato</span>
+                                <span className="row-value" style={{ fontWeight: 600, fontSize: 12, color: "var(--muted)" }}>{distanciaKm(ipRef.distanceToInstrumento).toFixed(2).replace(".", ",")} km</span>
+                              </div>
+                            )}
                             {d?.sintese && <div className="note" style={{ borderLeftColor: cor }}>{d.sintese}</div>}
                             <GeoMap
                               home={{ lat: report.contractGeo.lat, lon: report.contractGeo.lon }}

@@ -1054,13 +1054,20 @@ function sectionGeo(ctx, result, mapas = {}) {
     }
   }
 
-  // MED-01: recusado o confronto, o endereço aparece como não utilizado e o
-  // alerta acima é o único motivo impresso.
   const referenciaRecusada = ["RECUSADO_CONFLITO", "INDISPONIVEL_NAO_INFORMADO"].includes(result.home?.estado_confronto);
   const enderecoInformado = result.home?.conflito?.manual?.texto || result.home?.query;
   if (referenciaRecusada) {
     if (enderecoInformado) field(ctx, "Endereço informado, não utilizado", enderecoInformado);
-  } else if (result.home?.query) field(ctx, `Endereço (${result.home.source || "referência"})`, result.home.query);
+  } else if (result.home?.query) {
+    field(ctx, `Endereço (${result.home.source || "referência"})`, result.home.query);
+    if (result.home?.estado_confronto === "DIVERGENCIA_CADASTRAL" || result.home?.conflito) {
+      const instRotulo = [result.home.instrumento?.cidade, result.home.instrumento?.uf, result.home.instrumento?.cep].filter(Boolean).join(", ") || "município do contrato";
+      field(ctx, "Endereço extraído do contrato", instRotulo);
+      if (result.home.distancia_divergencia_cadastral != null) {
+        field(ctx, "Divergência cadastral entre os endereços", `${result.home.distancia_divergencia_cadastral.toFixed(1)} km`);
+      }
+    }
+  }
   if (!referenciaRecusada && home && Number.isFinite(home.lat) && Number.isFinite(home.lon)) {
     // A coordenada NUMÉRICA é obrigatória: todas as distâncias abaixo derivam
     // dela, e sem o valor o laudo deixa de ser reproduzível por terceiro.
@@ -1119,6 +1126,9 @@ function sectionGeo(ctx, result, mapas = {}) {
     } else if (!home) {
       paragraph(ctx, "Distância não calculada: falta a coordenada de referência.", { color: MUTED, size: 8.5 });
     }
+    if (ipRef.distanceToInstrumento != null) {
+      field(ctx, "Distância entre a origem do IP e o endereço do contrato", `${ipRef.distanceToInstrumento.toFixed(2)} km`);
+    }
 
     if (mapas.mapaIpResidencia) {
       drawMap(
@@ -1168,6 +1178,9 @@ function sectionGeo(ctx, result, mapas = {}) {
       );
       paragraph(ctx, declarado.sintese, { size: 9 });
       if (declarado.ressalva) paragraph(ctx, declarado.ressalva, { color: MUTED, size: 8.5 });
+    }
+    if (cg.distanceToInstrumento != null) {
+      field(ctx, "Distância entre o local declarado e o endereço do contrato", `${cg.distanceToInstrumento.toFixed(2)} km`);
     }
 
     if (mapas.mapaResidenciaDeclarado) {
