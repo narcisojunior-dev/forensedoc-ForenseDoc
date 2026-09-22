@@ -50,8 +50,8 @@ export const METODO_DISTANCIA = {
 
 export function memoriaDoConfronto(metodo) {
   if (!metodo) return null;
-  const ponto = (p) => `${p.rotulo || "ponto"} (${p.lat}, ${p.lon}); fonte: ${p.fonte || "não identificada no registro"}; precisão: ${p.precisao || "não informada"}`;
-  return `${metodo.formula}. Origem: ${ponto(metodo.de)}. Destino: ${ponto(metodo.para)}. Referências municipais e por IP são aproximadas e não demonstram a presença física do aparelho.`;
+  const ponto = (p) => `${p.rotulo || "ponto"} (${p.lat}, ${p.lon}); fonte: ${p.fonte || "não identificada no registro"}; precisão: ${p.precisao || "não informada"}${p.consulta ? `; consulta ${p.consulta}, em ${p.consultadoEm || "data não registrada"}` : ""}${p.evidencias?.length ? `; registros: ${p.evidencias.join(" / ")}` : ""}`;
+  return `${metodo.formula}. Origem: ${ponto(metodo.de)}. Destino: ${ponto(metodo.para)}. Referências municipais e por IP são aproximadas e não demonstram a presença física do aparelho. Consulta atual de IP não comprova localização na data do ato.`;
 }
 
 /** Abaixo de 100 m entre dois geocodificados, o número exato não tem sentido. */
@@ -81,8 +81,8 @@ export function montarConfrontoEnderecos(pontos = {}) {
     const precisoes = [a?.precisao, b?.precisao].filter(Boolean);
     const metodo = km === null ? null : {
       ...METODO_DISTANCIA,
-      de: { rotulo: a.rotulo || null, lat: a.lat, lon: a.lon, precisao: a.precisao || null, fonte: a.fonte || null },
-      para: { rotulo: b.rotulo || null, lat: b.lat, lon: b.lon, precisao: b.precisao || null, fonte: b.fonte || null },
+      de: { consulta: a.consulta, consultadoEm: a.consultadoEm, evidencias: a.evidencias, rotulo: a.rotulo || null, lat: a.lat, lon: a.lon, precisao: a.precisao || null, fonte: a.fonte || null },
+      para: { consulta: b.consulta, consultadoEm: b.consultadoEm, evidencias: b.evidencias, rotulo: b.rotulo || null, lat: b.lat, lon: b.lon, precisao: b.precisao || null, fonte: b.fonte || null },
     };
     return {
       id: par.id,

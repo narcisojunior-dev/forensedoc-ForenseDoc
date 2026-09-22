@@ -8,15 +8,20 @@
  * servidor faria as duas versões divergirem com o tempo.
  */
 
+/*
+ * O laudo é emitido pelo sistema, não por um escritório: quem responde pelo
+ * método e pelo resultado é o ForenseDoc. A qualificação do advogado que usa o
+ * sistema, quando necessária, é dele e entra na peça processual, não aqui.
+ */
 export const FIRM = {
-  nome: "Ronney Menezes Advocacia",
-  oab: "OAB/PI 15.508 · OAB/MA 26.102-A",
+  nome: "ForenseDoc",
+  descricao: "Verificação técnica e validação de cadeia de custódia documental",
   sistema: "ForenseDoc",
 };
 
 // §4 — nota sobre validade da assinatura eletrônica.
 export const NOTA_ASSINATURA =
-  "A validade da assinatura eletrônica não depende de certificação ICP-Brasil. A MP 2.200-2/2001 (art. 10, §2º) admite outros meios de comprovação de autoria e integridade, e a Lei 14.063/2020 reconhece as assinaturas simples, avançada e qualificada, todas com validade jurídica. O STJ consolidou esse entendimento no REsp 2.159.442 (rel. Min. Nancy Andrighi) e o reafirmou no REsp 2.205.708. O ponto decisivo não é o selo ICP-Brasil, e sim a completude da cadeia de custódia: demonstrar quem assinou, quando, de onde e com qual integridade.";
+  "A ausência de certificação ICP-Brasil, por si só, não invalida uma assinatura eletrônica (MP 2.200-2/2001, art. 10, § 2º; STJ, REsp 2.159.442 e REsp 2.197.156). A validade no caso concreto depende do método aceito, dos elementos de autoria e integridade e da apreciação do conjunto probatório. A classificação de assinaturas pela Lei 14.063/2020 não dispensa a verificação de seu âmbito de aplicação e dos requisitos do ato. A contagem de itens de um checklist não substitui essa análise.";
 
 // §1 — nota sobre hash calculado pelo sistema quando o documento não traz um.
 export const NOTA_HASH_SISTEMA =
@@ -69,20 +74,12 @@ export const FUNDAMENTACAO = [
   },
   GRUPO_CONSIGNADO,
   {
-    grupo: "Custo Efetivo Total (CET)",
-    itens: [
-      ["Resolução CMN 4.881/2020, art. 2º", "Define o CET como a taxa que representa, de forma consolidada, todos os encargos e despesas da operação."],
-      ["Resolução CMN 4.881/2020, art. 7º", "Obriga a instituição a informar o CET previamente à contratação e a apresentar o demonstrativo de cálculo ao tomador."],
-      ["CDC, art. 52, c/c Resolução CMN 4.881/2020", "A ausência, a incorreção ou a inconsistência do CET frente à taxa de juros caracteriza falha no dever de informação."],
-    ],
-  },
-  {
     grupo: "Assinatura eletrônica e ônus da prova",
     itens: [
       ["MP 2.200-2/2001, art. 10, § 2º", "Admite outros meios de comprovação de autoria e integridade, além da certificação ICP-Brasil."],
-      ["Lei 14.063/2020", "Classifica as assinaturas em simples, avançada e qualificada, todas com validade jurídica conforme o grau de segurança."],
-      ["STJ, REsp 2.159.442 e REsp 2.205.708", "A ausência de certificação ICP-Brasil não invalida, por si só, a assinatura, desde que comprovadas autoria e integridade."],
-      ["STJ, Tema 1.061, c/c CPC, art. 373", "Impugnada a assinatura em contrato bancário, cabe à instituição financeira comprovar a autenticidade e a integridade do documento."],
+      ["Lei 14.063/2020", "Define categorias de assinatura em seu âmbito de aplicação; a categoria, isoladamente, não comprova validade no caso concreto."],
+      ["STJ, REsp 2.159.442 e REsp 2.197.156", "A ausência de certificação ICP-Brasil não invalida, por si só, a assinatura, desde que comprovadas autoria e integridade."],
+      ["STJ, Tema 1.061, CPC arts. 6º, 369 e 429, II", "Quando o consumidor impugna a autenticidade da assinatura em contrato bancário juntado pela instituição financeira, cabe a ela provar a autenticidade. A existência de impugnação neste caso não foi demonstrada pelo dossiê."],
     ],
   },
   {
@@ -120,8 +117,9 @@ export const NOTA_FUNDAMENTACAO_RESSALVA =
 
 export function avisoLegal(timestamp) {
   return (
-    `AVISO LEGAL: Este laudo foi gerado automaticamente pelo sistema ForenseDoc (${FIRM.nome}, ${FIRM.oab}) ` +
-    "para fins de análise jurídica preliminar. Os hashes criptográficos SHA-256 e SHA-1 foram calculados pelo " +
+    `AVISO LEGAL: Este laudo foi gerado automaticamente pelo sistema ${FIRM.sistema} ` +
+    "para fins de verificação técnica preliminar da cadeia de custódia do documento. As condições econômicas da " +
+    "operação não integram o exame. Os hashes criptográficos SHA-256 e SHA-1 foram calculados pelo " +
     "servidor sobre o arquivo original recebido (NIST FIPS 180-4). A geolocalização de IPs é fornecida por " +
     "serviço de terceiros (ipapi.co) e possui margem de erro inerente; endereços de ISPs e VPNs podem não " +
     "refletir a localização física real do usuário. A geolocalização declarada da assinatura é extraída do " +

@@ -15,17 +15,13 @@
  * cada defeito vive no módulo que o produziu; este validador existe para que
  * uma regressão futura não volte a sair calada.
  *
- * ─── Modo alerta ─────────────────────────────────────────────────────────────
- *
- * Registra em `result.coerencia`, no log e na tela do laudo (fora do PDF). Com
- * `COERENCIA_BLOQUEANTE=true`, a exportação em PDF fica bloqueada enquanto houver
- * contradição. O padrão é desligado: bloquear sem política de estorno do crédito
- * puniria o cliente por defeito do sistema.
+ * Contradições materiais e falhas de validação bloqueiam a emissão.
+ * Coincidências heurísticas ficam como alertas, independentemente do ambiente.
  */
+export function coerenciaBloqueante() { return true; }
 
-export function coerenciaBloqueante() {
-  return process.env.COERENCIA_BLOQUEANTE === "true";
-}
+const HEURISTICAS = new Set(["data-contrato-x-juntada", "cet-implicito-no-extremo"]);
+const coordenadaValida = (p) => p && Number.isFinite(p.lat) && Number.isFinite(p.lon) && Math.abs(p.lat) <= 90 && Math.abs(p.lon) <= 180;
 
 const normalizar = (valor) =>
   String(valor || "")
@@ -75,13 +71,16 @@ const REGRAS = [
     },
   },
   {
-    id: "zero-km-no-sumario",
+    id: "distancia-sem-coordenadas",
     nivel: "CRITICA",
-    descricao: "Sumário executivo imprime distância de 0,00 km",
+    descricao: "Distância publicada sem os dois pontos válidos que a sustentam",
     verificar(result) {
-      const trecho = textosDoSumario(result.sumarioIrregularidades).find((t) => /(^|[^\d,])0,00 km/.test(t));
-      const pontoZero = (result.sumarioIrregularidades?.geo?.items || []).some((i) => i.distance === 0);
-      return trecho || pontoZero ? `"0,00 km" no sumário${trecho ? `: ${trecho.slice(0, 120)}` : " (ponto do gráfico)"}` : null;
+      if (result.contractGeo?.distance != null && (!coordenadaValida(result.home?.geo) || !coordenadaValida(result.contractGeo))) return "distância à residência sem coordenadas completas e válidas";
+      for (const ip of result.ipAnalysis || []) {
+        if (ip.distance != null && (!coordenadaValida(result.home?.geo) || !coordenadaValida(ip.geo))) return "distância IP/residência sem coordenadas completas e válidas";
+        if (ip.distanceToSignature != null && (!coordenadaValida(result.contractGeo) || !coordenadaValida(ip.geo))) return "distância IP/assinatura sem coordenadas completas e válidas";
+      }
+      return null;
     },
   },
   {
@@ -135,7 +134,7 @@ const REGRAS = [
       if (!achado || !cidade) return null;
       const citado = achado.text?.match(/domic[ií]lio do cliente \(([^/)]+)/i)?.[1];
       if (!citado || normalizar(citado) === normalizar(cidade)) return null;
-      const referenciaValida = ["DISPONIVEL", "LIBERADO_PELO_OPERADOR"].includes(result.home?.estado_confronto || "DISPONIVEL")
+      const referenciaValida = ["DISPONIVEL", "LIBERADO_PELO_OPERADOR", "DIVERGENCIA_CADASTRAL"].includes(result.home?.estado_confronto || "DISPONIVEL")
         && normalizar(result.home?.geo?.matchedCity) === normalizar(citado);
       return referenciaValida ? null : `sumário cita domicílio em ${citado}; § 3 registra ${cidade}`;
     },
@@ -145,7 +144,7 @@ const REGRAS = [
     descricao: "Biometria dada como apenas mencionada no clausulado, com evento ou imagem biométrica no arquivo",
     verificar(_result, extracted) {
       const a = extracted.assinatura || {};
-      const soClausulado = (a.metodos_descritos_no_fluxo || []).some((m) => m.codigo === "BIOMETRIA" || /biometr/i.test(m.rotulo || ""));
+      const soClausulado = (a.metodos_descritos_no_fluxo || []).some((m) => /apenas|somente/i.test(m.rotulo || "") && /biometr/i.test(m.rotulo || ""));
       if (!soClausulado) return null;
       const imagens = (extracted.imagens_pdf?.imagens || []).filter((i) => i.biometricaProvavel).length;
       if (a.biometria_registrada_como_evento || imagens) {
@@ -257,12 +256,14 @@ export function verificarCoerencia(result = {}, extracted = {}) {
   const violacoes = [];
   for (const regra of REGRAS) {
     let detalhe = null;
+    let falha = false;
     try {
       detalhe = regra.verificar(result, extracted || {});
     } catch (erro) {
+      falha = true;
       detalhe = `regra falhou ao executar: ${erro.message}`;
     }
-    if (detalhe) violacoes.push({ regra: regra.id, nivel: regra.nivel || NIVEL_PADRAO[regra.id] || "ALERTA", descricao: regra.descricao, detalhe });
+    if (detalhe) violacoes.push({ classe: falha ? "FALHA_VALIDACAO" : HEURISTICAS.has(regra.id) ? "HEURISTICA" : "CONTRADICAO_MATERIAL", bloqueante: falha || !HEURISTICAS.has(regra.id), regra: regra.id, nivel: regra.nivel || NIVEL_PADRAO[regra.id] || "ALERTA", descricao: regra.descricao, detalhe });
   }
   return violacoes;
 }

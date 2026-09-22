@@ -51,6 +51,15 @@ export async function handleAsaasWebhook(req, res) {
       paymentsQueue.add("process-webhook", req.body, {
         attempts: 5,
         backoff: { type: "exponential", delay: 2000 },
+        // Sem isto o BullMQ guarda o job concluído para sempre, e este nunca
+        // sairia sozinho: job de fila não tem TTL de propósito, e a política do
+        // Redis é `volatile-lru`, que só despeja chave COM prazo. Era
+        // crescimento monotônico numa área que a política não limpa.
+        //
+        // As falhas ficam: são as que explicam um pagamento que não virou
+        // crédito, e 100 é o mesmo teto já usado em notificationService.
+        removeOnComplete: true,
+        removeOnFail: 100,
       }),
       ENQUEUE_TIMEOUT_MS
     );

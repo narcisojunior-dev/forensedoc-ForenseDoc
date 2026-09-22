@@ -452,7 +452,7 @@ function extractGenericContractLayout(text, flat) {
     tributosPercentual: normalizePercent(tributos?.[2]),
     valorLiberadoClienteEmBranco: blankReleasedValue,
     codigoAutenticacao: authBlockTokens.length >= 8 ? authBlockTokens.join(" ") : null,
-    assinaturaEletronicaTexto: firstMatch(flat, [/(\(assinado\s+de\s+forma\s+eletr[oô]nica\)|Assinado\s+eletronicamente\s+por\s+[A-ZÁÀÂÃÉÊÍÓÔÕÚÇ\s]{8,90}|Documento\s+assinado\s+eletronicamente[^.]{0,180})/i]),
+    assinaturaEletronicaTexto: firstMatch(flat, [/(Documento\s+assinado\s+eletronicamente[^.]{0,180}?CPF\s*n[°ºo]?\s*:\s*\d{3}\.\d{3}\.\d{3}-\d{2})/i, /(\(assinado\s+de\s+forma\s+eletr[oô]nica\)|Assinado\s+eletronicamente\s+por\s+[A-ZÁÀÂÃÉÊÍÓÔÕÚÇ\s]{8,90}|Documento\s+assinado\s+eletronicamente[^.]{0,180})/i]),
   };
 }
 
@@ -1082,7 +1082,7 @@ export function heuristicExtractionFromText(rawText) {
   contratoExtraido.custo_total = mathAudit.custo_total;
   contratoExtraido.custo_total_percentual = mathAudit.custo_total_percentual;
   if (mathAudit.carencia_dias > 45) {
-    addIssue("FIN3", "INFO", "Carência prolongada entre contratação e primeiro vencimento", `Decorreram ${plural(mathAudit.carencia_dias, "dia", "dias")} entre a data do contrato (${contratoExtraido.data_contrato}) e o primeiro vencimento (${contratoExtraido.data_primeiro_vencimento}).${mathAudit.juros_carencia ? ` Nesse período, à taxa contratada, o saldo financiado acumula ${mathAudit.juros_carencia} de juros antes do primeiro pagamento.` : ""}${contratoExtraido.valor_total_parcelas && mathAudit.somatorio_sobre_liberado_percentual ? ` O somatório das parcelas (${contratoExtraido.valor_total_parcelas}) corresponde a ${mathAudit.somatorio_sobre_liberado_percentual} do valor liberado (${contratoExtraido.valor_liberado}).` : ""} A carência não é ilícita por si e integra o placar apenas como elemento de contexto econômico.`);
+    addIssue("FIN3", "INFO", "Carência prolongada entre contratação e primeiro vencimento", `Decorreram ${plural(mathAudit.carencia_dias, "dia", "dias")} entre a data do contrato (${contratoExtraido.data_contrato}) e o primeiro vencimento (${contratoExtraido.data_primeiro_vencimento}).${mathAudit.juros_carencia ? ` Sob a hipótese de liberação na data de emissão e aplicação da taxa declarada nesse período, o cálculo estima ${mathAudit.juros_carencia} de juros antes do primeiro pagamento.` : ""}${contratoExtraido.valor_total_parcelas && mathAudit.somatorio_sobre_liberado_percentual ? ` O somatório das parcelas (${contratoExtraido.valor_total_parcelas}) corresponde a ${mathAudit.somatorio_sobre_liberado_percentual} do valor liberado (${contratoExtraido.valor_liberado}).` : ""} A carência não é ilícita por si e integra o placar apenas como elemento de contexto econômico.`);
   }
   // D4: informação de prazo prestada de forma condicional não é divergência de
   // prazo. O achado muda de natureza, sai com o trecho ancorado e fica pendente
@@ -1123,7 +1123,7 @@ export function heuristicExtractionFromText(rawText) {
   if (layout.numeroBeneficio && layout.beneficioNoTermoConsentimento && layout.beneficioNoTermoConsentimento !== layout.numeroBeneficio) {
     addIssue("CAD3", "MÉDIA", "Termo de Consentimento com número de benefício divergente", `O Termo de Consentimento Esclarecido identifica o benefício com o número ${layout.beneficioNoTermoConsentimento}, que corresponde ao número da proposta/contrato, não ao número do benefício (${layout.numeroBeneficio}) informado no quadro de qualificação do cliente. O documento destinado a esclarecer o consumidor está preenchido com o dado errado.`);
   }
-  addIssue("CUS1", "MÉDIA", "Itens eliminatórios da cadeia de custódia não satisfeitos", "A extração não localizou hash conferível declarado pelo emissor, provedor verificável, carimbo de tempo independente nem registro de preservação do arquivo original. Em PDF reimpresso, a ausência de selfie e logs no próprio arquivo é esperada; a diligência recai sobre a exibição dos artefatos originais da plataforma.");
+  // CUS1 é produzido pelo sumário a partir dos estados efetivamente extraídos.
 
   // Linha do tempo do fluxo de aceite (dossiê de contratação): um fluxo
   // inteiro em poucos minutos, ou um aceite dos termos poucos segundos
@@ -1219,7 +1219,8 @@ export function heuristicExtractionFromText(rawText) {
     }
   }
 
-  mathAudit.conclusao = redigirConclusaoAfericao(mathAudit);
+  mathAudit.premissa_fluxo = "Cálculos de valor presente, juros e CET condicionados à hipótese de liberação na data de emissão, aos vencimentos previstos e aos valores declarados. Não comprovam desembolso, cobrança ou recolhimento de tributos efetivamente realizados.";
+  mathAudit.conclusao = `${redigirConclusaoAfericao(mathAudit)} ${mathAudit.premissa_fluxo}`;
 
   const platformIndependence = assessPlatformIndependence(layout.trilha?.validadorUrl, contratoExtraido.banco);
   const uaParsed = parseUserAgent(layout.trilha?.dispositivoUtilizado);
@@ -1491,7 +1492,7 @@ export function heuristicExtractionFromText(rawText) {
         "CAD4",
         "MÉDIA",
         "Qualificação do contratante com campos fictícios ou não informados",
-        `A instituição formalizou a operação com ${partes.join(" e ")}${vazios.length ? `, além de ${vazios.join(", ")} em branco na proposta` : ""}. O preenchimento indica cadastro feito por terceiro ou sem conferência documental, e falha de identificação do contratante.`
+        `A instituição formalizou a operação com ${partes.join(" e ")}${vazios.length ? `, além de ${vazios.join(", ")} em branco na proposta` : ""}. Esses campos limitam a conferência cadastral nesta cópia. Não identificam quem preencheu o cadastro nem demonstram, isoladamente, ausência de conferência ou fraude.`
       );
     }
   }
@@ -1530,6 +1531,13 @@ export function heuristicExtractionFromText(rawText) {
     flat,
   });
   extracted.trilha_eventos = trilhaEventos ? { ...trilhaEventos, achados: undefined } : null;
+  if (!extracted.assinatura.forma_aceite && extracted.assinatura.biometria_registrada_como_evento) {
+    extracted.assinatura.forma_aceite = "Assinatura eletrônica com validação biométrica (declarada no dossiê)";
+  }
+  const dispositivoRegistrado = trilhaEventos?.eventos?.find(e => e.aparelho)?.aparelho;
+  if (!extracted.assinatura.dispositivo && dispositivoRegistrado) {
+    extracted.assinatura.dispositivo = `Identificador declarado: ${dispositivoRegistrado}; modelo físico não determinado por esse identificador`;
+  }
   for (const a of trilhaEventos?.achados || []) addIssue(a.codigo, a.gravidade, a.titulo, a.texto);
 
   extracted.evidencias_irregularidade = achados.map((issue) => `${issue.titulo}. ${issue.texto}`);

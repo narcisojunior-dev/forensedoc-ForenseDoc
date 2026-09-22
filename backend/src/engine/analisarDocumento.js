@@ -3,7 +3,6 @@ import { inspectPdfImages } from "./pdfForensics.js";
 import { applySourceProvenance, inspectDocumentEligibility } from "./documentEligibility.js";
 import { separarCarimboProcessual } from "./carimboProcessual.js";
 import { analisarBiometria } from "./biometria.js";
-import { ESTADO_METODOS } from "./metodosAutenticacao.js";
 import {
   humanYearsMonthsFromDays, parseFormattedPdfDate, parsePtDate, parsePtDateTime, plural, stripDiacritics,
 } from "./format.js";
@@ -57,11 +56,7 @@ export async function analisarDocumento({
   // dossiê C6 dizia isso no § 4 e inventariava a selfie no § 4.2.
   const imagensBiometricas = (imageAnalysis.imagens || []).filter((imagem) => imagem.biometricaProvavel);
   if (imagensBiometricas.length && fallback.assinatura) {
-    fallback.assinatura.metodos_descritos_no_fluxo = (fallback.assinatura.metodos_descritos_no_fluxo || [])
-      .filter((metodo) => metodo.codigo !== "BIOMETRIA");
-    if (!fallback.assinatura.metodos_descritos_no_fluxo.length) {
-      fallback.assinatura.metodos_descritos_estado = ESTADO_METODOS.NAO_LOCALIZADO_NO_MATERIAL;
-    }
+    // A imagem e a descrição documental coexistem; uma não apaga a outra.
     const metodo = `Artefato biométrico no arquivo: ${imagensBiometricas.length === 1 ? "1 imagem classificada" : `${imagensBiometricas.length} imagens classificadas`} como fotografia ou biometria provável`;
     fallback.assinatura.metodos_autenticacao = [...(fallback.assinatura.metodos_autenticacao || []), metodo];
   }
@@ -168,25 +163,25 @@ export async function analisarDocumento({
     const diasAposContrato = creationDate && contractDate ? Math.floor((creationDate - contractDate) / 86400000) : null;
     const sistemaTribunal = [processual.sistema, processual.tribunal].filter(Boolean).join("/");
     const partes = [
-      `O arquivo é exportação do sistema processual ${sistemaTribunal}: todas as páginas trazem o carimbo do tribunal`,
+      `O texto do arquivo contém carimbo atribuído ao sistema processual ${sistemaTribunal}`,
       processual.identificador_validacao ? `com identificador de validação ${processual.identificador_validacao}` : null,
     ].filter(Boolean).join(", ");
     const juntadaTexto = processual.data_juntada
-      ? ` O documento foi juntado em ${processual.data_juntada}${processual.movimento ? ` (movimento ${processual.movimento}${processual.descricao_movimento ? `, ${processual.descricao_movimento.toLowerCase()}` : ""})` : ""}${processual.juntado_por ? `, com assinatura digital de ${processual.juntado_por}` : ""}.`
+      ? ` O carimbo informa juntada em ${processual.data_juntada}${processual.movimento ? ` (movimento ${processual.movimento}${processual.descricao_movimento ? `, ${processual.descricao_movimento.toLowerCase()}` : ""})` : ""}${processual.juntado_por ? `, com menção a assinatura digital de ${processual.juntado_por}` : ""}.`
       : "";
     const intervaloTexto = diasAposJuntada !== null && diasAposJuntada >= 0
-      ? ` A data interna de criação do PDF (${metadata.creationDate}) é ${plural(diasAposJuntada, "dia", "dias")} posterior à juntada e corresponde à extração dos autos, não a uma re-renderização pela instituição financeira.`
+      ? ` A data interna de criação do PDF (${metadata.creationDate}) é ${plural(diasAposJuntada, "dia", "dias")} posterior à juntada indicada. A data é declarativa e não identifica, por si, a operação nem o responsável pela geração desta cópia.`
       : "";
     const contratoTexto = diasAposContrato !== null && diasAposContrato >= 0
       ? ` Para referência, a mesma data é ${plural(diasAposContrato, "dia", "dias")} posterior à data do contrato (${fallback.contrato.data_contrato}).`
       : "";
-    const mensagem = `${partes}.${juntadaTexto}${intervaloTexto}${contratoTexto} Exportações processuais não preservam assinatura digital, campos de formulário nem metadados do arquivo original; a ausência desses elementos aqui não permite conclusão sobre o arquivo nativo da contratação.`;
+    const mensagem = `${partes}.${juntadaTexto}${intervaloTexto}${contratoTexto} A origem desta cópia não foi validada no sistema do tribunal. Cópias exportadas podem alterar a estrutura e os metadados; a ausência de assinatura incorporada nesta cópia não permite conclusão sobre o arquivo nativo da contratação.`;
     if (metadata.digitalSignature) {
       metadata.digitalSignature.procedencia = {
         ...(metadata.digitalSignature.procedencia || {}),
         procedencia: "EXPORTACAO_SISTEMA_PROCESSUAL",
         indicios: [
-          `carimbo ${sistemaTribunal} em todas as páginas`,
+          `carimbo ${sistemaTribunal} no texto extraído`,
           ...(metadata.digitalSignature.procedencia?.indicios || []).filter((indicio) => !/data interna posterior/i.test(indicio)),
         ],
         bloqueio: true,

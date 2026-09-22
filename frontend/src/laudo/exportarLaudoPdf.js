@@ -165,7 +165,7 @@ export async function exportarLaudoPdf(setBusy, setPdfDownload, { download = tru
       pdf.line(marginX, ph - 9.5, pw - marginX, ph - 9.5);
       pdf.setFontSize(7);
       pdf.setTextColor(104, 115, 123);
-      pdf.text("Ronney Menezes Advocacia | Documento gerado pelo ForenseDoc", marginX, ph - 6.5);
+      pdf.text("Documento gerado pelo ForenseDoc | Verificação de cadeia de custódia documental", marginX, ph - 6.5);
       page += 1;
     };
 
@@ -225,7 +225,7 @@ export async function exportarLaudoPdf(setBusy, setPdfDownload, { download = tru
     pdf.setProperties({
       title: "Laudo técnico pericial - ForenseDoc",
       subject: "Análise forense digital de contrato bancário",
-      author: "Ronney Menezes Advocacia",
+      author: "ForenseDoc",
       creator: "ForenseDoc",
     });
     const blob = pdf.output("blob");
@@ -244,7 +244,9 @@ export async function exportarLaudoPdf(setBusy, setPdfDownload, { download = tru
     }
     return { blob, filename, totalPages, pagination: {canvasWidth:canvas.width,canvasHeight:canvas.height,pageHeightPx,summaryRanges,pageSlices} };
   } catch (e) {
-    console.error("[ForenseDoc] Falha ao gerar PDF", e);
+    // Só a mensagem: o objeto de erro do html2canvas/jspdf carrega referência ao
+    // DOM capturado, que é o laudo — dado do dossiê no console do navegador.
+    console.error("[ForenseDoc] Falha ao gerar PDF:", e?.message || "erro desconhecido");
     // Quem chama mostra a mensagem no padrão de notificação do SaaS.
     throw new Error("Não foi possível gerar o PDF automaticamente. Detalhe: " + (e.message || "erro desconhecido"));
   } finally {

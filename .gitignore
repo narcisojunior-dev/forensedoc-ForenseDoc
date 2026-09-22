@@ -24,3 +24,7 @@ backend/dist
 
 # Railway
 .railway
+
+# Pacotes de validação com dossiê/laudo real de cliente (CPF, nome, endereço em
+# texto plano). Fixture real nunca entra no repositório, mesmo privado.
+codex-validacao-*/

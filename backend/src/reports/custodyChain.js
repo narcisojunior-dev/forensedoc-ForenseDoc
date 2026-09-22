@@ -24,7 +24,7 @@ export const DEFINICAO_CADEIA_CUSTODIA =
 
 /** Por que a completude importa, em termos de ônus da prova. */
 export const EFEITO_PROCESSUAL_CADEIA =
-  "Impugnada a assinatura pelo consumidor, o ônus de comprovar autenticidade e integridade do documento recai sobre a instituição financeira (STJ, Tema 1.061; CPC, art. 373, e art. 429, II). A assinatura eletrônica sem certificação ICP-Brasil é válida (MP 2.200-2/2001, art. 10, § 2º; Lei 14.063/2020), mas essa validade é CONDICIONADA à demonstração de autoria e integridade, que é precisamente o que a cadeia de custódia documenta. Cada elemento ausente subtrai um meio de prova de que a instituição dispõe para se desincumbir desse ônus.";
+  "Quando o consumidor impugna a autenticidade da assinatura em contrato bancário juntado pela instituição financeira, cabe a ela provar a autenticidade (STJ, Tema 1.061; CPC arts. 6º, 369 e 429, II). O dossiê isolado não demonstra que houve essa impugnação. A falta de certificação ICP-Brasil ou de um item deste checklist não decide, por si só, a validade do ato. A apreciação depende do conjunto probatório.";
 
 /**
  * Os oito elementos, cada um com função probatória, base normativa e efeito da
@@ -36,7 +36,7 @@ export const ELEMENTOS_CADEIA = [
     chave: "identificacao_signatario",
     nome: "Identificação do signatário",
     comprova:
-      "Vincula o ato a uma pessoa determinada, por dado que só o titular deveria possuir (CPF, documento, biometria ou certificado).",
+      "Registra a identidade atribuída ao ato. CPF, documento ou fotografia, isoladamente, não demonstram que o titular participou da contratação.",
     norma: "Lei 14.063/2020, art. 4º; MP 2.200-2/2001, art. 10, § 2º",
     ausencia:
       "Sem identificação, o documento não permite atribuir autoria a ninguém, e a assinatura não se sustenta como manifestação de vontade do contratante.",
@@ -45,7 +45,7 @@ export const ELEMENTOS_CADEIA = [
     chave: "carimbo_tempo",
     nome: "Carimbo de data e hora",
     comprova:
-      "Fixa o instante do ato, permitindo confrontá-lo com a disponibilidade do contratante e com a sequência dos demais registros.",
+      "Registra o horário declarado e permite comparar a sequência dos eventos. A presença desse campo não equivale a carimbo de tempo confiável de terceiro.",
     norma: "Lei 14.063/2020, art. 5º; ITI, DOC-ICP-15 (para carimbo qualificado)",
     ausencia:
       "Sem marco temporal confiável, não é possível verificar se o ato ocorreu quando a instituição afirma, nem detectar registros inseridos depois.",
@@ -54,17 +54,17 @@ export const ELEMENTOS_CADEIA = [
     chave: "registro_ip",
     nome: "Registro de endereço IP",
     comprova:
-      "Indica de qual conexão partiu o ato. Combinado com data e hora, é o dado que permite requisitar da operadora a identificação do assinante da conexão.",
+      "Registra um endereço de rede atribuído ao evento. Sua função na sessão, data, hora, fuso e, quando necessária, porta dependem de confirmação pelos registros de origem.",
     norma:
       "Marco Civil da Internet (Lei 12.965/2014), arts. 13 e 15 (guarda de registros de conexão por 1 ano e de acesso a aplicações por 6 meses); art. 10, § 1º e art. 22 (fornecimento mediante ordem judicial)",
     ausencia:
-      "Sem o IP, extingue-se a única via de rastrear a origem material da conexão. A prazo, a perda é irreversível: passados os prazos de guarda do Marco Civil, o dado deixa de existir na operadora.",
+      "A ausência limita o rastreamento por endereço de rede. Os prazos legais mínimos não demonstram exclusão efetiva dos registros; preservação e disponibilidade devem ser consultadas à operadora.",
   },
   {
     chave: "geolocalizacao",
     nome: "Geolocalização do ato",
     comprova:
-      "Situa o ato no espaço, permitindo o confronto com a residência do contratante e com a localização do correspondente bancário.",
+      "Permite comparar coordenadas declaradas e referências disponíveis. A origem, precisão e vinculação ao aparelho dependem de verificação independente.",
     norma: "LGPD (Lei 13.709/2018), arts. 5º, I e 7º: a coordenada é dado pessoal e seu tratamento exige base legal",
     ausencia:
       "Sem geolocalização, o laudo não pode aferir incompatibilidade espacial, restando apenas o IP, cuja precisão é de nível de operadora.",
@@ -73,7 +73,7 @@ export const ELEMENTOS_CADEIA = [
     chave: "metodo_autenticacao",
     nome: "Método de autenticação",
     comprova:
-      "Descreve COMO a identidade foi verificada (token por SMS, biometria facial, senha, certificado) e determina o nível da assinatura.",
+      "Registra o método de autenticação declarado. A descrição de biometria, token ou certificado não comprova a execução ou o resultado individual do procedimento.",
     norma: "Lei 14.063/2020, art. 4º, I a III: assinatura simples, avançada e qualificada",
     ausencia:
       "Sem o método declarado, não é possível classificar o nível da assinatura nem avaliar se ele era adequado ao ato praticado.",
@@ -85,13 +85,13 @@ export const ELEMENTOS_CADEIA = [
       "Permite verificar que o conteúdo assinado é idêntico ao apresentado, detectando qualquer alteração posterior de um único bit.",
     norma: "MP 2.200-2/2001, art. 10, § 1º; NIST FIPS 180-4 (SHA-2)",
     ausencia:
-      "Sem hash, não há como demonstrar que o documento exibido é o mesmo que foi assinado, e a integridade fica indemonstrável por meio técnico.",
+      "Sem hash de referência, a comparação criptográfica por esse elemento não foi realizada. Outros registros e o arquivo nativo podem permitir verificação; a ausência isolada não prova adulteração.",
   },
   {
     chave: "trilha_auditoria",
     nome: "Trilha de auditoria",
     comprova:
-      "Registra a sequência de eventos do fluxo (envio, abertura, leitura, aceite), permitindo reconstituir o que ocorreu e em que ordem.",
+      "Registra a sequência declarada de eventos do fluxo. Eventos de aceite não demonstram, por si, exibição ou leitura do documento.",
     norma: "CPP, art. 158-A, por analogia, quanto à história cronológica do vestígio; ISO/IEC 27037:2012",
     ausencia:
       "Sem trilha, cada registro isolado passa a depender da palavra da instituição, sem meio de conferir consistência entre eles.",
@@ -100,7 +100,7 @@ export const ELEMENTOS_CADEIA = [
     chave: "evidencia_aceite",
     nome: "Evidência de aceite e manifestação de vontade",
     comprova:
-      "Demonstra que o contratante teve acesso ao conteúdo e manifestou concordância, não apenas que um clique foi registrado.",
+      "Registra aceite atribuído ao contratante; a efetiva disponibilização do conteúdo e a autoria dependem de confronto com os registros originais.",
     norma: "CDC, arts. 46 e 52; CC (Lei 10.406/2002), art. 107",
     ausencia:
       "Sem evidência de aceite informado, o contrato não obriga o consumidor que não teve conhecimento prévio de seu conteúdo (CDC, art. 46).",
@@ -118,7 +118,7 @@ export function classifyCustodyCompleteness(presentes, total) {
       tom: "ok",
       pct,
       leitura:
-        "A cadeia reúne os elementos necessários para que a instituição comprove autoria e integridade. A ausência de certificação ICP-Brasil, se for o caso, não compromete a validade do ato.",
+        "Foram localizadas referências à maioria dos elementos deste checklist. Presença de campos não equivale a validação da autoria ou integridade; devem ser examinadas as limitações de cada elemento.",
     };
   }
   if (presentes >= 5) {
@@ -128,7 +128,7 @@ export function classifyCustodyCompleteness(presentes, total) {
       tom: "warn",
       pct,
       leitura:
-        "A cadeia cobre o núcleo do ato, mas há lacunas que reduzem a robustez da prova. A instituição ainda pode se desincumbir do ônus, desde que supra os elementos faltantes por outros meios.",
+        "O checklist apresenta referências documentais parciais. As lacunas indicadas exigem confronto com os registros de origem; a contagem não decide a validade do ato.",
     };
   }
   if (presentes >= 3) {
@@ -138,7 +138,7 @@ export function classifyCustodyCompleteness(presentes, total) {
       tom: "warn",
       pct,
       leitura:
-        "Faltam elementos essenciais à demonstração de autoria ou de integridade. A prova documental, isoladamente, tende a ser insuficiente frente a impugnação fundamentada do consumidor.",
+        "Poucos elementos do checklist foram localizados na extração. Solicitar os registros de origem para avaliar autoria e integridade, sem inferir invalidade desta contagem.",
     };
   }
   return {
@@ -147,7 +147,7 @@ export function classifyCustodyCompleteness(presentes, total) {
     tom: "danger",
     pct,
     leitura:
-      "A cadeia de custódia não documenta o ato de forma rastreável. Impugnada a assinatura, a instituição não dispõe, no documento apresentado, dos meios necessários para comprovar autenticidade e integridade (STJ, Tema 1.061).",
+      "A extração localizou poucos elementos deste checklist; não é possível concluir sobre a completude dos registros originais. A apreciação da prova não decorre automaticamente da contagem.",
   };
 }
 

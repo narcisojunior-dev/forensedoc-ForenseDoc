@@ -191,11 +191,12 @@ describe("D1 · métodos de autenticação só com trecho ancorado", () => {
   });
 
   describe("método descrito x evento observado", () => {
-    it("biometria já registrada como evento da trilha não é listada como apenas descrita", () => {
+    it("descrição e evento biométrico são preservados em eixos distintos", () => {
       const frase = "A assinatura eletrônica se dá pela coleta da biometria facial do contratante.";
       expect(extrairMetodosDescritos(frase).metodos.map((m) => m.codigo)).toContain("BIOMETRIA");
       const comEvento = extrairMetodosDescritos(frase, { biometriaRegistradaComoEvento: true });
-      expect(comEvento.metodos.map((m) => m.codigo)).not.toContain("BIOMETRIA");
+      expect(comEvento.metodos.map((m) => m.codigo)).toContain("BIOMETRIA");
+      expect(comEvento.metodos[0].rotulo).not.toMatch(/apenas/i);
     });
   });
 
@@ -209,10 +210,10 @@ describe("D1 · métodos de autenticação só com trecho ancorado", () => {
       expect(JSON.stringify(extraido.assinatura)).not.toMatch(/SMS\s*Token/i);
     });
 
-    it("o desfecho do eixo é nao_localizado_no_material", () => {
+    it("preserva a descrição biométrica apesar do evento também estar presente", () => {
       const extraido = heuristicExtractionFromText(dossieC6);
-      expect(extraido.assinatura.metodos_descritos_estado).toBe(ESTADO_METODOS.NAO_LOCALIZADO_NO_MATERIAL);
-      expect(extraido.assinatura.metodos_descritos_no_fluxo).toEqual([]);
+      expect(extraido.assinatura.metodos_descritos_estado).toBe(ESTADO_METODOS.LOCALIZADO);
+      expect(extraido.assinatura.metodos_descritos_no_fluxo.map(m => m.codigo)).toContain("BIOMETRIA");
     });
 
     it("o campo legado ambíguo não existe mais", () => {

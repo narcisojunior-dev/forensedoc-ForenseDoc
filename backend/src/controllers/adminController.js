@@ -4,6 +4,7 @@ import { prisma } from "../utils/prisma.js";
 import { addManualCredits, invalidateCreditCache } from "../services/creditService.js";
 import { notify } from "../services/notificationService.js";
 import { parsePagination } from "../utils/pagination.js";
+import { cancelarVerificacao } from "../services/verificacaoStore.js";
 
 /**
  * Admin Panel — fatia mínima necessária para operar o lançamento com
@@ -368,6 +369,47 @@ export async function activateTenant(req, res) {
     return res.json({ success: true, status: newStatus });
   } catch (error) {
     console.error("[Admin] Erro ao reativar tenant:", error);
+    return res.status(500).json({ error: "Erro interno no servidor." });
+  }
+}
+
+/**
+ * Cancela a validade pública de um laudo.
+ *
+ * Existe para o caso de emissão sobre o arquivo errado. O motivo é obrigatório
+ * porque ele aparece na página pública: um laudo que passa a dizer "cancelado"
+ * sem explicar por quê lança dúvida sobre o trabalho inteiro, e quem recebeu o
+ * documento não tem a quem perguntar.
+ *
+ * O cancelamento não apaga nada. O registro continua confirmando que o laudo
+ * foi emitido e que o hash confere, o que é exatamente o que precisa continuar
+ * verdadeiro para quem já recebeu o documento.
+ */
+export async function cancelarLaudo(req, res) {
+  const motivo = String(req.body?.motivo || "").trim();
+  if (!motivo) {
+    return res.status(400).json({ error: "Informe o motivo do cancelamento." });
+  }
+
+  try {
+    const cancelado = await cancelarVerificacao(req.params.codigo, motivo);
+
+    await prisma.auditLog.create({
+      data: {
+        action: "laudo_cancelled",
+        userId: req.auth.userId,
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent") || null,
+        metadata: { codigo: req.params.codigo, motivo },
+      },
+    });
+
+    return res.json({ codigo: cancelado.codigo, situacao: cancelado.status });
+  } catch (erro) {
+    if (erro.code === "P2025") {
+      return res.status(404).json({ error: "Laudo não encontrado." });
+    }
+    console.error("[Admin] Erro ao cancelar laudo:", erro);
     return res.status(500).json({ error: "Erro interno no servidor." });
   }
 }

@@ -15,6 +15,7 @@ import { validatePdfPayload } from "../utils/pdfValidation.js";
 import { buildReportPdf } from "../services/reportPdfService.js";
 import { haversineKm } from "../utils/geoUtils.js";
 import { recomputeDerived } from "../services/analysisRecompute.js";
+import { substituirVerificacaoVigente } from "../services/verificacaoStore.js";
 import { coerenciaBloqueante } from "../engine/coerenciaLaudo.js";
 import { geocodeAddress, reverseGeocode } from "../services/geocodingService.js";
 import { ESTADO_CONFRONTO, avaliarConflitoReferencia, descreverEstadoConfronto, validarFormaDaReferencia } from "../utils/referenciaResidencial.js";
@@ -206,15 +207,9 @@ export async function analyzePdf(req, res) {
     // O slot limita a leitura/OCR preliminar; ainda não há débito nem análise
     // pericial. O worker reutiliza esta extração, em vez de reler o documento.
     const preflight = await preflightReference(Buffer.from(validation.base64, "base64"), home, extractPdfTextWithOcr);
-    if (preflight.conflito && !(homeContestacao?.contestado && homeContestacao.justificativa.length >= 15)) {
-      await releaseSlot(analysisLockKey(tenantId), lockToken);
-      lockToken = null;
-      return res.status(409).json({
-        code: "CONFLITO_REFERENCIA",
-        error: `${preflight.conflito.descricao}. Corrija ou remova a referência residencial antes de iniciar a análise, ou declare o endereço do instrumento contestado com justificativa.`,
-        conflito: preflight.conflito,
-      });
-    }
+    // Divergências entre o endereço informado e o do instrumento não bloqueiam
+    // mais a análise: o laudo é gerado calculando as distâncias para ambos os
+    // endereços e registrando a divergência cadastral.
 
     const debit = await prisma.$transaction(async (tx) => {
       const created = await tx.analysis.create({
@@ -409,13 +404,15 @@ export async function correctAnalysisGeo(req, res) {
       pontoManual: coord,
       servicos: { geocodeAddress, reverseGeocode },
     });
-    if (conflito && !(contestacao && contestacao.justificativa.length >= 15)) {
-      return res.status(409).json({
-        error: `A coordenada conflita com o endereço do instrumento: ${conflito.descricao}. Para usá-la, declare o endereço do instrumento contestado e escreva a justificativa (pelo menos 15 caracteres).`,
-        code: "CONFLITO_REFERENCIA",
-        conflito,
-      });
-    }
+    const estadoConfronto = contestacao && contestacao.justificativa?.length >= 15
+      ? ESTADO_CONFRONTO.LIBERADO_PELO_OPERADOR
+      : conflito
+        ? ESTADO_CONFRONTO.DIVERGENCIA_CADASTRAL
+        : ESTADO_CONFRONTO.DISPONIVEL;
+
+    const distanciaDivergencia = result.home?.instrumento_geo && Number.isFinite(result.home.instrumento_geo.lat)
+      ? haversineKm(coord.lat, coord.lon, result.home.instrumento_geo.lat, result.home.instrumento_geo.lon)
+      : null;
 
     // Substitui a residência pela coordenada confirmada e recalcula distâncias.
     result.home = {
@@ -430,9 +427,10 @@ export async function correctAnalysisGeo(req, res) {
         source: "manual",
         cityMatch: true,
       },
-      estado_confronto: conflito ? ESTADO_CONFRONTO.LIBERADO_PELO_OPERADOR : ESTADO_CONFRONTO.DISPONIVEL,
+      estado_confronto: estadoConfronto,
       conflito,
-      justificativa: conflito ? contestacao.justificativa : null,
+      justificativa: contestacao?.justificativa || null,
+      distancia_divergencia_cadastral: distanciaDivergencia,
       instrumento: result.home?.instrumento || null,
       endereco_literal: result.home?.endereco_literal || null,
       endereco_nao_informado: Boolean(result.home?.endereco_nao_informado),
@@ -452,6 +450,10 @@ export async function correctAnalysisGeo(req, res) {
     corrigido.geoCorrectedAt = new Date().toISOString();
 
     await prisma.analysis.update({ where: { id: analysis.id }, data: { result: corrigido } });
+
+    // O laudo mudou de conteúdo: o que foi impresso antes deixa de valer, e a
+    // página pública precisa apontar para a emissão nova.
+    await substituirVerificacaoVigente(analysis.id, req.tenantId, corrigido);
 
     await prisma.auditLog
       .create({
@@ -483,24 +485,38 @@ export async function getAnalysisPdf(req, res) {
     if (analysis.status !== "COMPLETED" || !analysis.result) {
       return res.status(409).json({ error: "Laudo indisponível: análise não concluída.", status: analysis.status });
     }
-    if (coerenciaBloqueante() && analysis.result.coerencia?.length) {
-      return res.status(409).json({
-        error: "Laudo com contradição entre seções. Revise os campos indicados antes de emitir.",
-        code: "COERENCIA",
-        coerencia: analysis.result.coerencia,
+    /*
+     * A verificação pública vai para dentro do PDF. É buscada aqui, e não no
+     * gerador, porque o gerador não consulta banco: quem monta o documento
+     * recebe pronto o que vai imprimir.
+     *
+     * Laudo anterior ao backfill não tem registro, e nesse caso o PDF sai sem
+     * o bloco em vez de falhar: melhor um laudo sem QR do que nenhum laudo.
+     */
+    let verificacao = null;
+    try {
+      verificacao = await prisma.laudoVerification.findFirst({
+        where: { analysisId: analysis.id, status: "VALIDO" },
+        select: { codigo: true, laudoHash: true },
       });
+    } catch (verifErr) {
+      console.warn("[Analyze] Falha ao consultar registro de verificação para PDF:", verifErr.message);
     }
 
+    // buildReportPdf valida o snapshot atual antes de gerar bytes ou cabeçalhos.
+    const pdf = await buildReportPdf(analysis, analysis.result, { verificacao });
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="laudo-${analysis.id.slice(0, 8)}.pdf"`);
 
-    const pdf = await buildReportPdf(analysis, analysis.result);
     pdf.on("error", (err) => {
       console.error("[Analyze] Erro ao gerar PDF:", err.message);
       if (!res.headersSent) res.status(500).end();
     });
     pdf.pipe(res);
   } catch (error) {
+    if (error.code === "COERENCIA" && !res.headersSent) {
+      return res.status(409).json({ error: error.message, code: error.code, coerencia: error.coerencia });
+    }
     console.error("[Analyze] Erro ao gerar laudo PDF:", error);
     if (!res.headersSent) return res.status(500).json({ error: "Erro interno no servidor." });
   }
@@ -695,6 +711,10 @@ export async function reviewAnalysisFields(req, res) {
     const corrigido = recomputeDerived(result, extracted);
 
     await prisma.analysis.update({ where: { id: analysis.id }, data: { result: corrigido } });
+
+    // O laudo mudou de conteúdo: o que foi impresso antes deixa de valer, e a
+    // página pública precisa apontar para a emissão nova.
+    await substituirVerificacaoVigente(analysis.id, req.tenantId, corrigido);
 
     await prisma.auditLog
       .create({

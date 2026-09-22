@@ -1,13 +1,13 @@
 import React from "react";
 import "./laudo.css";
 import {
-  classifyHashString, shortHash, nBR, formatCnpj, formatCpf, labelHashState, labelProvenance, labelModalidade, formatMetadataWarning,
+  classifyHashString, shortHash, formatCnpj, formatCpf, labelHashState, labelProvenance, labelModalidade, formatMetadataWarning,
   noteForDeclaredHashState, reportIssues, issueBucket, extractCnjFromName, labelComparisonStatus,
   comparisonStatusColor, severityColor, haversineKm, riskFromDistance, riskFromDistanceWithHistory, semPontoFinal,
 } from "./laudoUtils.js";
 import SumarioIrregularidades from "./SumarioIrregularidades.jsx";
 import { distanciaKm } from "./distancia.js";
-import { fichaBeneficioSeAplica, marcarOrigem } from "./produto.js";
+import { fichaBeneficioSeAplica } from "./produto.js";
 
 /**
  * Laudo técnico pericial, portado do motor de geração.
@@ -358,10 +358,11 @@ export default function LaudoForense({ report }) {
                     ? String(report.extracted.assinatura.hash_documento_assinado).trim()
                     : null;
                   const declaredAlgo = report.extracted.assinatura?.algoritmo_hash || null;
-                  const calc = report.hashes.sha256;
+                  const calc = String(report.hashes.sha256 || "");
                   const declaredState = report.extracted.assinatura?.hash_declarado_estado || (report.extracted.assinatura?.codigo_autenticacao_declarado ? "DECLARADO_NAO_CONFERIVEL" : "AUSENTE");
                   const cls = classifyHashString(declared);
-                  const confere = !!declared && cls?.format === "SHA-256" && declared.replace(/\s/g, "").toUpperCase() === calc.toUpperCase();
+                  const comparavel = cls?.format === "SHA-256" && /^[a-fA-F0-9]{64}$/.test(calc);
+                  const confere = comparavel && !!declared && cls?.format === "SHA-256" && declared.replace(/\s/g, "").toUpperCase() === calc.toUpperCase();
                   const vcolor = confere ? "var(--ok)" : "var(--crit)";
 
                   if (declared) {
@@ -389,13 +390,13 @@ export default function LaudoForense({ report }) {
                         <div className="row" style={{ marginTop: 14 }}>
                           <span className="row-label">Resultado da comparação</span>
                           <Badge
-                            label={!cls?.isHash ? "NÃO COMPARÁVEL" : confere ? "HASHES CONFEREM" : "DIVERGÊNCIA DETECTADA"}
-                            color={!cls?.isHash ? "#f2b03d" : confere ? "#3ddc97" : "#f06363"}
+                            label={!comparavel ? "NÃO COMPARÁVEL" : confere ? "HASHES CONFEREM" : "DIVERGÊNCIA DETECTADA"}
+                            color={!comparavel ? "#f2b03d" : confere ? "#3ddc97" : "#f06363"}
                           />
                         </div>
                         <div className="note" style={{ borderLeftColor: vcolor, background: confere ? "rgba(61,220,151,0.07)" : "rgba(240,99,99,0.07)" }}>
-                          {!cls?.isHash
-                            ? `O valor apresentado no documento como hash não corresponde a um hash criptográfico válido. ${cls?.detalhe}. A substituição do hash criptográfico por identificador dessa natureza configura defeito formal do instrumento, pois impede a verificação objetiva de integridade e autenticidade exigida para a assinatura eletrônica, nos termos da MP 2.200-2/2001.`
+                          {!comparavel
+                            ? `Comparação não realizada: o formato declarado é ${cls?.format || "não identificado"}. São necessários hashes do mesmo algoritmo e escopo; o campo calculado pelo sistema é SHA-256. Isso não determina a validade da assinatura.`
                             : confere
                             ? "O hash informado no documento confere integralmente com o hash calculado localmente sobre o arquivo. Integridade consistente entre o valor declarado e o conteúdo verificado."
                             : "O hash informado no documento diverge do hash calculado localmente sobre o arquivo. A divergência deve ser interpretada com cautela técnica: em PDFs assinados, o hash de assinatura refere-se ao conteúdo no instante da assinatura e pode não coincidir com o recálculo sobre o arquivo finalizado. Recomenda-se verificação pericial complementar antes de qualquer conclusão sobre adulteração."}
@@ -488,7 +489,14 @@ export default function LaudoForense({ report }) {
 
               {/* §2 */}
               <Section title="§ 2 · Dados do instrumento contratual">
-                {report.extracted.contrato?.condicoes_financeiras_nota && <div className="note">{report.extracted.contrato.condicoes_financeiras_nota}</div>}
+                {/* O objeto do laudo é a cadeia de custódia. Valor, taxa, CET e
+                    prazo da operação não entram: o leitor precisa saber que a
+                    ausência é deliberada, e não falha de extração. */}
+                <div className="note">
+                  Este laudo verifica e valida a cadeia de custódia do documento. As condições econômicas da
+                  operação (valores, tarifas, tributos, taxas, Custo Efetivo Total e prazos) não integram o exame
+                  e não foram aferidas aqui.
+                </div>
                 {[
                   ["Número do contrato", report.extracted.contrato?.numero],
                   ["Banco / instituição financeira", report.extracted.contrato?.banco],
@@ -499,37 +507,6 @@ export default function LaudoForense({ report }) {
                   ["Tipo de operação", report.extracted.contrato?.tipo_operacao],
                   ["Operação portada", report.extracted.contrato?.operacao_portada === true ? "Sim" : report.extracted.contrato?.operacao_portada === false ? "Não" : null],
                   ["Empregador declarado", report.extracted.contrato?.empregador ? `${report.extracted.contrato.empregador.literal}${report.extracted.contrato.empregador.identificado ? "" : " (sem razão social e sem CNPJ)"}` : null],
-                  ["Valor liberado/solicitado", report.extracted.contrato?.valor_liberado],
-                  ["Saldo portado / refinanciado", report.extracted.contrato?.saldo_portado],
-                  ["Tarifa de cadastro", report.extracted.contrato?.tarifa_cadastro],
-                  ["Seguros", report.extracted.contrato?.seguros],
-                  ["Valor dos novos recursos / total financiado", report.extracted.contrato?.valor_novos_recursos],
-                  ["Valor total do empréstimo", report.extracted.contrato?.valor_total_emprestimo],
-                  ["IOF financiado", report.extracted.contrato?.iof_financiado],
-                  ["Valor de entrada", report.extracted.contrato?.valor_entrada],
-                  ["Valor da parcela", report.extracted.contrato?.valor_parcela],
-                  ["Quantidade de parcelas mensais", report.extracted.contrato?.parcelas_mensais || report.extracted.contrato?.numero_parcelas],
-                  /* D6: a origem é impressa junto do valor. Guardar no JSON não
-                     basta: quem lê o laudo precisa saber o que o instrumento
-                     declarou e o que o sistema calculou. */
-                  [marcarOrigem("Prazo da operação (dias)", report.extracted.contrato?.prazo_dias_origem), report.extracted.contrato?.prazo_dias != null ? nBR(report.extracted.contrato.prazo_dias) : null],
-                  /* D4: a ficha publica o token completo, com a ressalva. */
-                  ["Prazo total declarado", report.extracted.contrato?.prazo_total_declarado
-                    ? (report.extracted.contrato.prazo_total_declarado.condicional
-                      ? `${report.extracted.contrato.prazo_total_declarado.texto} · declaração condicional`
-                      : `${report.extracted.contrato.prazo_total_declarado.quantidade} ${report.extracted.contrato.prazo_total_declarado.unidade}`)
-                    : null],
-                  ["Prazo efetivo, da emissão ao último vencimento (dias)", report.extracted.contrato?.prazo_efetivo_dias != null ? nBR(report.extracted.contrato.prazo_efetivo_dias) : null],
-                  [marcarOrigem("Prazo da operação (meses, aprox.)", report.extracted.contrato?.prazo_operacao_meses_aprox_origem), report.extracted.contrato?.prazo_operacao_meses_aprox != null ? nBR(report.extracted.contrato.prazo_operacao_meses_aprox, 1) : null],
-                  ["Carência até o primeiro vencimento (dias)", report.extracted.contrato?.carencia_dias != null ? nBR(report.extracted.contrato.carencia_dias) : null],
-                  ["Juros acumulados na carência", report.extracted.contrato?.juros_carencia],
-                  ["Taxa de juros mensal", report.extracted.contrato?.taxa_juros_mensal],
-                  ["Taxa de juros anual", report.extracted.contrato?.taxa_juros_anual],
-                  [marcarOrigem("Taxa de juros anual calculada", report.extracted.contrato?.taxa_juros_anual_calculada_origem), report.extracted.contrato?.taxa_juros_anual_calculada],
-                  ["CET mensal", report.extracted.contrato?.cet_mensal],
-                  ["CET anual", report.extracted.contrato?.cet_anual],
-                  ["Somatório das parcelas", report.extracted.contrato?.valor_total_parcelas],
-                  ["Custo total da operação (somatório menos liberado)", report.extracted.contrato?.custo_total ? `${report.extracted.contrato.custo_total} (${report.extracted.contrato.custo_total_percentual} do liberado)` : null],
                   ["Credor original / cedente", report.extracted.contrato?.credor_original],
                   ["Agência", report.extracted.contrato?.agencia],
                   ["Conta-corrente", report.extracted.contrato?.conta_corrente],
@@ -540,57 +517,29 @@ export default function LaudoForense({ report }) {
                   ["Primeiro vencimento", report.extracted.contrato?.data_primeiro_vencimento],
                   ["Último vencimento", report.extracted.contrato?.data_ultimo_vencimento],
                 ].map(([lbl, val]) => <Row key={lbl} label={lbl} value={val} />)}
+                {/* A nota das datas é cronologia do instrumento, não preço. */}
+                {report.extracted.contrato?.datas_nota && <div className="note">{report.extracted.contrato.datas_nota}</div>}
               </Section>
 
-              {report.extracted.afericao_matematica && (
-                <Section title="§ 2.1 · Aferição matemática do instrumento">
-                  {(() => {
-                    const m = report.extracted.afericao_matematica;
-                    const ok = (value) => value === true ? "Confere" : value === false ? "Diverge" : null;
-                    return (
-                      <>
-                        {[
-                          ["Prazo declarado", m.prazo_descricao
-                            ? `${m.prazo_descricao} · ${ok(m.prazo_confere) || (m.prazo_declarado_condicional ? "não aferido: campo condicional" : "não aferido")}`
-                            : `${m.prazo_calculado_dias != null ? nBR(m.prazo_calculado_dias) : "n/i"} dias calculados${m.prazo_declarado_dias != null ? ` contra ${nBR(m.prazo_declarado_dias)} declarados` : ", prazo declarado não localizado"} · ${ok(m.prazo_confere) || "não aferido"}`],
-                          ["Somatório das parcelas", `${m.somatorio_calculado || "n/i"} calculado${m.somatorio_declarado ? ` contra ${m.somatorio_declarado} declarado` : ""} · ${ok(m.somatorio_confere) || "não aferido"}`],
-                          ["Composição do financiado", `${m.composicao_financiado_calculada || "n/i"} calculado${m.composicao_componentes?.length ? ` (${m.composicao_componentes.map((c) => `${c.rotulo} ${c.localizado ? c.valor : "não localizado"}`).join(" + ")})` : ""} · ${ok(m.composicao_confere) || "não aferido"}`],
-                          ["Valor presente pela taxa declarada", `${m.vp_taxa_declarada || "n/i"} · ${ok(m.vp_confere) || "não aferido"}`],
-                          ["Taxa implícita sobre o valor financiado", m.juros_implicito_mensal
-                            ? `${m.juros_implicito_mensal} a.m. · ${m.juros_implicito_confere ? "confere com" : "diverge da"} taxa declarada${m.juros_implicito_delta_pp !== null ? ` (diferença de ${Math.abs(m.juros_implicito_delta_pp).toFixed(3).replace(".", ",")} ponto)` : ""} · valor presente a essa taxa ${m.vp_taxa_implicita}`
-                            : null],
-                          ["CET implícito mensal", m.cet_implicito_mensal
-                            ? `${m.cet_implicito_mensal}${m.cet_implicito_anual_calculado ? ` (${m.cet_implicito_anual_calculado} a.a. em 365 dias)` : ""}${m.cet_implicito_nota ? ` · ${m.cet_implicito_nota}` : ""} · ${m.cet_implicito_veredito || "não aferido"}`
-                            : m.cet_implicito_motivo ? `não aferido: ${m.cet_implicito_motivo}` : null],
-                          [m.cet_anual_base === "IMPLICITO" ? `Anualização do CET implícito (${m.cet_anual_base_mensal} a.m.)` : "Anualização do CET mensal declarado", m.cet_anual_calculado ? `${m.cet_anual_calculado} em 365 dias${m.cet_anual_calculado_12m ? ` · ${m.cet_anual_calculado_12m} em 12 meses` : ""}${m.cet_anual_convencao ? ` · contrato usa ${m.cet_anual_convencao}` : ""} · ${ok(m.cet_anual_confere) || "não aferido"}` : null],
-                          ["Anualização do CET mensal declarado, arredondado (informativa)", m.cet_anual_calculado_declarado ? `${m.cet_anual_calculado_declarado} em 365 dias` : null],
-                          ["Anualização da taxa de juros mensal", m.juros_anual_calculado_365 ? `${m.juros_anual_calculado_365} em 365 dias · ${m.juros_anual_calculado_12m} em 12 meses${m.juros_anual_convencao ? ` · contrato usa ${m.juros_anual_convencao}` : ""} · ${ok(m.juros_anual_confere) || "não aferido"}` : null],
-                          ["CET maior que taxa de juros", ok(m.cet_maior_que_juros)],
-                        ].map(([lbl, val]) => <Row key={lbl} label={lbl} value={val} />)}
-                        {m.composicao_nota && <div className="note">{m.composicao_nota}</div>}
-                        {m.conclusao && <div className="note">{m.conclusao}</div>}
-                      </>
-                    );
-                  })()}
-                </Section>
-              )}
+              {/* § 2.1 · aferição matemática do instrumento: fora do laudo.
+                  Somatório, composição do financiado, valor presente, taxa
+                  implícita e CET são exame econômico, não cadeia de custódia. */}
 
-              {/* §2.2 Liberação do crédito */}
+              {/* § 2.1 Liberação do crédito */}
               {report.extracted.liberacao_credito?.declarada && (
-                <Section title="§ 2.2 · Liberação do crédito e comprovante" danger={!report.extracted.liberacao_credito.comprovante}>
+                <Section title="§ 2.1 · Liberação do crédito e comprovante" danger={!report.extracted.liberacao_credito.comprovante}>
                   {(() => {
                     const l = report.extracted.liberacao_credito;
                     return (
                       <>
                         <Row label="Forma de liberação declarada" value={l.declarada.forma} />
                         <Row label="Banco / agência / conta de crédito" value={[l.declarada.banco && `Banco ${l.declarada.banco}`, l.declarada.agencia && `agência ${l.declarada.agencia}`, l.declarada.conta && `conta ${l.declarada.conta}`].filter(Boolean).join(" · ")} />
-                        <Row label="Valor que deveria ter sido creditado" value={report.extracted.contrato?.valor_liberado} />
                         <div className="row">
                           <span className="row-label">Comprovante de transferência no arquivo</span>
                           <Badge label={l.comprovante ? "LOCALIZADO" : "AUSENTE"} color={l.comprovante ? "#3ddc97" : "#f06363"} />
                         </div>
                         {l.comprovante && (
-                          <Row label="Comprovante localizado" value={[l.comprovante.pagina && `pág. ${l.comprovante.pagina}`, l.comprovante.valor, l.comprovante.data].filter(Boolean).join(" · ")} />
+                          <Row label="Comprovante localizado" value={[l.comprovante.pagina && `pág. ${l.comprovante.pagina}`, l.comprovante.data].filter(Boolean).join(" · ")} />
                         )}
                       </>
                     );
@@ -598,20 +547,16 @@ export default function LaudoForense({ report }) {
                 </Section>
               )}
 
-              {/* §2.3 Seguro prestamista */}
+              {/* § 2.2 Seguro prestamista */}
               {report.extracted.seguro_prestamista && (
-                <Section title="§ 2.3 · Seguro prestamista vinculado à operação" danger={(report.extracted.seguro_prestamista.achados || []).some((a) => a.gravidade === "ALTA")}>
+                <Section title="§ 2.2 · Seguro prestamista vinculado à operação" danger={(report.extracted.seguro_prestamista.achados || []).some((a) => a.gravidade === "ALTA")}>
                   {(() => {
                     const sg = report.extracted.seguro_prestamista;
-                    const pctBR = (v, casas = 1) => (v == null ? null : `${(v * 100).toFixed(casas).replace(".", ",")}%`);
                     return (
                       <>
                         {[
                           ["Proposta", sg.proposta ? `nº ${sg.proposta}${sg.documento ? ` (págs. ${sg.documento.paginaInicial} a ${sg.documento.paginaFinal})` : ""}` : null],
-                          ["Prêmio", sg.premio ? `${sg.premio}${sg.premio_sobre_liberado != null ? ` (${pctBR(sg.premio_sobre_liberado, 2)} do valor liberado)` : ""}` : null],
-                          ["IOF do seguro", sg.iof],
                           ["Periodicidade / forma de pagamento", [sg.periodicidade, sg.forma_pagamento].filter(Boolean).join(" · ")],
-                          ["Pró-labore", sg.pro_labore ? `${sg.pro_labore}${sg.pro_labore_sobre_premio != null ? ` (${pctBR(sg.pro_labore_sobre_premio)} do prêmio)` : ""}` : null],
                           ["Seguradora", sg.seguradora ? `${sg.seguradora.nome}${sg.seguradora.cnpj ? `, CNPJ ${sg.seguradora.cnpj}` : ""}` : null],
                           ["Corretora", sg.corretora ? `${sg.corretora.nome}, CNPJ ${sg.corretora.cnpj}, SUSEP ${sg.corretora.susep}` : null],
                           ["Estipulante", sg.estipulante ? `${sg.estipulante.nome}, CNPJ ${sg.estipulante.cnpj}` : null],
@@ -622,13 +567,11 @@ export default function LaudoForense({ report }) {
                             <div className="sub-head">Coberturas</div>
                             <div className="audit-table-wrap">
                               <table className="audit-table">
-                                <thead><tr><th>Cobertura</th><th>Prêmio</th><th>Parte do prêmio</th><th>Carência</th><th>Franquia</th><th>Teto</th></tr></thead>
+                                <thead><tr><th>Cobertura</th><th>Carência</th><th>Franquia</th><th>Teto</th></tr></thead>
                                 <tbody>
                                   {sg.coberturas.map((c) => (
                                     <tr key={c.nome}>
                                       <td>{c.nome}</td>
-                                      <td className="mono-cell">{c.premio || "-"}</td>
-                                      <td className="mono-cell">{pctBR(c.participacao_premio) || "-"}</td>
                                       <td>{c.carencia_dias ? `${c.carencia_dias} dias` : "não há"}</td>
                                       <td>{c.franquia_dias ? `${c.franquia_dias} dias` : "não há"}</td>
                                       <td>{c.teto_parcelas ? `${c.teto_parcelas} parcelas` : "-"}</td>
@@ -724,6 +667,20 @@ export default function LaudoForense({ report }) {
                   <>
                     <Row label="Endereço adotado" value={report.home.query} nullText="Nenhum endereço informado ou extraído" />
                     <Row label="Origem do endereço" value={report.home.source} />
+                    {(report.home.estado_confronto === "DIVERGENCIA_CADASTRAL" || report.home.conflito) && report.home.instrumento && (
+                      <>
+                        <Row
+                          label="Endereço extraído do contrato"
+                          value={[report.home.instrumento.cidade, report.home.instrumento.uf, report.home.instrumento.cep].filter(Boolean).join(", ") || "município do contrato"}
+                        />
+                        {report.home.distancia_divergencia_cadastral != null && (
+                          <Row
+                            label="Divergência entre os endereços"
+                            value={`${report.home.distancia_divergencia_cadastral.toFixed(1).replace(".", ",")} km`}
+                          />
+                        )}
+                      </>
+                    )}
                   </>
                 )}
                 {referenciaRecusada(report.home) ? null : report.home.geo && (report.ipAnalysis.length > 0 || report.contractGeo) ? (
@@ -880,74 +837,13 @@ export default function LaudoForense({ report }) {
                   <div className="note">{report.extracted.assinatura.observacoes}</div>
                 )}
 
-                {(() => {
-                  const a = report.extracted.assinatura || {};
-                  const cc = report.extracted.cadeia_custodia || {};
-                  const eliminatorios = [
-                    ["Hash conferível declarado", !!(cc.eliminatorios?.hash_declarado_emissor || cc.hash_integridade)],
-                    ["Provedor de assinatura identificado", !!cc.eliminatorios?.provedor_assinatura_identificado],
-                    ["Carimbo de tempo independente", !!cc.eliminatorios?.carimbo_tempo_independente],
-                    ["Registro de coleta e preservação", !!cc.eliminatorios?.registro_coleta_preservacao],
-                  ];
-                  const apoio = [
-                    ["Identificação do signatário", !!(cc.identificacao_signatario || a.titular_certificado || a.cpf_titular || report.extracted.cliente?.nome)],
-                    ["Registro de IP", !!(cc.registro_ip || report.ipAnalysis.length > 0)],
-                    ["Data/hora indicada", !!(cc.carimbo_tempo || a.data_hora_assinatura)],
-                    ["Geolocalização tecnicamente válida", !!(cc.geolocalizacao && report.contractGeo)],
-                    ["Método de autenticação operacional registrado", !!(cc.metodo_autenticacao || (a.metodos_autenticacao && a.metodos_autenticacao.length > 0))],
-                    ["Trilha de auditoria", !!cc.trilha_auditoria],
-                    ["Menção de aceite no documento", !!cc.mencao_aceite],
-                  ];
-                  const missing = eliminatorios.filter((it) => !it[1]).map((it) => it[0].toLowerCase());
-                  const demonstrada = missing.length === 0;
-                  const vcolor = demonstrada ? "#3ddc97" : "#f06363";
-                  const result = cc.resultado || (demonstrada ? "CADEIA DE CUSTÓDIA DEMONSTRADA" : "CADEIA DE CUSTÓDIA NÃO DEMONSTRADA");
+                <div className="sub-head">Checklist de referências documentais</div>
+                {report.cadeiaCustodia ? <>
+                  <Row label="Referências localizadas" value={`${report.cadeiaCustodia.presentes}/${report.cadeiaCustodia.total}`} />
+                  <div className="note">Presença documental não valida autoria, integridade ou completude dos registros originais.</div>
+                  {(report.cadeiaCustodia.elementos || []).map(e => <Row key={e.chave} label={e.nome} value={e.presente ? "REFERÊNCIA LOCALIZADA" : "NÃO LOCALIZADA"} />)}
+                </> : <div className="note">Checklist consolidado indisponível nesta análise. Reprocesse o documento para obter a contagem atual; não é possível inferir validade desta ausência.</div>}
 
-                  return (
-                    <>
-                      <div className="sub-head">Cadeia de custódia da assinatura</div>
-                      <div className="dist-banner" style={{ borderColor: `${vcolor}55`, background: `${vcolor}14`, marginTop: 16 }}>
-                        <div>
-                          <div className="dl">Resultado técnico por itens eliminatórios</div>
-                          <div className="dv" style={{ color: vcolor }}>{result}</div>
-                        </div>
-                        <Badge label={demonstrada ? "DEMONSTRADA" : "NÃO DEMONSTRADA"} color={vcolor} />
-                      </div>
-                      <div className="note" style={{ borderLeftColor: vcolor, background: `${vcolor}12` }}>
-                        {demonstrada
-                          ? "Os itens eliminatórios foram encontrados na extração automática. Ainda assim, os logs brutos e o certificado devem ser confrontados manualmente antes do uso processual."
-                          : `Não foi aplicado percentual de completude porque faltam itens eliminatórios: ${missing.join(", ")}. Sem esses elementos, o relatório não afirma autenticidade, integridade ou validade jurídica da assinatura.`}
-                      </div>
-                      {(a.hash_declarado_estado === "DECLARADO_NAO_CONFERIVEL" || a.codigo_autenticacao_estado === "DECLARADO_NAO_CONFERIVEL") && (
-                        <div className="note" style={{ borderLeftColor: "var(--warn)", background: "rgba(242,176,61,0.07)" }}>
-                          Existe código de autenticação declarado pelo emissor, mas ele não é conferível por método público. O item eliminatório permanece não satisfeito até que a instituição informe algoritmo, payload assinado e procedimento de verificação.
-                        </div>
-                      )}
-                      {cc.placar && (
-                        <div className="dist-banner" style={{ borderColor: "rgba(133,149,168,0.35)", background: "rgba(133,149,168,0.08)", marginTop: 12 }}>
-                          <div>
-                            <div className="dl">Placar técnico da cadeia</div>
-                            <div className="dv">Itens eliminatórios satisfeitos: {cc.placar.eliminatorios_presentes} de {cc.placar.eliminatorios_total}. Elementos auxiliares localizados: {cc.placar.auxiliares_presentes} de {cc.placar.auxiliares_total}.</div>
-                          </div>
-                        </div>
-                      )}
-                      <div className="sub-head">Itens eliminatórios</div>
-                      {eliminatorios.map(([lbl, ok]) => (
-                        <div className="row" key={lbl}>
-                          <span className="row-label">{lbl}</span>
-                          <Badge label={ok ? "PRESENTE" : "AUSENTE"} color={ok ? "#3ddc97" : "#f06363"} />
-                        </div>
-                      ))}
-                      <div className="sub-head">Elementos auxiliares encontrados</div>
-                      {apoio.map(([lbl, ok]) => (
-                        <div className="row" key={lbl}>
-                          <span className="row-label">{lbl}</span>
-                          <Badge label={ok ? "SIM" : "NÃO"} color={ok ? "#f2b03d" : "#8595a8"} />
-                        </div>
-                      ))}
-                    </>
-                  );
-                })()}
               </Section>
 
               {/* §4.1 Auditoria detalhada do trilho */}
@@ -1250,6 +1146,11 @@ export default function LaudoForense({ report }) {
                 {report.contractGeo ? (
                   <>
                     <div className="sub-head">Confronto · residência do cliente × geolocalização declarada no contrato</div>
+                    {report.home.distancia_divergencia_cadastral != null && (
+                      <div className="note" style={{ borderLeftColor: "var(--crit)", background: "rgba(240,99,99,0.08)", marginBottom: 14 }}>
+                        <strong>Divergência Cadastral Identificada:</strong> O endereço fornecido como residência do cliente ({report.home.query || report.home.conflito?.manual?.texto}) difere da qualificação cadastral extraída do contrato ({[report.home.instrumento?.cidade, report.home.instrumento?.uf].filter(Boolean).join("/") || "município do contrato"}), distantes em aproximadamente <strong>{report.home.distancia_divergencia_cadastral.toFixed(1).replace(".", ",")} km</strong>. O laudo analisa as distâncias para ambas as referências.
+                      </div>
+                    )}
                     <div className="grid-2">
                       <div className="geo-card" style={{ borderTopColor: "var(--accent)" }}>
                         <div className="gtitle" style={{ color: "var(--accent)" }}>Residência do cliente (referência)</div>
@@ -1287,6 +1188,12 @@ export default function LaudoForense({ report }) {
                     {distanciaKm(report.contractGeo.distance) !== null ? (
                       <div className="geo-visual-block">
                         <DistanceBanner label="Distância: residência do cliente → local declarado da assinatura" km={report.contractGeo.distance} />
+                        {report.contractGeo.distanceToInstrumento != null && (
+                          <div className="row" style={{ marginTop: 6, marginBottom: 8, padding: "6px 12px", background: "rgba(133,149,168,0.08)", borderRadius: 6 }}>
+                            <span className="row-label" style={{ fontSize: 12 }}>Distância: endereço extraído do contrato → local declarado da assinatura</span>
+                            <span className="row-value" style={{ fontWeight: 700, fontSize: 13, color: "var(--accent)" }}>{report.contractGeo.distanceToInstrumento.toFixed(2).replace(".", ",")} km</span>
+                          </div>
+                        )}
                         <GeoMap
                           home={report.home.geo}
                           sign={{ lat: report.contractGeo.lat, lon: report.contractGeo.lon }}
@@ -1320,12 +1227,18 @@ export default function LaudoForense({ report }) {
                       const cor = d?.tom === "ok" ? "#3ddc97" : d?.tom === "danger" ? "#f06363" : "#f2b03d";
                       return (
                         <>
-                          <div className="sub-head">Confronto · geolocalização declarada no contrato × origem da conexão (IP)</div>
+                          <div className="sub-head">Confronto · GPS declarado × consulta de geolocalização do IP</div>
                           <div className="geo-visual-block">
                             <div className="row">
                               <span className="row-label">Distância entre o local declarado e a origem do IP {ipRef.endereco}</span>
                               <span className="row-value" style={{ color: cor, fontWeight: 700 }}>{distanciaKm(ipRef.distanceToSignature).toFixed(2).replace(".", ",")} km{d?.rotulo ? ` · ${d.rotulo}` : ""}</span>
                             </div>
+                            {ipRef.distanceToInstrumento != null && (
+                              <div className="row" style={{ marginTop: 4, padding: "4px 8px", background: "rgba(133,149,168,0.06)", borderRadius: 4 }}>
+                                <span className="row-label" style={{ fontSize: 12 }}>Distância entre a origem do IP e o endereço extraído do contrato</span>
+                                <span className="row-value" style={{ fontWeight: 600, fontSize: 12, color: "var(--muted)" }}>{distanciaKm(ipRef.distanceToInstrumento).toFixed(2).replace(".", ",")} km</span>
+                              </div>
+                            )}
                             {d?.sintese && <div className="note" style={{ borderLeftColor: cor }}>{d.sintese}</div>}
                             <GeoMap
                               home={{ lat: report.contractGeo.lat, lon: report.contractGeo.lon }}
@@ -1334,7 +1247,7 @@ export default function LaudoForense({ report }) {
                               distanceKm={distanciaKm(ipRef.distanceToSignature)}
                               riskColor={cor}
                               targetLabel="Localização aproximada do IP"
-                              caption="Coordenada declarada no log da assinatura × localização aproximada do IP informada pelo provedor. Este confronto não usa a residência. O ponto do IP pode representar a central da operadora, CGNAT ou VPN, e só incompatibilidade de ordem de grandeza tem valor indiciário."
+                              caption="Coordenada declarada no log da assinatura × localização aproximada do IP informada pelo provedor. Este confronto não usa a residência. O ponto do IP pode representar a central da operadora, CGNAT ou VPN, e não demonstra localização histórica, presença física ou autoria. A margem de erro do serviço não foi fornecida."
                             />
                           </div>
                         </>
@@ -1395,6 +1308,8 @@ export default function LaudoForense({ report }) {
                                 ["Provedor (ISP / ASN)", ip.geo.isp],
                                 ["Fuso horário", ip.geo.timezone],
                                 ["Fonte da geolocalização", ip.geo.source],
+                                ["Consulta externa", `${ip.geo.queryId || "ID não registrado"} · ${ip.geo.queriedAt || "data não registrada"}`],
+                                ["Granularidade", ip.historico?.precisionOverride || ip.geo.granularity || "não informada"],
                               ].map(([lbl, val]) => <Row key={lbl} label={lbl} value={val} />)}
                               {hasIpGeoCoords && <Row label="Coordenadas do IP (registro atual)" value={`${ip.geo.lat.toFixed(7)}, ${ip.geo.lon.toFixed(7)}`} mono />}
                               {distanciaKm(ip.distanceToSignature) !== null && (
@@ -1553,14 +1468,12 @@ export default function LaudoForense({ report }) {
                   const declaredHash = report.extracted.assinatura?.hash_documento_assinado;
                   const clsHash = declaredHash ? classifyHashString(declaredHash) : null;
                   const hashDefect = !!(clsHash && !clsHash.isHash);
-                  const cetPresent = !!(ctr.cet_mensal || ctr.cet_anual);
                   const geoRisk =
                     (report.contractGeo?.distance != null && report.contractGeo.distance >= 300) ||
                     report.ipAnalysis.some((ip) => ip.distance != null && ip.distance >= 300);
 
                   const destaques = [];
                   if (hashDefect) destaques.push("defeito formal de integridade do documento");
-                  if (cetPresent) destaques.push("informação e consistência do CET");
                   destaques.push("validade da assinatura eletrônica e ônus da prova");
                   if (geoRisk) destaques.push("incompatibilidade geográfica do ato");
 
@@ -1581,11 +1494,6 @@ export default function LaudoForense({ report }) {
                       ["Lei 8.213/1991, art. 115", "Define as hipóteses e os limites de desconto sobre o valor do benefício previdenciário."],
                       ["Normas do INSS sobre consignações (Instrução Normativa vigente) e Resoluções do CNPS", "Regulam margem consignável, formalização e averbação. Número da IN vigente: verificar conforme a data do contrato."],
                     ]]]),
-                    ["Custo Efetivo Total (CET)", [
-                      ["Resolução CMN 4.881/2020, art. 2º", "Define o CET como a taxa que representa, de forma consolidada, todos os encargos e despesas da operação."],
-                      ["Regulamentação do CMN sobre CET", "Exige informação prévia e clara do custo efetivo total e dos componentes que formam o fluxo financeiro da operação."],
-                      ["CDC, art. 52, c/c Resolução CMN 4.881/2020", "A ausência, a incorreção ou a inconsistência do CET frente à taxa de juros caracteriza falha no dever de informação."],
-                    ]],
                     ["Assinatura eletrônica e ônus da prova", [
                       ["MP 2.200-2/2001, art. 10, § 2º", "Admite outros meios de comprovação de autoria e integridade, além da certificação ICP-Brasil."],
                       ["Lei 14.063/2020", "Classifica assinaturas em simples, avançada e qualificada nas interações com entes públicos; em relações privadas, use como parâmetro técnico por analogia."],
@@ -1672,7 +1580,7 @@ export default function LaudoForense({ report }) {
               {/* Legal */}
               <div className="legal">
                 {[
-                  "AVISO LEGAL: Este laudo foi gerado automaticamente pelo sistema ForenseDoc (Ronney Menezes Advocacia, OAB/PI 15.508 · OAB/MA 26.102-A) para fins de análise jurídica preliminar.",
+                  "AVISO LEGAL: Este laudo foi gerado automaticamente pelo sistema ForenseDoc para fins de análise técnica preliminar da cadeia de custódia do documento.",
                   "Os hashes criptográficos SHA-256 e SHA-1 foram calculados pelo servidor sobre o arquivo original recebido (NIST FIPS 180-4).",
                   report.ipAnalysis.length > 0 ? "A geolocalização de IPs é fornecida por serviços de terceiros (ipapi.co, com contingência ipwho.is) e possui margem de erro inerente; endereços de ISPs, CGNAT e VPNs podem não refletir a localização física real do usuário." : null,
                   (report.home.geo || report.contractGeo?.geocoded) ? "A geocodificação de endereços usa o serviço OpenStreetMap Nominatim." : null,

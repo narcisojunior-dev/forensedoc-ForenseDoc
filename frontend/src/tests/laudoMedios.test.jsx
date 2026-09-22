@@ -69,7 +69,10 @@ describe("MED-05: quesitos por achado", () => {
     });
     const report = montarRelatorio({ analysisId: "a1", result: r });
     const lib = report.quesitos.find((q) => q.titulo === "Comprovação do Crédito Liberado");
-    expect(lib.quesito).toMatch(/R\$ 1\.779,15 na conta 005555-1, agência 1234, Banco 237/);
+    expect(lib.quesito).toMatch(/comprovante de transferência relativo ao crédito na conta 005555-1, agência 1234, Banco 237/);
+    // O quesito pede o comprovante e a titularidade da conta; o valor do dossiê
+    // não é afirmado, porque o laudo não examina as condições econômicas.
+    expect(lib.quesito).not.toContain("R$ 1.779,15");
   });
 });
 

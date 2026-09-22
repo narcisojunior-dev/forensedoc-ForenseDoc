@@ -1,7 +1,7 @@
 import { haversineKm } from "../utils/geoUtils.js";
 import { describeIpDivergence, classifyDeclaredDivergence, aplicarHistoricoDoIp } from "../utils/geoDivergence.js";
 import { buildCustodyChain } from "../reports/custodyChain.js";
-import { buildIrregularitySummary } from "../engine/irregularitySummary.js";
+import { buildIrregularitySummary, classifyIpRole } from "../engine/irregularitySummary.js";
 import { verificarCoerencia, coerenciaBloqueante } from "../engine/coerenciaLaudo.js";
 import { montarConfrontoGeografico } from "../utils/distancia.js";
 import { montarConfrontoEnderecos } from "../utils/confrontoEnderecos.js";
@@ -26,7 +26,7 @@ export function buildSummaryForResult(result, extracted) {
       extracted,
       home: result.home,
       confronto_geografico: result.confronto_geografico || montarConfrontoGeografico(result),
-      confronto_enderecos: result.confronto_enderecos || montarConfrontoEnderecos(pontosDoConfronto(result)),
+      confronto_enderecos: result.confronto_enderecos || montarConfrontoEnderecos(pontosDoConfronto(result, extracted)),
       contractGeo: result.contractGeo,
       geoDeclaredPresent: result.geoDeclaredPresent,
       ipAnalysis: result.ipAnalysis || [],
@@ -66,7 +66,9 @@ export function buildSummaryForResult(result, extracted) {
  * em vez de virar mais um job na fila.
  */
 /** Pontos dos quatro pares, a partir do resultado já recalculado. */
-export function pontosDoConfronto(result) {
+export function pontosDoConfronto(result, extracted = {}) {
+  const eventos = extracted.trilha_eventos?.eventos || [];
+  const evidencias = filtro => eventos.flatMap((ev, i) => filtro(ev) ? [`evento-${i + 1}: ${ev.nome || "registro"} ${ev.data_hora || ""}`] : []);
   const ip = (result.ipAnalysis || []).find((i) => Number.isFinite(i.geo?.lat) && Number.isFinite(i.geo?.lon));
   const laudo = result.home?.geo && Number.isFinite(result.home.geo.lat)
     ? { lat: result.home.geo.lat, lon: result.home.geo.lon, rotulo: result.home.query, precisao: result.home.geo.precision || null }
@@ -75,9 +77,9 @@ export function pontosDoConfronto(result) {
     instrumento: result.home?.instrumento_geo || null,
     emissao: result.home?.emissao_geo || null,
     laudo,
-    ip: ip ? { lat: ip.geo.lat, lon: ip.geo.lon, rotulo: [ip.geo.city, ip.geo.region].filter(Boolean).join("/") || ip.endereco, precisao: "ip", fonte: ip.geo.source || null } : null,
+    ip: ip ? { lat: ip.geo.lat, lon: ip.geo.lon, rotulo: [ip.endereco, [ip.geo.city, ip.geo.region].filter(Boolean).join("/")].filter(Boolean).join(" · "), precisao: ip.historico?.precisionOverride || ip.geo.granularity || "ip", fonte: ip.geo.source || null, consulta: ip.geo.queryId || null, consultadoEm: ip.geo.queriedAt || null, evidencias: evidencias(ev => ev.ip === ip.endereco) } : null,
     gps: result.contractGeo && Number.isFinite(result.contractGeo.lat)
-      ? { lat: result.contractGeo.lat, lon: result.contractGeo.lon, rotulo: result.contractGeo.municipio || "coordenada do log", precisao: result.contractGeo.precision || "gps", fonte: result.contractGeo.fonte || result.contractGeo.source || "coordenada declarada no documento" }
+      ? { lat: result.contractGeo.lat, lon: result.contractGeo.lon, rotulo: result.contractGeo.municipio || "coordenada do log", precisao: result.contractGeo.precision || "gps", fonte: result.contractGeo.fonte || result.contractGeo.source || "coordenada declarada no documento", evidencias: evidencias(ev => ev.lat === result.contractGeo.lat && ev.lon === result.contractGeo.lon) }
       : null,
   };
 }
@@ -114,18 +116,26 @@ export function recomputeDerived(result, extracted) {
         ? haversineKm(contractGeo.lat, contractGeo.lon, ip.geo.lat, ip.geo.lon)
         : null;
 
+    const role = classifyIpRole(ip, { extracted });
+    const consultaLimitada = role !== "access" && Number.isFinite(distanceToSignature);
     return {
       ...ip,
+      role,
       distance,
       distanceToSignature,
       divergenciaResidencia: aplicarHistoricoDoIp(
         describeIpDivergence({ km: distance, referenciaConfirmada, referenciaRotulo: result.home?.source }),
         ip.historico
       ),
-      divergenciaAssinatura: aplicarHistoricoDoIp(
+      divergenciaAssinatura: consultaLimitada ? {
+        km: distanceToSignature, nivel: "descritivo", rotulo: "DISTÂNCIA DESCRITIVA", tom: "neutral",
+        sintese: "Distância entre o GPS declarado e os pontos retornados pela consulta de geolocalização do IP. O papel desse IP na sessão não foi determinado nesta análise. Sem margem de erro fornecida, esse número não confirma nem afasta presença física ou autoria.",
+        ressalva: "Consulta externa não comprova a localização na data do ato. A coordenada do documento não foi confirmada pelo operador.",
+      } : aplicarHistoricoDoIp(
         describeIpDivergence({
           km: distanceToSignature,
-          referenciaConfirmada: contractGeo?.precision === "gps",
+          referenciaConfirmada: false,
+          referenciaDeclarada: true,
           referenciaRotulo: "geolocalização declarada no contrato",
         }),
         ip.historico
@@ -135,7 +145,7 @@ export function recomputeDerived(result, extracted) {
 
   const recalculado = { ...result, contractGeo, ipAnalysis };
   recalculado.confronto_geografico = montarConfrontoGeografico(recalculado);
-  recalculado.confronto_enderecos = montarConfrontoEnderecos(pontosDoConfronto(recalculado));
+  recalculado.confronto_enderecos = montarConfrontoEnderecos(pontosDoConfronto(recalculado, extracted));
   const sumarioIrregularidades = buildSummaryForResult(recalculado, extracted);
   return {
     ...recalculado,
@@ -147,7 +157,7 @@ export function recomputeDerived(result, extracted) {
     cadeiaCustodia: buildCustodyChain(
       extracted,
       ipAnalysis,
-      Boolean(result.geoDeclaredPresent)
+      Boolean(result.geoDeclaredPresent || contractGeo)
     ),
   };
 }

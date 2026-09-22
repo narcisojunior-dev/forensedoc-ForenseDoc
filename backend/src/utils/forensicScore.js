@@ -36,7 +36,7 @@ export function calculateForensicScore({ distKmIp, distKmGps, distKmIpVsGps }) {
   }
 
   // Se IP e GPS estão coerentes entre si (< 50 km) mas a milhares de km do domicílio,
-  // a probabilidade de fraude deliberada por terceiro é máxima.
+  // o índice descritivo aumenta; isso não é probabilidade de fraude.
   if (distRef >= 500 && distanciaKm(distKmIpVsGps) !== null && distanciaKm(distKmIpVsGps) <= 50) {
     score = Math.max(score, 98);
   }
@@ -45,26 +45,26 @@ export function calculateForensicScore({ distKmIp, distKmGps, distKmIpVsGps }) {
 
   let nivel = "BAIXO";
   let tom = "success";
-  let rotulo = "COMPATÍVEL / BAIXO RISCO";
+  let rotulo = "BAIXA DISTÂNCIA GEOGRÁFICA";
   let conclusao = "A origem dos registros coincide ou situa-se em raio compatível com o domicílio declarado.";
 
   if (score >= 80) {
     nivel = "CRÍTICO";
     tom = "danger";
-    rotulo = "RISCO CRÍTICO DE FRAUDE";
+    rotulo = "DISTÂNCIA GEOGRÁFICA ELEVADA";
     conclusao =
-      "Incompatibilidade geográfica absoluta. Todos os elementos técnicos apontam execução do ato em localidade remota e distinta do domicílio do titular.";
+      "Os pontos comparados apresentam distância elevada. Geolocalização de IP é aproximada e deslocamento pode ser legítimo; este índice não mede probabilidade de fraude nem determina autoria.";
   } else if (score >= 50) {
     nivel = "ALTO";
     tom = "warning";
     rotulo = "ANOMALIA GEOGRÁFICA ELEVADA";
     conclusao =
-      "Divergência expressiva de localidade que extrapola a margem esperada de erro de operadora ou deslocamento corriqueiro.";
+      "Há distância expressiva entre os pontos disponíveis. Interpretar conforme a granularidade das fontes e o contexto do ato, sem presumir fraude ou deslocamento impossível.";
   } else if (score >= 25) {
     nivel = "MODERADO";
     tom = "warning";
     rotulo = "DIVERGÊNCIA MODERADA";
-    conclusao = "Pequena oscilação de município ou região metropolitana. Requer exame do histórico de deslocamento.";
+    conclusao = "Distância intermediária na escala heurística. Conferir precisão das coordenadas e contexto; o índice não mede probabilidade de fraude.";
   }
 
   return {

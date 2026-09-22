@@ -31,7 +31,7 @@ describe("ordenação por gravidade e eixo da tese", () => {
     // O BIO2 nasce do inventário de imagens do PDF, que o caso de texto não tem.
     extracted.achados_irregularidade.push({ codigo: "BIO2", gravidade: "ALTA", titulo: "Lastro biométrico frágil", texto: "fotografia única" });
     const sumario = buildIrregularitySummary({ reportId: "FD-T", extracted, hashes: {}, ipAnalysis: [] });
-    expect(sumario.findings.slice(0, 3).map((f) => f.key)).toEqual(["LIB1", "BIO2", "TRL1-CCB"]);
+    expect(sumario.findings.slice(0, 3).map((f) => f.key)).toEqual(["LIB1", "BIO2", "INT1"]);
   });
 });
 

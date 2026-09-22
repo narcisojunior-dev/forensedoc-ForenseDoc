@@ -77,11 +77,13 @@ export function classifyIpDivergence(km) {
  * contra um centroide de cidade não permite as mesmas afirmações que comparar
  * contra um ponto conferido por humano.
  */
-export function describeIpDivergence({ km, referenciaConfirmada, referenciaRotulo }) {
+export function describeIpDivergence({ km, referenciaConfirmada, referenciaRotulo, referenciaDeclarada = false }) {
   const c = classifyIpDivergence(km);
   if (!c) return null;
 
-  const ressalva = referenciaConfirmada
+  const ressalva = referenciaDeclarada
+    ? "A referência é uma coordenada declarada no documento, sem confirmação independente de sua origem. A consulta de IP não comprova a localização histórica na data do ato."
+    : referenciaConfirmada
     ? "A referência é coordenada confirmada pelo operador, o que dá ao confronto o maior grau de precisão disponível neste laudo."
     : `A referência (${referenciaRotulo || "endereço informado"}) foi obtida por geocodificação automática e carrega imprecisão própria, que se soma à da geolocalização por IP.`;
 

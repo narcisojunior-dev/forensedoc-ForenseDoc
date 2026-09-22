@@ -62,7 +62,8 @@ test("3/5 - ausência de dados gera cautelas sem inventar coordenadas ou IP", ()
   assert.ok(summary.allFindings.some((item) => item.key === "signature-absent"));
   assert.equal(summary.geo.items.length, 0);
   assert.equal(summary.ipCards.length, 0);
-  assert.match(summary.synthesis, /ausência integral de trilha/i);
+  assert.match(summary.synthesis, /extração disponível/i);
+  assert.doesNotMatch(summary.synthesis, /ausência integral de trilha/i);
 });
 
 test("4/5 - IPs de banco e CDN não são tratados como localização do consumidor", () => {
@@ -148,4 +149,11 @@ test("município diverso usa a residência de referência geocodificada, quando 
   const achado = summary.allFindings.find((f) => f.key === "gps-outro-municipio");
   assert.ok(achado, "achado de município diverso ausente");
   assert.match(achado.text, /Pedro II\/PI, residência de referência/);
+});
+
+test("lacunas e achados não são convertidos em suspeição agregada do contrato", () => {
+  const summary = buildIrregularitySummary({ extracted: { contrato: {}, cliente: {}, assinatura: {}, achados_irregularidade: Array.from({ length: 4 }, (_, i) => ({codigo: `T${i}`, gravidade: "ALTA", titulo: `Lacuna ${i}`, texto: "Documento a solicitar."})) }, ipAnalysis: [] });
+  assert.equal(summary.suspicionGrade.label, "REVISÃO DOCUMENTAL NECESSÁRIA");
+  assert.match(summary.suspicionGrade.rationale, /não atestam fraude/);
+  assert.ok(summary.allFindings.length >= 4);
 });

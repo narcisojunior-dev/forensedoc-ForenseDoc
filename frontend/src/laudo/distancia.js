@@ -66,7 +66,10 @@ export function montarConfrontoGeografico(result = {}) {
   const home = result.home || {};
   const ips = result.ipAnalysis || [];
   const gps = distanciaKm(result.contractGeo?.distance);
+  const gpsInstrumento = distanciaKm(result.contractGeo?.distanceToInstrumento);
   const ipsResidencia = ips.map((ip) => ({ endereco: ip.endereco || null, km: distanciaKm(ip.distance) }));
+  const ipsInstrumento = ips.map((ip) => ({ endereco: ip.endereco || null, km: distanciaKm(ip.distanceToInstrumento) }));
+  const divergenciaCadastral = distanciaKm(home.distancia_divergencia_cadastral);
 
   let status;
   if (home.estado_confronto === "RECUSADO_CONFLITO" || home.estado_confronto === "INDISPONIVEL_NAO_INFORMADO") {
@@ -86,7 +89,10 @@ export function montarConfrontoGeografico(result = {}) {
     motivo: calculado ? null : home.alerta || MOTIVOS[status],
     distancias: {
       gps_residencia: calculado ? gps : null,
+      gps_instrumento: gpsInstrumento,
       ips_residencia: calculado ? ipsResidencia : ipsResidencia.map((ip) => ({ ...ip, km: null })),
+      ips_instrumento: ipsInstrumento,
+      divergencia_cadastral: divergenciaCadastral,
     },
     gps_ip: gpsIp,
     suspeitas: calculado

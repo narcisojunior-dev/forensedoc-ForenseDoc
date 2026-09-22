@@ -1,3 +1,4 @@
+import { buildCustodyChain } from "../reports/custodyChain.js";
 import { ordenarAchados } from "./eixosAchado.js";
 import { distanciaKm, distanciaSuspeita, formatarDistancia, montarConfrontoGeografico, STATUS_CONFRONTO } from "../utils/distancia.js";
 import { descreverIndisponibilidade } from "../utils/confrontoEnderecos.js";
@@ -166,28 +167,8 @@ function buildIpCard(ip, role, bank) {
 }
 
 function chainScore(report) {
-  const extracted = report?.extracted || {};
-  const signature = extracted.assinatura || {};
-  const chain = extracted.cadeia_custodia || {};
-  if (chain.placar) {
-    return {
-      present: Number(chain.placar.auxiliares_presentes || 0),
-      total: Number(chain.placar.auxiliares_total || 7),
-      eliminatoriosPresent: Number(chain.placar.eliminatorios_presentes || 0),
-      eliminatoriosTotal: Number(chain.placar.eliminatorios_total || 4),
-    };
-  }
-  const items = [
-    chain.identificacao_signatario || signature.titular_certificado || signature.cpf_titular || extracted.cliente?.nome,
-    chain.registro_ip || (report.ipAnalysis || []).length > 0,
-    chain.carimbo_tempo || signature.data_hora_assinatura,
-    chain.geolocalizacao || report.geoDeclaredPresent || report.contractGeo,
-    chain.metodo_autenticacao || signature.metodos_autenticacao?.length,
-    chain.hash_integridade || signature.hash_documento_assinado,
-    chain.trilha_auditoria,
-    chain.evidencia_aceite,
-  ];
-  return { present: items.filter(Boolean).length, total: items.length };
+  const c = buildCustodyChain(report.extracted || {}, report.ipAnalysis || [], Boolean(report.geoDeclaredPresent || report.contractGeo));
+  return { present: c.presentes, total: c.total, missing: c.faltantes.map(e => e.nome) };
 }
 
 function evidenceSeverity(text) {
@@ -238,8 +219,9 @@ export function buildIrregularitySummary(report = {}) {
 
   const addCheck = (domain, key, status, detail = "") => checks.push({ domain, key, status, detail });
   const addFinding = (severity, key, title, text) => {
-    if (issueKeys.has(key)) return;
-    issueKeys.add(key);
+    const identidade = JSON.stringify([key, title, String(text || "").replace(/\s+/g, " ").trim()]);
+    if (issueKeys.has(identidade)) return;
+    issueKeys.add(identidade);
     // O texto entra integral. Quem resume é a página do sumário, em
     // `displayFindings`, e o corpo do laudo publica o texto completo.
     const entry = { severity, key, title, text: String(text || "").replace(/\s+/g, " ").trim() };
@@ -248,13 +230,13 @@ export function buildIrregularitySummary(report = {}) {
   const addDiligence = (key, title, text) => {
     if (diligenceKeys.has(key)) return;
     diligenceKeys.add(key);
-    diligences.push({ key, title, text: compact(text, 220) });
+    diligences.push({ key, title, text: String(text || "").replace(/\s+/g, " ").trim() });
   };
 
   const declaredHash = String(signature.hash_documento_assinado || "").replace(/\s/g, "");
   const calculatedHash = String(report.hashes?.sha256 || "").replace(/\s/g, "");
   const declaredKind = hashKind(declaredHash);
-  const hashMismatch = declaredKind === "SHA-256" && calculatedHash
+  const hashMismatch = declaredKind === "SHA-256" && hashKind(calculatedHash) === "SHA-256"
     && declaredHash.toUpperCase() !== calculatedHash.toUpperCase();
   const hashMalformed = declaredKind === "INVALIDO";
   // Hash e código de autenticação têm estados próprios desde a separação dos
@@ -289,6 +271,8 @@ export function buildIrregularitySummary(report = {}) {
   } else if (hashMissing) {
     addFinding("MÉDIA", "hash-missing", "Integridade não confrontável pelo documento.", "O contrato não apresenta hash declarado para comparação com a impressão digital calculada pelo ForenseDoc.");
     addCheck("A", "hash", "ALERTA", "Hash declarado ausente.");
+  } else if (declaredKind !== "SHA-256" || hashKind(calculatedHash) !== "SHA-256") {
+    addCheck("A", "hash", "INDETERMINADO", `Comparação não realizada: algoritmo declarado ${declaredKind}; é necessário SHA-256 declarado e recalculado válidos.`);
   } else {
     addCheck("A", "hash", "CONFERIDO", "Hash declarado compatível com o arquivo analisado.");
     addFinding("FAVORÁVEL", "hash-ok", "Hash informado confere com o arquivo.", `O SHA-256 declarado coincide com o valor recalculado (${shortHash(calculatedHash)}).`);
@@ -386,12 +370,10 @@ export function buildIrregularitySummary(report = {}) {
   if (signature.presente && embeddedMissing && (!hasValue(signature.tipo) || /simples|indeterminado/i.test(signature.tipo || ""))) {
     addFinding("MÉDIA", "simple-signature", "Assinatura eletrônica depende da cadeia de custódia.", "Não foi detectada certificação PAdES incorporada e o nível da assinatura é simples ou indeterminado. Isso não a invalida por si; impugnada a autoria, cabe ao banco comprovar autenticidade (STJ, Tema 1.061, CPC arts. 6º, 369 e 429, II)." );
   }
-  if (chain.eliminatoriosPresent === chain.eliminatoriosTotal && chain.eliminatoriosTotal) {
-    addFinding("FAVORÁVEL", "chain-complete", "Cadeia de custódia com boa completude.", `O laudo registra ${chain.present}/${chain.total} elementos técnicos. O número mede presença de campos, não a coerência entre eles, e deve ser enfrentado na análise.`);
-  } else {
-    addFinding("MÉDIA", "CUS1", "Cadeia de custódia incompleta.", `Itens eliminatórios satisfeitos: ${chain.eliminatoriosPresent ?? 0} de ${chain.eliminatoriosTotal ?? 4}. Elementos auxiliares localizados: ${chain.present} de ${chain.total}. A instituição deve suprir os registros ausentes com os logs brutos da plataforma.`);
+  if (chain.present < chain.total) {
+    addFinding("INFO", "CUS1", "Referências documentais de rastreabilidade: limitações.", `Referências localizadas neste checklist: ${chain.present} de ${chain.total}. Não localizadas: ${chain.missing.join("; ")}. Essa contagem mede referências no material examinado, não valida autoria, integridade ou completude dos registros originais. Solicitar os registros de origem necessários à verificação.`);
   }
-  addCheck("E", "cadeia-custodia", chain.eliminatoriosPresent === chain.eliminatoriosTotal ? "PRÓ-BANCO" : "ALERTA", `${chain.eliminatoriosPresent ?? 0}/${chain.eliminatoriosTotal ?? 4} eliminatórios; ${chain.present}/${chain.total} auxiliares.`);
+  addCheck("E", "cadeia-custodia", "INFORMATIVO", `${chain.present}/${chain.total} referências documentais; presença não equivale a validação.`);
 
   if (audit.chronologyInconsistent) {
     addFinding("ALTA", "chronology", "Carimbos de tempo não conciliados.", `A trilha registra eventos entre ${audit.firstTime || "horário não identificado"} e ${audit.lastTime || "horário não identificado"}, enquanto o campo da assinatura usa outro horário ou fuso. Os logs brutos devem esclarecer o fuso efetivamente aplicado.`);
@@ -464,6 +446,27 @@ export function buildIrregularitySummary(report = {}) {
     addCheck("F", "gps-municipio", "PRÓ-BANCO", "Mesmo município do domicílio.");
   }
 
+  if (report.home?.estado_confronto === "DIVERGENCIA_CADASTRAL" || (report.home?.conflito && report.home?.estado_confronto !== "RECUSADO_CONFLITO")) {
+    const conflito = report.home.conflito;
+    const kmCadastral = report.home.distancia_divergencia_cadastral != null
+      ? report.home.distancia_divergencia_cadastral
+      : conflito?.km;
+    const ufManual = conflito?.manual?.uf;
+    const ufInst = conflito?.instrumento?.uf;
+    const ufsDivergentes = ufManual && ufInst && ufManual !== ufInst;
+    const severidade = (ufsDivergentes || (kmCadastral !== null && kmCadastral >= 300)) ? "ALTA" : "MÉDIA";
+    const detalheKm = kmCadastral !== null ? `, a aproximadamente ${formatKm(kmCadastral)} de distância` : "";
+    const textoManual = conflito?.manual?.texto || report.home.query || "endereço informado";
+    const textoInst = [conflito?.instrumento?.cidade, conflito?.instrumento?.uf].filter(Boolean).join("/") || "município do contrato";
+    addFinding(
+      severidade,
+      "divergencia-endereco-cadastral",
+      "Divergência entre endereço declarado no instrumento e residência informada.",
+      `O endereço fornecido como residência do cliente (${textoManual}) difere da qualificação cadastral registrada no contrato (${textoInst})${detalheKm}. O laudo analisa as distâncias para ambos os locais. Essa divergência pode indicar fraude cadastral na contratação ou desatualização documental.`
+    );
+    addCheck("F", "divergencia-cadastral", "ALERTA", `${textoManual} ≠ ${textoInst}`);
+  }
+
   const ipCards = (report.ipAnalysis || []).map((ip, indice) => {
     const role = classifyIpRole(ip, report);
     const km = residenciaCalculada ? distanciaKm(confronto.distancias.ips_residencia[indice]?.km) : null;
@@ -517,7 +520,7 @@ export function buildIrregularitySummary(report = {}) {
     addDiligence("full-contract", "Instrumento contratual completo", "Solicitar taxa anual quando o campo estiver em branco, campo de valor liberado ao cliente, demonstrativo do CET, qualificação completa e número/espécie do benefício quando aplicável.");
   }
   if (issueCodes.has("INT1")) {
-    addDiligence("auth-code", "Explicitação do código de autenticação", "Exigir o algoritmo, o payload de origem e o procedimento de verificação do bloco impresso no rodapé da última página, a fim de permitir conferência independente do elemento declarado.");
+    addDiligence("auth-code", "Explicitação do código de autenticação", `Solicitar o procedimento de validação do código de autenticação${signature.codigo_autenticacao_origem ? ` localizado em ${signature.codigo_autenticacao_origem}` : " declarado no material examinado"}, o arquivo original e, se houver hash, seu algoritmo e payload de referência. Código de autenticação e hash são elementos distintos.`);
   }
   if (issueCodes.has("CET1")) {
     addDiligence("cet-demo", "Demonstrativo de cálculo do CET", "Exigir valor em reais, percentual e base de cálculo de cada componente do fluxo, conforme dever de informação do CDC e da regulamentação do CMN sobre CET.");
@@ -576,7 +579,7 @@ export function buildIrregularitySummary(report = {}) {
   // A página do sumário resume; o corpo publica integral. Antes, o corte de 560
   // caracteres era aplicado na criação do achado e, com o corpo passando a ler
   // a projeção, levava o resumo para dentro do detalhe.
-  const displayFindings = orderedFindings.slice(0, LIMITE_SUMARIO).map((f) => ({ ...f, text: compact(f.text, 560) }));
+  const displayFindings = orderedFindings.slice(0, LIMITE_SUMARIO).map((f) => ({ ...f, text: f.text }));
   // Ausência de achado é estado de interface, não item de lista: entrar na
   // lista do sumário sem entrar na projeção quebraria a igualdade que o § de
   // achados e esta página agora mantêm.
@@ -644,13 +647,14 @@ export function buildIrregularitySummary(report = {}) {
    */
   const eventosDaTrilha = report.extracted?.trilha_eventos?.eventos || [];
   const numero = (valor) => {
+    if (valor == null || typeof valor === "boolean" || String(valor).trim() === "") return null;
     const n = Number(valor);
     return Number.isFinite(n) ? n : null;
   };
   // Par completo: latitude 0 é coordenada válida, e latitude sem longitude não
   // localiza nada. O teste anterior usava `e.latitude || e.coordenada`, que
   // descartava o zero e aceitava meia coordenada.
-  const temPar = (lat, lon) => numero(lat) !== null && numero(lon) !== null;
+  const temPar = (lat, lon) => numero(lat) !== null && numero(lon) !== null && Math.abs(numero(lat)) <= 90 && Math.abs(numero(lon)) <= 180;
 
   // Contagens de EVENTOS da trilha, que é o que a frase de ausência afirma.
   const eventosComIp = eventosDaTrilha.filter((e) => hasValue(e.ip)).length;
@@ -690,12 +694,15 @@ export function buildIrregularitySummary(report = {}) {
   ].filter(Boolean).join(", ");
 
   let synthesis = semInsumoGeografico
-    ? "O documento não contém elementos geográficos suficientes para confronto entre GPS e IP de acesso; a ausência integral de trilha de rede/localização é o achado geográfico principal."
+    ? "Não foram localizados elementos geográficos suficientes na extração disponível para confronto entre GPS e IP de acesso. A limitação da extração não comprova ausência desses elementos no original."
     : `O confronto entre GPS e IP de acesso não foi concluído porque ${motivoDoConfronto}. O arquivo NÃO é omisso quanto a rastros geográficos: ${inventario} constam do dossiê e estão detalhados nas seções anteriores. Confronto não realizado e insumo ausente são estados distintos, e este é o primeiro.`;
   if (gpsIpDistance !== null && gpsIpDistance >= 50) {
     synthesis = `A tese técnica se concentra na divergência de ${formatKm(gpsIpDistance)} entre o GPS da assinatura e o IP de acesso provável. IPs classificados como servidor, CDN ou infraestrutura não devem ser usados para localizar o consumidor.`;
   } else if (gpsIpDistance !== null) {
     synthesis = `GPS e IP de acesso estão a aproximadamente ${formatKm(gpsIpDistance)}. A convergência é favorável à coerência espacial, mas não substitui a prova de autoria. IPs de infraestrutura foram separados do acesso do usuário.`;
+  } else if (paresMedidos.some(par => par.id === "gps-x-ip")) {
+    const par = paresMedidos.find(par => par.id === "gps-x-ip");
+    synthesis = `O GPS declarado e o ponto retornado pela consulta de geolocalização do IP registrado no dossiê foram comparados: cerca de ${par.km >= 1 ? `${Math.round(par.km)} km` : formatKm(par.km)}${par.metodo?.para?.evidencias?.length ? ` (${par.metodo.para.evidencias.length} registros desse endereço)` : ""}. O papel desse IP na sessão não foi determinado nesta análise; a distância descreve os pontos consultados, cuja margem de erro não foi informada, e não comprova autoria, presença física ou localização histórica. Consulte a memória de cálculo e as fontes do par GPS × IP. ${referenciaIndisponivel ? "O confronto residencial permanece indisponível e é independente dessa comparação." : "O confronto residencial é avaliado separadamente."}`;
   } else if (infrastructureIps.length) {
     synthesis = `${infrastructureIps.length} IP(s) foram classificados como infraestrutura. Esses endereços não localizam o consumidor; a conclusão depende de identificar o IP efetivamente associado à sessão do signatário.`;
   }
@@ -710,6 +717,7 @@ export function buildIrregularitySummary(report = {}) {
 
   return {
     reportId: report.reportId || "Laudo sem protocolo",
+    custodyChecklist: { present: chain.present, total: chain.total },
     bank,
     contractNumber,
     cpf,
@@ -774,23 +782,10 @@ export function buildIrregularitySummary(report = {}) {
   };
 }
 
-// Grau de suspeição técnica agregado — item 10.1 do relatório técnico de
-// 09/09/2026: o laudo não concluía nada além do placar por achado
-// individual. Regra simples e documentada, não uma fórmula estatística:
-// serve para orientar a leitura, nunca substitui a valoração jurídica.
-function computeSuspicionGrade(findingsList) {
-  const nAlta = findingsList.filter((item) => item.severity === "ALTA").length;
-  const nMedia = findingsList.filter((item) => item.severity === "MÉDIA").length;
-  if (nAlta >= 3) {
-    return { label: "CRÍTICA", color: "#f06363", rationale: `${nAlta} achados de gravidade ALTA identificados.` };
-  }
-  if (nAlta >= 1) {
-    return { label: "ALTA", color: "#f5853f", rationale: `${nAlta} achado${nAlta === 1 ? "" : "s"} de gravidade ALTA identificado${nAlta === 1 ? "" : "s"}.` };
-  }
-  if (nMedia >= 2) {
-    return { label: "MODERADA", color: "#f2b03d", rationale: `${nMedia} achados de gravidade MÉDIA, sem nenhum de gravidade ALTA.` };
-  }
-  return { label: "BAIXA", color: "#3ddc97", rationale: nMedia === 1 ? "1 achado de gravidade MÉDIA, sem nenhum de gravidade ALTA." : "Nenhum achado de gravidade ALTA ou MÉDIA além do eventual formal já listado." };
+// Nome do campo mantido por compatibilidade com resultados persistidos.
+// A quantidade de lacunas não é uma escala de suspeição do contrato.
+function computeSuspicionGrade() {
+  return { label: "REVISÃO DOCUMENTAL NECESSÁRIA", color: "#64748b", rationale: "Conferir as evidências e diligências de cada item. As classificações individuais orientam a revisão; não atestam fraude, autoria ou validade jurídica." };
 }
 
 export { formatKm };

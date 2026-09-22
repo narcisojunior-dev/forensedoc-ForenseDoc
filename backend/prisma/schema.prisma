@@ -337,6 +337,11 @@ model Subscription {
 // SALDO DE CRÉDITOS
 // ─────────────────────────────────────────────
 
+/// Os quatro contadores têm CHECK `>= 0` no banco, criado pela migration
+/// `20260919140000_credit_balance_nao_negativo`. O Prisma não expressa CHECK no
+/// schema, então ele NÃO aparece aqui: quem reescrever este modelo precisa
+/// preservar a constraint, que é a segunda camada contra débito em corrida
+/// (a primeira é o `updateMany` com `{ gt: 0 }` em `creditService.debitCredit`).
 model CreditBalance {
   id               String    @id @default(uuid())
   tenantId         String    @unique
@@ -415,6 +420,9 @@ model Analysis {
   user               User                @relation(fields: [userId], references: [id])
   // Uma análise tem o gasto e, se falhar, também o estorno.
   creditTransactions CreditTransaction[]
+  // Uma análise pode ter várias verificações ao longo do tempo: cada correção
+  // de campo ou de coordenada emite um laudo novo e aposenta o anterior.
+  verifications      LaudoVerification[]
 
   @@index([tenantId, createdAt(sort: Desc)])
   @@map("analyses")
@@ -489,4 +497,58 @@ model AuditLog {
   @@index([tenantId, createdAt(sort: Desc)])
   @@index([action, createdAt(sort: Desc)])
   @@map("audit_logs")
+}
+
+// ─────────────────────────────────────────────
+// VERIFICAÇÃO PÚBLICA DE LAUDO
+// ─────────────────────────────────────────────
+
+enum LaudoVerificationStatus {
+  VALIDO
+  SUBSTITUIDO
+  CANCELADO
+  DADOS_REMOVIDOS
+}
+
+/// Registro que sustenta a página pública de verificação.
+///
+/// Vive fora de `analyses` de propósito. `analyses` é apagada em cascata quando
+/// o tenant é excluído, e o hash de um laudo que já circulou continua sendo um
+/// fato verificável depois disso: quem recebeu o documento precisa poder
+/// conferir a autenticidade mesmo que o escritório tenha encerrado a conta. A
+/// relação usa SetNull, e `tenantId` é coluna solta, sem relação, para não
+/// herdar a cascata.
+///
+/// `publicSnapshot` guarda os poucos campos que a página mostra, JÁ MASCARADOS
+/// na emissão. A leitura pública nunca abre `analyses.result`: mascarar na
+/// escrita faz com que um defeito futuro na função de máscara não vaze
+/// histórico, porque o histórico já está gravado mascarado.
+model LaudoVerification {
+  id        String                  @id @default(uuid())
+  codigo    String                  @unique // FD-XXXX-XXXX-XXXX, 60 bits
+  laudoHash String                  @unique // SHA-256 do conteúdo canônico
+  reportId  String
+  status    LaudoVerificationStatus @default(VALIDO)
+  emitidoEm DateTime
+
+  publicSnapshot Json
+
+  analysisId String?
+  tenantId   String?
+
+  substituidoPorId String?   @unique
+  canceladoEm      DateTime?
+  canceladoMotivo  String?
+  dadosRemovidosEm DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  analysis       Analysis?          @relation(fields: [analysisId], references: [id], onDelete: SetNull)
+  substituidoPor LaudoVerification? @relation("Substituicao", fields: [substituidoPorId], references: [id])
+  substitui      LaudoVerification? @relation("Substituicao")
+
+  @@index([analysisId])
+  @@index([tenantId])
+  @@map("laudo_verifications")
 }

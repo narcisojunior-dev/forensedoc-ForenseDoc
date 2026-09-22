@@ -150,12 +150,6 @@ export default function Analyze() {
       return;
     }
 
-    if (enderecoContestado && justificativaContestacao.trim().length < 15) {
-      setError("Para declarar contestado o endereço do instrumento, escreva a justificativa (pelo menos 15 caracteres). Ela é impressa no laudo.");
-      setStage("error");
-      return;
-    }
-
     const runId = ++runIdRef.current;
     const desatualizado = () => runId !== runIdRef.current || !mountedRef.current;
 
@@ -292,9 +286,9 @@ export default function Analyze() {
                 className={inputBase}
               />
               <p className="mt-2 text-xs leading-relaxed text-zinc-500">
-                Ponto de referência de todas as comparações de distância. Antes de usá-lo, o sistema
-                confere cidade, UF e CEP do instrumento: em outra UF, ou a mais de 100 km do município
-                do contrato, o confronto é recusado e o laudo registra o conflito.
+                Ponto de referência das comparações de distância. Se este endereço divergir do município ou
+                UF extraído do contrato, o laudo é gerado calculando as distâncias para ambos os endereços e
+                registrando a divergência cadastral.
               </p>
             </div>
 
@@ -327,11 +321,9 @@ export default function Analyze() {
                   onChange={(e) => setEnderecoContestado(e.target.checked)}
                 />
                 <span>
-                  O endereço registrado no instrumento é contestado
+                  O endereço registrado no instrumento é contestado / incorreto <span className="text-zinc-500">(opcional)</span>
                   <span className="mt-1 block text-xs leading-relaxed text-zinc-500">
-                    Marque só quando o endereço do contrato for o dado impugnado. Com a marcação, uma
-                    referência em conflito com o instrumento é usada, e a justificativa sai impressa
-                    no laudo ao lado das distâncias.
+                    Opcional: marque caso queira registrar uma justificativa específica (ex.: endereço preenchido por terceiro ou fraudado). Ela sairá impressa no laudo.
                   </span>
                 </span>
               </label>

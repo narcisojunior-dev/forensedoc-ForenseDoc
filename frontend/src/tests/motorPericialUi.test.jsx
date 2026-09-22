@@ -21,7 +21,7 @@ const { default: ConfrontoProcesso } = await import("../components/report/Confro
 const { default: Replica } = await import("../pages/Replica.jsx");
 
 describe("seções do laudo", () => {
-  it("sumário executivo mostra grau, placar e diligências", () => {
+  it("sumário preserva achados e substitui grau legado por orientação neutra", () => {
     render(
       <SumarioExecutivo
         sumario={{
@@ -37,8 +37,10 @@ describe("seções do laudo", () => {
         }}
       />
     );
-    // Grau de suspeição e severidade do achado: os dois selos dizem ALTA.
-    expect(screen.getAllByText("ALTA")).toHaveLength(2);
+    // A gravidade individual permanece; o grau agregado legado não é exibido.
+    expect(screen.getAllByText("ALTA")).toHaveLength(1);
+    expect(screen.getByText("REVISÃO DOCUMENTAL NECESSÁRIA")).toBeInTheDocument();
+    expect(screen.queryByText("Grau de suspeição técnica")).not.toBeInTheDocument();
     expect(screen.getByText("Hash inválido.")).toBeInTheDocument();
     expect(screen.getByText("Logs brutos.")).toBeInTheDocument();
   });

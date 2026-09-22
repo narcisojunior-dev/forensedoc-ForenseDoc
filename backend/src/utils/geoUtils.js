@@ -45,7 +45,7 @@ export function buildGeocodeQueries(rawQuery) {
   const city = firstMatch(q, [/cidade\s*[:\-]?\s*([^,.;\n]{3,60}?)(?=\s+(?:bairro|endereco|cep|estado)\b)/i]);
   const bairro = firstMatch(q, [/bairro\s*[:\-]?\s*([^,.;\n]{3,60}?)(?=\s+(?:endereco|cep|cidade|estado)\b)/i]);
   const estado = firstMatch(q, [/estado\s*[:\-]?\s*([A-Z]{2})\b/i, /\b(PI|MA|CE|PA|BA|PE|PB|RN|AL|SE|TO|GO|DF|MG|SP|RJ|ES|PR|SC|RS|MS|MT|RO|AC|AM|RR|AP)\b/i]);
-  const cep = firstMatch(q, [/\b(\d{5}-?\d{3})\b/]);
+  const cep = firstMatch(q, [/\b(\d{2}\.?\d{3}-?\d{3})\b/]);
   const street = firstMatch(q, [
     /endereco\s*[:\-]?\s*([^.;\n]{4,100}?)(?=\s+(?:numero\s+do\s+endereco|numero|complemento|cep|promotor|atendente)\b)/i,
     /((?:rua|avenida|av\.?|travessa|tv\.?|rodovia|estrada)\s+[^,.;\n]{4,100})/i,

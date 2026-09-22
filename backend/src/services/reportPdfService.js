@@ -1,3 +1,4 @@
+import { exigirEmissaoCoerente } from "../engine/validarEmissao.js";
 import PDFDocument from "pdfkit";
 import { classifyDeclaredDivergence } from "../utils/geoDivergence.js";
 import { fetchStaticMap, mapPointsIpVsHome, mapPointsHomeVsDeclared, mapPointsDeclaredVsIp } from "./staticMapService.js";
@@ -11,11 +12,33 @@ import {
   avisoLegal,
 } from "../reports/laudoTexts.js";
 import { buildCustodyChain } from "../reports/custodyChain.js";
+import * as temaModelo from "../reports/temaModelo.js";
+import { desenharQr, urlDeVerificacao } from "../reports/qrVerificacao.js";
 import { calculateForensicScore } from "../utils/forensicScore.js";
 import { generateJudicialQuesitos } from "../reports/quesitosTemplate.js";
 import { montarConfrontoGeografico } from "../utils/distancia.js";
 import { descreverIndisponibilidade } from "../utils/confrontoEnderecos.js";
 import { fichaBeneficioSeAplica } from "../engine/produto.js";
+import { distanciaKm, distanciaSuspeita, formatarDistancia } from "../utils/distancia.js";
+import { haversineKm } from "../utils/geoUtils.js";
+import {
+  confrontoHash,
+  shortHash,
+  formatCnpj,
+  formatCpf,
+  labelHashState,
+  labelProvenance,
+  noteForDeclaredHashState,
+  reportIssues,
+  issueBucket,
+  GRUPOS_ACHADOS,
+  extractCnjFromName,
+  labelComparisonStatus,
+  semPontoFinal,
+  labelModalidade,
+  formatMetadataWarning,
+  sanearSumario,
+} from "../reports/laudoApresentacao.js";
 
 // Paleta sóbria para peça processual (impressão em preto e branco continua legível).
 const INK = "#1a1a1a";
@@ -51,7 +74,26 @@ const MAP_MIN_SCALE = 0.75;
  * @param {object} analysis linha de Analysis (para id, datas)
  * @param {object} result   Analysis.result já parseado
  */
-export async function buildReportPdf(analysis, result) {
+export async function buildReportPdf(analysis, result, opcoes = {}) {
+  exigirEmissaoCoerente(result);
+  /*
+   * `tema` escolhe o desenho do laudo. "modelo" é o padrão: cartões, linha com
+   * o valor à direita, selos em pílula, Inter e JetBrains Mono, o mesmo desenho
+   * que o laudo tinha quando era exportado como imagem pelo navegador, agora em
+   * vetor e com texto pesquisável. "classico" fica disponível para comparação e
+   * para voltar atrás sem reescrever nada. O conteúdo, as regras e a paginação
+   * protegida são os mesmos nos dois.
+   */
+  const tema = opcoes.tema === "classico" ? "classico" : "modelo";
+  /*
+   * Registro de verificação pública do laudo (código + SHA-256 do conteúdo).
+   * Vem de fora porque o PDF não deve consultar o banco: quem monta o
+   * documento recebe pronto o que vai imprimir.
+   *
+   * É opcional de propósito. Laudo antigo, anterior ao backfill, continua
+   * sendo gerado sem o bloco em vez de falhar.
+   */
+  const verificacao = opcoes.verificacao || null;
   // Pré-busca dos DOIS mapas do § 5, em paralelo. Cada um responde a uma
   // pergunta pericial distinta (ver staticMapService.js) e nenhum é requisito:
   // se a busca falhar, a seção sai com as coordenadas e as distâncias.
@@ -63,47 +105,78 @@ export async function buildReportPdf(analysis, result) {
 
   const doc = new PDFDocument({
     size: "A4",
-    margins: { top: MARGIN, bottom: MARGIN_BOTTOM, left: MARGIN, right: MARGIN },
+    margins: tema === "modelo"
+      ? { top: temaModelo.MARGEM_TOPO, bottom: temaModelo.MARGEM_RODAPE, left: temaModelo.MARGEM_TEXTO, right: temaModelo.MARGEM_TEXTO }
+      : { top: MARGIN, bottom: MARGIN_BOTTOM, left: MARGIN, right: MARGIN },
     bufferPages: true, // necessário para numerar o rodapé no fim
     info: {
-      Title: `Laudo ForenseDoc ${analysis.id.slice(0, 8)}`,
+      Title: `Laudo ForenseDoc ${result.reportId || analysis.id}`,
       Author: FIRM.nome,
       Creator: FIRM.sistema,
     },
   });
 
-  const extracted = safeParse(result.text) || {};
+  // Fontes padrão PDFKit usam WinAnsi: normalizar acentos compostos e sinais
+  // matemáticos evita nomes corrompidos e operadores ilegíveis no texto extraído.
+  const escrever = doc.text.bind(doc);
+  doc.text = (text, ...args) => escrever(typeof text === "string" ? text.normalize("NFC").replace(/−/g, "-").replace(/→/g, "->").replace(/≥/g, ">=").replace(/≤/g, "<=") : text, ...args);
+  const extraido = safeParse(result.text);
+  const extracted = extraido || {};
   const timestamp = result.generatedAt
     ? new Date(result.generatedAt).toLocaleString("pt-BR", { timeZone: "America/Fortaleza" })
     : new Date(analysis.createdAt).toLocaleString("pt-BR", { timeZone: "America/Fortaleza" });
 
-  const ctx = { doc, contentWidth: doc.page.width - MARGIN * 2 };
+  const ctx = { doc, contentWidth: doc.page.width - MARGIN * 2, tema, cartao: null };
+  if (tema === "modelo") {
+    temaModelo.registrarFontes(doc);
+    // A moldura é pintada a cada página nova; o cartão aberto fecha no pé e
+    // recomeça no topo, para a seção não perder a borda ao virar a folha.
+    doc.on("pageAdded", () => {
+      const { x, y } = doc;
+      temaModelo.pintarMoldura(doc);
+      doc.x = x;
+      doc.y = y;
+      temaModelo.quebrarCartao(ctx);
+    });
+    temaModelo.pintarMoldura(doc);
+    doc.x = temaModelo.MARGEM_TEXTO;
+    doc.y = temaModelo.MARGEM_TOPO;
+  }
+  // O sumário passa pelo mesmo saneamento da tela (montarRelatorio.js): item
+  // que a tela retira de sumário legado não pode reaparecer no PDF.
+  const sumario = sanearSumario(result.sumarioIrregularidades || null, result.home, result.ipAnalysis || [], result.contractGeo);
 
-  cover(ctx, analysis, result, timestamp);
+  cover(ctx, analysis, result, timestamp, extracted);
+  sectionVerificacao(ctx, verificacao);
+  sectionProcessingNotices(ctx, result, Boolean(extraido));
   sectionReview(ctx, result);
   sectionIdentity(ctx, result, extracted);
   sectionMetadata(ctx, result.metadata);
-  sectionDigitalSignature(ctx, result.metadata, extracted);
+  sectionDigitalSignature(ctx, result.metadata);
   sectionContract(ctx, extracted);
-  sectionEconomics(ctx, extracted);
   sectionCreditRelease(ctx, extracted);
   sectionInsurance(ctx, extracted);
-  sectionClient(ctx, extracted);
+  sectionClient(ctx, extracted, result);
   sectionSignature(ctx, extracted, result);
-  sectionContractingTrail(ctx, extracted);
+  sectionContractingTrail(ctx, extracted, result);
   sectionEventTrail(ctx, extracted);
-  sectionBiometricArtifact(ctx, extracted);
+  sectionImages(ctx, extracted);
   sectionGeo(ctx, result, { mapaIpResidencia, mapaResidenciaDeclarado, mapaDeclaradoIp });
-  sectionIrregularities(ctx, extracted, result.sumarioIrregularidades?.projecao);
+  sectionIrregularities(ctx, extracted, sumario?.projecao);
   sectionProcessComparison(ctx, result.processComparison);
   sectionRemarks(ctx, extracted);
   sectionQuesitos(ctx, extracted, result);
-  sectionLegal(ctx, extracted);
-  sectionExecutiveSummary(ctx, result.sumarioIrregularidades, result.reportId);
+  sectionLegal(ctx, extracted, result);
+  sectionExecutiveSummary(ctx, sumario, result.reportId);
   sectionImageAnnex(ctx, extracted);
   legalNotice(ctx, timestamp);
 
-  paintFooters(doc, result.hashes?.sha256);
+  if (tema === "modelo") {
+    temaModelo.fecharCartao(ctx);
+    temaModelo.pintarRodapes(doc, result.hashes?.sha256);
+  } else {
+    paintFooters(doc, result.hashes?.sha256);
+  }
 
   doc.end();
   return doc;
@@ -124,6 +197,7 @@ function safeParse(raw) {
 
 /** Subtítulo de subseção (§ 4.1), sem a régua do heading principal. */
 function subheading(ctx, title) {
+  if (ctx.tema === "modelo") return temaModelo.subheading(ctx, title);
   const { doc, contentWidth } = ctx;
   reserve(ctx, 54); // título da subseção + duas linhas do que vem abaixo
   doc.moveDown(0.3);
@@ -136,6 +210,7 @@ function subheading(ctx, title) {
 }
 
 function heading(ctx, title, { danger = false } = {}) {
+  if (ctx.tema === "modelo") return temaModelo.heading(ctx, title, { danger });
   const { doc, contentWidth } = ctx;
   reserve(ctx, 62); // título + régua + duas linhas, para o heading não ficar órfão
   doc.moveDown(0.6);
@@ -158,6 +233,7 @@ function heading(ctx, title, { danger = false } = {}) {
 // o fluxo do PDFKit e gerava uma página por campo.
 function field(ctx, label, value, { mono = false } = {}) {
   if (value === null || value === undefined || value === "") return;
+  if (ctx.tema === "modelo") return temaModelo.field(ctx, label, value, { mono });
   const { doc, contentWidth } = ctx;
   reserve(ctx, 16); // uma linha
   doc
@@ -172,6 +248,7 @@ function field(ctx, label, value, { mono = false } = {}) {
 }
 
 function paragraph(ctx, text, { color = INK, size = 9.5, italic = false } = {}) {
+  if (ctx.tema === "modelo") return temaModelo.paragraph(ctx, text, { color, size, italic });
   const { doc, contentWidth } = ctx;
   // O PDFKit já quebra o parágrafo sozinho no meio; a guarda só evita começar um
   // com menos de duas linhas de espaço, o que deixaria uma viúva no pé.
@@ -216,6 +293,7 @@ function espacoLivre(doc) {
 }
 
 function badge(ctx, label, value, ok) {
+  if (ctx.tema === "modelo") return temaModelo.badge(ctx, label, value, ok);
   const { doc, contentWidth } = ctx;
   reserve(ctx, 16);
   doc
@@ -229,28 +307,78 @@ function badge(ctx, label, value, ok) {
   doc.moveDown(0.15);
 }
 
+const FUNDO_CABECALHO = "#f1f5f9";
+const FUNDO_DESTAQUE = "#fef2f2";
+
+/**
+ * Tabela em fluxo, com quebra de página linha a linha e cabeçalho repetido.
+ *
+ * A tela apresenta a trilha, o histórico de ações e as imagens em tabelas; o
+ * PDF imprimia uma linha "rótulo: valor" por evento, e as colunas que não
+ * cabiam nessa linha (dispositivo, hora local, classe da imagem) ficavam de
+ * fora. `colunas` traz a largura como fração da coluna de texto.
+ */
+function table(ctx, colunas, linhas, { size = 7.5, destaque = null } = {}) {
+  if (ctx.tema === "modelo") return temaModelo.table(ctx, colunas, linhas, { size, destaque });
+  const { doc, contentWidth } = ctx;
+  if (!linhas.length) return;
+  const PAD = 3;
+  const larguras = colunas.map((c) => c.largura * contentWidth);
+  const fonte = (i, negrito) => (negrito ? "Helvetica-Bold" : colunas[i].mono ? "Courier" : "Helvetica");
+  const texto = (v) => (v === null || v === undefined || v === "" ? "-" : String(v));
+  const medir = (valores, negrito) =>
+    Math.max(
+      ...valores.map((v, i) => {
+        doc.font(fonte(i, negrito)).fontSize(size);
+        return doc.heightOfString(texto(v), { width: larguras[i] - PAD * 2 });
+      })
+    ) + PAD * 2;
+  const desenhar = (valores, { negrito = false, fundo = null } = {}) => {
+    const altura = medir(valores, negrito);
+    const y = doc.y;
+    if (fundo) doc.rect(MARGIN, y, contentWidth, altura).fillColor(fundo).fill();
+    let x = MARGIN;
+    valores.forEach((v, i) => {
+      doc.font(fonte(i, negrito)).fontSize(size).fillColor(INK).text(texto(v), x + PAD, y + PAD, { width: larguras[i] - PAD * 2 });
+      x += larguras[i];
+    });
+    doc.moveTo(MARGIN, y + altura).lineTo(MARGIN + contentWidth, y + altura).strokeColor(RULE).lineWidth(0.4).stroke();
+    doc.x = MARGIN;
+    doc.y = y + altura;
+  };
+  const cabecalho = colunas.map((c) => c.titulo);
+  reserve(ctx, medir(cabecalho, true) + medir(linhas[0], false));
+  desenhar(cabecalho, { negrito: true, fundo: FUNDO_CABECALHO });
+  linhas.forEach((linha, i) => {
+    if (espacoLivre(doc) < medir(linha, false)) {
+      doc.addPage();
+      desenhar(cabecalho, { negrito: true, fundo: FUNDO_CABECALHO });
+    }
+    desenhar(linha, { fundo: destaque?.(i) ? FUNDO_DESTAQUE : null });
+  });
+  doc.font("Helvetica");
+  doc.moveDown(0.4);
+}
+
+/** Item de lista com marcador, usado para achados e diligências. */
+function bullet(ctx, text, { color = INK, size = 9 } = {}) {
+  if (ctx.tema === "modelo") return temaModelo.bullet(ctx, text, { color, size });
+  const { doc, contentWidth } = ctx;
+  reserve(ctx, 24);
+  // "•" existe na codificação WinAnsi das fontes padrão; "▸" não.
+  doc.fontSize(size).font("Helvetica").fillColor(ACCENT).text("•", MARGIN, doc.y, { width: 10 });
+  doc.moveUp();
+  doc.fillColor(color).text(text, MARGIN + 12, doc.y, { width: contentWidth - 12, align: "justify", lineGap: 1.2 });
+  doc.x = MARGIN;
+  doc.moveDown(0.25);
+}
+
 // ─────────────────────────────────────────────────────────────
 // Seções
 // ─────────────────────────────────────────────────────────────
 
-function cover(ctx, analysis, result, timestamp) {
+function cover(ctx, analysis, result, timestamp, extracted = {}) {
   const { doc, contentWidth } = ctx;
-  doc.fontSize(11).font("Helvetica-Bold").fillColor(ACCENT).text(FIRM.sistema.toUpperCase(), { align: "center" });
-  doc.moveDown(0.3);
-  doc.fontSize(19).font("Helvetica-Bold").fillColor(INK).text("Laudo Técnico Pericial", { align: "center" });
-  doc.fontSize(11).font("Helvetica").fillColor(MUTED).text("Análise forense de contrato de consignado", { align: "center" });
-  doc.moveDown(0.5);
-  doc.fontSize(8.5).fillColor(MUTED).text(`${FIRM.nome} · ${FIRM.oab}`, { align: "center" });
-  doc.moveDown(1);
-
-  doc.moveTo(MARGIN, doc.y).lineTo(MARGIN + contentWidth, doc.y).strokeColor(RULE).lineWidth(1).stroke();
-  doc.moveDown(0.6);
-
-  field(ctx, "Identificador do laudo", analysis.id);
-  field(ctx, "Arquivo analisado", result.file?.name || "nome não informado");
-  field(ctx, "Tamanho do arquivo", result.file?.sizeBytes ? `${(result.file.sizeBytes / 1024).toFixed(2)} KB` : null);
-  field(ctx, "Data de geração", timestamp);
-  if (result.usedOcr) field(ctx, "OCR", `Aplicado em ${result.ocrPages} página(s)`);
 
   // ─── Visual Law: Resumo Executivo para o Magistrado / Perito ────────────────
   // Distâncias do confronto canônico: recusado o confronto, não há índice.
@@ -259,6 +387,77 @@ function cover(ctx, analysis, result, timestamp) {
   const distKmGps = confrontoCapa.distancias.gps_residencia;
   const distKmIpVsGps = confrontoCapa.gps_ip;
   const scoreObj = calculateForensicScore({ distKmIp, distKmGps, distKmIpVsGps });
+
+  const ipLoc = result.ipAnalysis?.[0]?.geo?.city
+    ? `${result.ipAnalysis[0].geo.city}/${result.ipAnalysis[0].geo.region || ""}`
+    : "Não localizada";
+  // Referência recusada não é domicílio: a capa usa a qualificação do
+  // instrumento e diz que o endereço informado não foi utilizado.
+  const recusada = confrontoCapa.status === "RECUSADO_CONFLITO" || confrontoCapa.status === "INDISPONIVEL_NAO_INFORMADO";
+  const inst = result.home?.instrumento || {};
+  const cidadeInstrumento = [inst.cidade, inst.uf].filter(Boolean).join("/");
+  const homeLoc = recusada
+    ? `${cidadeInstrumento || "não identificado no instrumento"} (qualificação do instrumento; o endereço informado não foi utilizado)`
+    : result.home?.geo?.display || result.home?.query || "Domicílio declarado";
+  const km = (v) => `${v.toFixed(1).replace(".", ",")} km`;
+  const cg = result.contractGeo;
+  const temGps = cg && Number.isFinite(cg.lat) && Number.isFinite(cg.lon);
+  const origemDetalhe = distKmIp !== null
+    ? `${km(distKmIp)} do domicílio`
+    : distKmIpVsGps !== null
+      ? `${km(distKmIpVsGps)} do GPS declarado no ato`
+      : "N/D";
+  const gpsTexto = !temGps
+    ? "Não registrado"
+    : `${cg.municipio ? `${cg.municipio}${cg.uf ? `/${cg.uf}` : ""} ` : ""}(${cg.lat}, ${cg.lon})${distKmGps !== null ? `, ${km(distKmGps)} do domicílio` : ", confronto com a residência não aferido"}`;
+
+  const resumoTitulo = "Resumo executivo · índice de anomalia forense";
+  const resumoValor = scoreObj.score === null ? scoreObj.rotulo : `${scoreObj.score}/100 · ${scoreObj.rotulo}`;
+  const resumoLinhas = [
+    `Domicílio do titular: ${homeLoc}`,
+    `Estimativa da consulta do IP: ${ipLoc} (${origemDetalhe})`,
+    `GPS registrado no ato: ${gpsTexto}`,
+  ];
+  const tamanhoArquivo = result.file?.sizeBytes
+    ? `${(result.file.sizeBytes / 1024).toFixed(2)} KB (${result.file.sizeBytes.toLocaleString("pt-BR")} bytes)`
+    : null;
+  const escopo = "Integridade criptográfica · Metadados e OCR · Cadeia de custódia · Confronto geográfico";
+
+  if (ctx.tema === "modelo") {
+    return temaModelo.capa(ctx, {
+      protocolo: result.reportId || analysis.id,
+      emissao: `${timestamp}\n(Fortaleza, BRT)`,
+      arquivo: result.file?.name || "nome não informado",
+      tamanho: tamanhoArquivo,
+      sha256: result.hashes?.sha256,
+      produto: extracted.contrato?.produto || "Instrumento de crédito",
+      ocr: result.usedOcr ? `Aplicado em ${result.ocrPages} página(s)` : null,
+      escopo,
+      resumoTitulo,
+      resumoValor,
+      resumoLinhas,
+      alerta: scoreObj.score !== null && scoreObj.score >= 80,
+    });
+  }
+
+  doc.fontSize(11).font("Helvetica-Bold").fillColor(ACCENT).text(FIRM.sistema.toUpperCase(), { align: "center" });
+  doc.moveDown(0.3);
+  doc.fontSize(19).font("Helvetica-Bold").fillColor(INK).text("Laudo Técnico Pericial", { align: "center" });
+  doc.fontSize(11).font("Helvetica").fillColor(MUTED).text("Exame automatizado de integridade, autoria e consistência documental", { align: "center" });
+  doc.moveDown(0.5);
+  doc.fontSize(8.5).fillColor(MUTED).text(FIRM.descricao, { align: "center" });
+  doc.moveDown(1);
+
+  doc.moveTo(MARGIN, doc.y).lineTo(MARGIN + contentWidth, doc.y).strokeColor(RULE).lineWidth(1).stroke();
+  doc.moveDown(0.6);
+
+  field(ctx, "Instrumento examinado", extracted.contrato?.produto || "Instrumento de crédito");
+  field(ctx, "Identificador do laudo", result.reportId || analysis.id);
+  field(ctx, "Arquivo analisado", result.file?.name || "nome não informado");
+  field(ctx, "Tamanho do arquivo", result.file?.sizeBytes ? `${(result.file.sizeBytes / 1024).toFixed(2)} KB (${result.file.sizeBytes.toLocaleString("pt-BR")} bytes)` : null);
+  field(ctx, "Data de geração", `${timestamp} (Fortaleza, BRT)`);
+  if (result.usedOcr) field(ctx, "OCR", `Aplicado em ${result.ocrPages} página(s)`);
+  field(ctx, "Escopo do exame", "Integridade criptográfica · Metadados e OCR · Cadeia de custódia · Confronto geográfico");
 
   doc.moveDown(0.6);
   const boxX = MARGIN;
@@ -285,43 +484,43 @@ function cover(ctx, analysis, result, timestamp) {
     .fillColor(scoreObj.score >= 80 ? DANGER : INK)
     .text(scoreObj.score === null ? scoreObj.rotulo : `${scoreObj.score}/100 · ${scoreObj.rotulo}`, boxX + 12, boxY + 26);
 
-  const ipLoc = result.ipAnalysis?.[0]?.geo?.city
-    ? `${result.ipAnalysis[0].geo.city}/${result.ipAnalysis[0].geo.region || ""}`
-    : "Não localizada";
-  // Referência recusada não é domicílio: a capa usa a qualificação do
-  // instrumento e diz que o endereço informado não foi utilizado.
-  const recusada = confrontoCapa.status === "RECUSADO_CONFLITO" || confrontoCapa.status === "INDISPONIVEL_NAO_INFORMADO";
-  const inst = result.home?.instrumento || {};
-  const cidadeInstrumento = [inst.cidade, inst.uf].filter(Boolean).join("/");
-  const homeLoc = recusada
-    ? `${cidadeInstrumento || "não identificado no instrumento"} (qualificação do instrumento; o endereço informado não foi utilizado)`
-    : result.home?.geo?.display || result.home?.query || "Domicílio declarado";
-  const km = (v) => `${v.toFixed(1).replace(".", ",")} km`;
-  const cg = result.contractGeo;
-  const temGps = cg && Number.isFinite(cg.lat) && Number.isFinite(cg.lon);
-  const origemDetalhe = distKmIp !== null
-    ? `${km(distKmIp)} do domicílio`
-    : distKmIpVsGps !== null
-      ? `${km(distKmIpVsGps)} do GPS declarado no ato`
-      : "N/D";
-  const gpsTexto = !temGps
-    ? "Não registrado"
-    : `${cg.municipio ? `${cg.municipio}${cg.uf ? `/${cg.uf}` : ""} ` : ""}(${cg.lat}, ${cg.lon})${distKmGps !== null ? `, ${km(distKmGps)} do domicílio` : ", confronto com a residência não aferido"}`;
-
   doc
     .fontSize(8.5)
     .font("Helvetica")
     .fillColor(INK)
     .text(
       `• Domicílio do titular: ${homeLoc}\n` +
-      `• Origem técnica da conexão: ${ipLoc} (${origemDetalhe})\n` +
+      `• Estimativa da consulta do IP: ${ipLoc} (${origemDetalhe})\n` +
       `• GPS registrado no ato: ${gpsTexto}`,
       boxX + 12,
       boxY + 48,
       { width: boxWidth - 24, lineGap: 1.5 }
     );
 
+  // O texto do quadro deixa o cursor horizontal recuado; sem voltar à margem,
+  // todo o § 1 saía deslocado.
+  doc.x = MARGIN;
   doc.y = boxY + boxHeight + 10;
+}
+
+/**
+ * Avisos de processamento que a tela exibe logo abaixo da capa: a nota do
+ * worker (ex.: OCR parcial) e a falha da extração estruturada. Quem lê só o
+ * PDF precisa saber que o laudo saiu com dados parciais.
+ */
+function sectionProcessingNotices(ctx, result, extracaoValida) {
+  if (result.warning) {
+    subheading(ctx, "Nota de processamento");
+    paragraph(ctx, result.warning, { size: 9 });
+  }
+  if (!extracaoValida) {
+    subheading(ctx, "Extração automática parcial");
+    paragraph(
+      ctx,
+      "A extração automática não retornou dados estruturados válidos. O laudo foi gerado com os dados disponíveis.",
+      { color: DANGER, size: 9 }
+    );
+  }
 }
 
 /**
@@ -373,94 +572,277 @@ function sectionReview(ctx, result) {
   );
 }
 
+/**
+ * Bloco de verificação pública: código, hash do laudo e QR Code.
+ *
+ * Fica no fluxo comum, logo depois da capa, e não dentro dela. Os dois temas
+ * desenham a capa de formas muito diferentes ("modelo" monta um cartão com
+ * degradê e medidas próprias, protegido por teste de regressão), e duplicar o
+ * bloco nas duas implementações significaria manter duas versões da mesma
+ * coisa. Como seção própria, ele sai igual nos dois e é fácil de achar no
+ * documento impresso, que é onde alguém vai procurá-lo.
+ */
+function sectionVerificacao(ctx, verificacao) {
+  if (!verificacao) return;
+  const { doc, contentWidth } = ctx;
+
+  const LADO_QR = 74;
+  reserve(ctx, LADO_QR + 46);
+
+  heading(ctx, "Verificação de autenticidade");
+
+  const yTopo = doc.y;
+  const { lado } = desenharQr(doc, {
+    conteudo: urlDeVerificacao(verificacao.codigo),
+    x: MARGIN,
+    y: yTopo,
+    lado: LADO_QR,
+  });
+
+  const xTexto = MARGIN + lado + 16;
+  const larguraTexto = contentWidth - lado - 16;
+
+  doc.fontSize(8).font("Helvetica").fillColor(MUTED)
+    .text("CÓDIGO DE VERIFICAÇÃO", xTexto, yTopo, { width: larguraTexto, characterSpacing: 0.4 });
+  doc.fontSize(12).font("Courier-Bold").fillColor(INK)
+    .text(verificacao.codigo, xTexto, doc.y + 1, { width: larguraTexto });
+
+  doc.fontSize(8).font("Helvetica").fillColor(MUTED)
+    .text("SHA-256 DESTE LAUDO", xTexto, doc.y + 6, { width: larguraTexto, characterSpacing: 0.4 });
+  doc.fontSize(7).font("Courier").fillColor(INK)
+    .text(verificacao.laudoHash, xTexto, doc.y + 1, { width: larguraTexto });
+
+  doc.fontSize(7.5).font("Helvetica").fillColor(MUTED)
+    .text(
+      `Aponte a câmera para o código ao lado ou informe o código de verificação em ${urlDeVerificacao("").replace(/\/$/, "")}. A conferência é pública e não exige cadastro.`,
+      xTexto,
+      doc.y + 6,
+      { width: larguraTexto }
+    );
+
+  // O texto pode ser mais curto que o QR: a linha de baixo tem que começar
+  // depois do mais alto dos dois, senão a próxima seção invade o código.
+  doc.y = Math.max(doc.y, yTopo + lado) + 8;
+  doc.x = MARGIN;
+
+  paragraph(
+    ctx,
+    "O código acima confere o CONTEÚDO do laudo, não o arquivo. O PDF é remontado a cada download e seus bytes mudam a cada geração, o que tornaria o resumo do arquivo inútil como prova de integridade. Na página de verificação constam os mesmos resumos criptográficos impressos aqui e o nome do titular de forma parcial, para conferência.",
+    { size: 8 }
+  );
+}
+
 function sectionIdentity(ctx, result, extracted) {
   heading(ctx, "§ 1 · Identificação e integridade criptográfica");
+  field(ctx, "Nome do arquivo", result.file?.name);
+  if (result.file?.sizeBytes) {
+    field(ctx, "Tamanho", `${(result.file.sizeBytes / 1024).toFixed(2)} KB (${result.file.sizeBytes.toLocaleString("pt-BR")} bytes)`);
+  }
+  field(ctx, "Tipo de documento", extracted.tipo_documento);
+  field(ctx, "Qualidade de leitura/OCR", extracted.qualidade_ocr);
   if (result.hashes) {
     field(ctx, "SHA-256 (calculado pelo servidor)", result.hashes.sha256, { mono: true });
     field(ctx, "SHA-1 (calculado pelo servidor)", result.hashes.sha1, { mono: true });
   }
-  const declared = extracted.assinatura?.hash_documento_assinado;
-  if (declared) field(ctx, "Hash declarado no documento", declared, { mono: true });
-  const codigo = extracted.assinatura?.codigo_autenticacao_declarado;
-  if (codigo) {
-    // Protocolo não é hash: sai em campo próprio, sem painel de confronto.
-    field(ctx, "Código de autenticação declarado", codigo, { mono: true });
-    field(ctx, "   Origem", extracted.assinatura.codigo_autenticacao_origem);
-    field(ctx, "   Verificação oferecida", extracted.assinatura.codigo_autenticacao_url_verificacao);
+
+  const a = extracted.assinatura || {};
+  const declared = a.hash_documento_assinado ? String(a.hash_documento_assinado).trim() : null;
+  if (declared) {
+    // Confronto hash informado × hash encontrado, com a mesma decisão da tela.
+    const c = confrontoHash(declared, result.hashes?.sha256);
+    subheading(ctx, "Confronto · hash informado × hash encontrado");
+    field(ctx, "Hash informado no documento", declared, { mono: true });
+    field(ctx, "   Algoritmo declarado", a.algoritmo_hash || "não informado");
+    field(ctx, "   Formato detectado", `${c.formato || "não identificado"}${c.ehHash ? "" : " (não é hash criptográfico)"}`);
+    field(ctx, "Hash encontrado (calculado)", result.hashes?.sha256, { mono: true });
+    field(ctx, "   Algoritmo", "SHA-256 (NIST FIPS 180-4), calculado pelo servidor sobre o arquivo original recebido");
+    badge(ctx, "Resultado da comparação", c.resultado, c.confere);
+    paragraph(ctx, c.nota, { size: 9, color: c.comparavel && !c.confere ? DANGER : INK });
+  } else {
+    const codigo = a.codigo_autenticacao_declarado;
+    if (codigo) {
+      // Protocolo não é hash: sai em campo próprio, sem painel de confronto.
+      field(ctx, "Código de autenticação declarado (não é hash)", codigo, { mono: true });
+      field(ctx, "   Origem do código", a.codigo_autenticacao_origem);
+      field(ctx, "   Verificação oferecida", a.codigo_autenticacao_url_verificacao);
+    }
+    const estado = a.hash_declarado_estado || (codigo ? "DECLARADO_NAO_CONFERIVEL" : "AUSENTE");
+    paragraph(ctx, noteForDeclaredHashState(estado, result.hashes?.sha256, a), { size: 9 });
   }
-  field(ctx, "Tipo de documento", extracted.tipo_documento);
-  field(ctx, "Qualidade de leitura/OCR", extracted.qualidade_ocr);
   paragraph(ctx, NOTA_HASH_SISTEMA, { color: MUTED, size: 8.5 });
 }
+
+// Avisos de metadado que só registram rastreabilidade, sem indicar alteração.
+const SO_NOTAS_DE_RASTREABILIDADE = /Título interno|Autor interno|Assunto|Data de criação interna|não contém assinatura digital incorporada detectável/i;
 
 function sectionMetadata(ctx, metadata) {
   if (!metadata) return;
   heading(ctx, "§ 1.1 · Verificação dos metadados internos do PDF");
-  field(ctx, "Número de páginas", metadata.totalPages);
-  field(ctx, "Autor declarado", metadata.author);
-  field(ctx, "Aplicativo criador", metadata.creator);
-  field(ctx, "Produtor", metadata.producer);
-  field(ctx, "Data de criação", metadata.creationDate);
-  field(ctx, "Data de modificação", metadata.modDate);
-  if (metadata.warnings?.length) {
-    paragraph(ctx, metadata.warnings.join(" "), { color: DANGER, size: 8.5 });
+  const warnings = metadata.warnings || [];
+  const soNotas = warnings.length > 0 && warnings.every((w) => SO_NOTAS_DE_RASTREABILIDADE.test(w));
+  badge(
+    ctx,
+    "Resultado da verificação",
+    !warnings.length ? "SEM ALERTAS" : soNotas ? `${warnings.length} NOTA(S)` : `${warnings.length} ALERTA(S)`,
+    !warnings.length || soNotas
+  );
+  const ds = metadata.digitalSignature;
+  const sim = (v) => (v ? "Sim" : "Não");
+  const linhas = [
+    ["Versão do formato PDF", metadata.version],
+    ["Número de páginas", metadata.totalPages],
+    ["Formato das páginas", metadata.pageFormats?.join(" · ")],
+    ["Título interno", metadata.title],
+    ["Autor declarado", metadata.author],
+    ["Assunto", metadata.subject],
+    ["Palavras-chave", metadata.keywords],
+    ["Aplicativo criador", metadata.creator],
+    ["Produtor / conversor", metadata.producer],
+    ["Data de criação interna", metadata.creationDate],
+    // O extrator grava `modificationDate`; `modDate` nunca existiu e a linha
+    // saía sempre vazia no PDF.
+    ["Data de modificação interna", metadata.modificationDate ?? metadata.modDate],
+    ["Idioma declarado", metadata.language],
+    ["Arquivo criptografado", metadata.encrypted == null ? null : sim(metadata.encrypted)],
+    ["PDF linearizado", metadata.linearized == null ? null : sim(metadata.linearized)],
+    ["Procedência do arquivo", labelProvenance(ds?.procedencia?.procedencia, ds?.procedencia)],
+    ["Formulário AcroForm", metadata.hasAcroForm == null ? null : metadata.hasAcroForm ? "Presente" : "Ausente"],
+    ["AcroForm xref", ds?.catalog?.acroformXref],
+    ["SigFlags", ds?.catalog?.sigFlags],
+    ["Formulário XFA", metadata.hasXfa == null ? null : metadata.hasXfa ? "Presente" : "Ausente"],
+    ["Assinatura digital incorporada", metadata.cryptographicSignatureStatus || (metadata.hasEmbeddedSignatures ? "Detectada" : "Não detectada")],
+  ];
+  for (const [rotulo, valor] of linhas) field(ctx, rotulo, valor);
+  field(ctx, "Identificador interno do trailer", metadata.trailerFingerprint, { mono: true });
+
+  if (warnings.length) {
+    subheading(ctx, "Achados da auditoria de metadados");
+    for (const w of warnings) bullet(ctx, formatMetadataWarning(w), { size: 8.5, color: soNotas ? INK : DANGER });
   }
+  paragraph(
+    ctx,
+    "Metadados são campos declarativos e podem ser alterados por editores de PDF. Eles servem como indício técnico e devem ser avaliados em conjunto com os hashes do arquivo, a assinatura digital incorporada e a cadeia de custódia.",
+    { color: MUTED, size: 8.5 }
+  );
 }
 
 function sectionContract(ctx, extracted) {
   const c = extracted.contrato || {};
   heading(ctx, "§ 2 · Dados do instrumento contratual");
-  if (c.condicoes_financeiras_nota) paragraph(ctx, c.condicoes_financeiras_nota, { color: DANGER, size: 8.5 });
+  // O objeto do laudo é a cadeia de custódia. Valor, taxa, CET e prazo da
+  // operação não entram: o leitor precisa saber que a ausência é deliberada, e
+  // não falha de extração.
+  paragraph(
+    ctx,
+    "Este laudo verifica e valida a cadeia de custódia do documento. As condições econômicas da operação " +
+      "(valores, tarifas, tributos, taxas, Custo Efetivo Total e prazos) não integram o exame e não foram aferidas aqui.",
+    { color: MUTED, size: 8.5 }
+  );
   field(ctx, "Número do contrato", c.numero);
-  field(ctx, "Banco / instituição", c.banco);
+  field(ctx, "Banco / instituição financeira", c.banco);
+  field(ctx, "CNPJ da instituição", formatCnpj(c.cnpj_instituicao));
+  field(ctx, "Código BACEN", c.codigo_banco_bacen);
   field(ctx, "Produto", c.produto);
-  field(ctx, "Modalidade", ({COMPRA_CARTAO: "Compra com cartão", SAQUE_CARTAO_CONSIGNADO: "Saque parcelado do cartão consignado", CDC_COM_GARANTIA: "Crédito direto ao consumidor com garantia", CREDITO_PESSOA_JURIDICA: "Crédito para pessoa jurídica"})[c.modalidade] || c.modalidade);
+  field(ctx, "Modalidade", labelModalidade(c.modalidade));
+  field(ctx, "Tipo de operação", c.tipo_operacao);
+  field(ctx, "Operação portada", c.operacao_portada === true ? "Sim" : c.operacao_portada === false ? "Não" : null);
   if (c.empregador) field(ctx, "Empregador declarado", `${c.empregador.literal}${c.empregador.identificado ? "" : " (sem razão social e sem CNPJ)"}`);
-  field(ctx, "Valor contratado", c.valor_contratado);
-  field(ctx, "Valor da parcela", c.valor_parcela);
-  field(ctx, "Número de parcelas", c.numero_parcelas);
-  field(ctx, "Taxa de juros mensal", c.taxa_juros_mensal);
-  field(ctx, "Taxa de juros anual", c.taxa_juros_anual);
-  field(ctx, "CET mensal", c.cet_mensal);
-  field(ctx, "CET anual", c.cet_anual);
+  field(ctx, "Credor original / cedente", c.credor_original);
+  field(ctx, "Agência", c.agencia);
+  field(ctx, "Conta-corrente", c.conta_corrente);
+  field(ctx, "Nome da agência", c.nome_agencia);
+  field(ctx, "Banco de recebimento", c.banco_recebimento);
   field(ctx, "Data do contrato", c.data_contrato);
   if (c.data_contrato_origem) field(ctx, "   Origem da data", `${c.data_contrato_origem}${c.data_contrato_confianca === "BAIXA" ? " · confiança baixa" : ""}`);
   if (c.data_contrato_nota) paragraph(ctx, c.data_contrato_nota, { color: DANGER, size: 8.5 });
+  field(ctx, "Primeiro vencimento", c.data_primeiro_vencimento);
+  field(ctx, "Último vencimento", c.data_ultimo_vencimento);
+  field(ctx, "Modalidade de desconto provável", c.modalidade_desconto_provavel);
+  // A nota das datas vinha do § de dados econômicos, que saiu do laudo.
+  if (c.datas_nota) paragraph(ctx, c.datas_nota, { color: DANGER, size: 8.5 });
 }
 
-function sectionClient(ctx, extracted) {
+function sectionClient(ctx, extracted, result = {}) {
   const c = extracted.cliente || {};
   heading(ctx, "§ 3 · Qualificação do contratante");
-  field(ctx, "Nome completo", c.nome);
-  field(ctx, "CPF", c.cpf);
+  const origem = c.origens || {};
+  const inferido = (campo, valor) => (origem[campo]?.startsWith("INFERIDO") && valor ? `${valor} (inferido)` : valor);
+  // Vazio no documento e suspeito são achados sobre o instrumento, e não podem
+  // desaparecer do laudo como se o campo não existisse.
   const estados = c.estados_campos || {};
-  field(ctx, "RG", estados.rg?.estado === "LOCALIZADO_SUSPEITO" ? `${c.rg || estados.rg.valor} (suspeito: ${estados.rg.motivo})` : c.rg);
+  const comEstado = (campo, valor) => {
+    const e = estados[campo];
+    if (e?.estado === "LOCALIZADO_SUSPEITO") return `${valor || e.valor} (suspeito: ${e.motivo})`;
+    if (e?.estado === "LOCALIZADO_VAZIO") return e.valor ? `Localizado e vazio no instrumento: "${e.valor}"` : "Localizado e vazio no instrumento";
+    return valor;
+  };
+  field(ctx, "Nome completo", c.nome);
+  field(ctx, "CPF", formatCpf(c.cpf));
+  field(ctx, "RG", comEstado("rg", c.rg));
   field(ctx, "Data de nascimento", c.data_nascimento);
-  field(
-    ctx,
-    "Endereço",
-    estados.endereco?.estado === "LOCALIZADO_VAZIO" ? `localizado e vazio no instrumento: "${estados.endereco.valor}"` : c.endereco
-  );
-  field(ctx, "Cidade / Estado", [c.cidade, c.estado].filter(Boolean).join(" / "));
+  field(ctx, "Endereço (extraído do contrato)", comEstado("endereco", c.endereco));
+  field(ctx, "Bairro", c.bairro);
+  field(ctx, "Cidade", inferido("cidade", c.cidade));
+  field(ctx, "Estado", inferido("estado", c.estado));
   field(ctx, "CEP", c.cep);
   field(ctx, "Telefone", c.telefone);
+  field(ctx, "E-mail", comEstado("email", c.email));
+  if (estados.ocupacao?.estado === "LOCALIZADO_VAZIO") field(ctx, "Ocupação", comEstado("ocupacao", null));
   // D7: campo de benefício previdenciário não se imprime em modalidade que não
   // o comporta. "Não identificado" ali afirma lacuna onde não há campo.
   if (fichaBeneficioSeAplica(extracted.contrato?.produto_codigo)) {
+    field(ctx, "Matrícula INSS", c.matricula_inss);
     field(ctx, "Número do benefício", c.numero_beneficio);
+    field(ctx, "Espécie do benefício", c.especie_beneficio);
+  }
+  field(ctx, "Banco de recebimento", c.banco_recepcao);
+  if (c.origens) {
+    paragraph(
+      ctx,
+      "Município, UF, bairro e CEP são exibidos com controle de origem. Campos inferidos não substituem a qualificação completa no instrumento original.",
+      { color: MUTED, size: 8.5 }
+    );
+  }
+  // A verificação de endereços, dois a dois, e a referência residencial estão
+  // no § 5, junto dos confrontos que dependem delas.
+  if (result.confronto_enderecos?.pares?.length || result.home?.query || result.home?.alerta) {
+    paragraph(ctx, "A verificação dos endereços, dois a dois, e o endereço de referência adotado para as distâncias constam do § 5.", { color: MUTED, size: 8.5 });
   }
 }
 
 function sectionSignature(ctx, extracted, result = {}) {
   const a = extracted.assinatura || {};
   heading(ctx, "§ 4 · Assinatura eletrônica e cadeia de custódia");
-  badge(ctx, "Assinatura presente", a.presente ? "CONFIRMADA" : "AUSENTE", !!a.presente);
+  badge(ctx, "Registro textual de assinatura", a.presente ? "LOCALIZADO" : "NÃO LOCALIZADO", !!a.presente);
   paragraph(ctx, NOTA_ASSINATURA, { color: MUTED, size: 8.5 });
+  paragraph(
+    ctx,
+    "Esta seção separa assinatura eletrônica/digital, menção textual no corpo do documento, forma de aceite registrada e assinatura criptográfica incorporada ao PDF. O laudo descreve evidências e ausências técnicas; a consequência jurídica depende de valoração no caso concreto.",
+    { color: MUTED, size: 8.5 }
+  );
+  const cripto = a.assinatura_criptografica || {};
+  const estadoCripto = cripto.estado || (result.metadata?.hasEmbeddedSignatures ? "PRESENTE" : "AUSENTE");
+  badge(ctx, "Assinatura criptográfica incorporada ao PDF", `${estadoCripto} (detalhe no § 1.2)`, estadoCripto === "PRESENTE");
+  if (Number.isFinite(cripto.quantidade)) field(ctx, "Quantidade de assinaturas/campos assinados", cripto.quantidade);
   field(ctx, "Plataforma de assinatura", a.plataforma);
   field(ctx, "Tipo de assinatura", a.tipo);
   field(ctx, "Titular do signatário", a.titular_certificado);
+  field(ctx, "CPF indicado", formatCpf(a.cpf_titular));
   field(ctx, "Data / hora da assinatura", a.data_hora_assinatura);
+  field(ctx, "Autoridade certificadora", a.certificadora_ac);
+  field(ctx, "Nº de série do certificado", a.numero_serie_certificado, { mono: true });
+  field(ctx, "Validade do certificado · início", a.validade_certificado_inicio);
+  field(ctx, "Validade do certificado · fim", a.validade_certificado_fim);
   field(ctx, "Algoritmo de hash", a.algoritmo_hash);
+  field(ctx, "Estado do hash declarado", labelHashState(a.hash_declarado_estado));
+  if (a.hash_documento_assinado) field(ctx, "Hash do documento assinado", a.hash_documento_assinado, { mono: true });
+  if (a.codigo_autenticacao_declarado) {
+    field(ctx, "Estado do código de autenticação", labelHashState(a.codigo_autenticacao_estado || "DECLARADO_NAO_CONFERIVEL"));
+  }
+  if (a.integridade_pos_assinatura === true || a.integridade_pos_assinatura === false) {
+    badge(ctx, "Integridade pós-assinatura", a.integridade_pos_assinatura ? "ÍNTEGRO" : "DOCUMENTO ADULTERADO", a.integridade_pos_assinatura);
+  }
+  if (a.observacoes) paragraph(ctx, a.observacoes, { size: 9 });
   if (a.metodos_autenticacao?.length) field(ctx, "Métodos de autenticação", a.metodos_autenticacao.join(" · "));
   if (a.metodos_descritos_no_fluxo?.length) {
     field(ctx, "Métodos descritos no instrumento como etapa do fluxo", a.metodos_descritos_no_fluxo.map((m) => m.rotulo).join(" · "));
@@ -474,7 +856,6 @@ function sectionSignature(ctx, extracted, result = {}) {
   if (a.blocos_por_documento) paragraph(ctx, `Blocos de assinatura por documento: ${a.blocos_por_documento}.`, { size: 8.5 });
   if (Number.isFinite(a.blocos_assinatura_total)) field(ctx, "Blocos de assinatura em documentos negociais", a.blocos_assinatura_total);
   if (a.codigo_autenticacao_declarado) {
-    field(ctx, "Hash declarado", a.hash_documento_assinado ? "Declarado" : "Ausente");
     field(ctx, "Código de autenticação", `Declarado, conferível apenas pelo emissor (${a.codigo_autenticacao_origem || "origem não identificada"})`);
   }
 
@@ -507,9 +888,9 @@ function sectionCustodyChain(ctx, extracted, ipAnalysis = [], geoPresente = fals
   const av = cadeia.avaliacao;
   badge(
     ctx,
-    "Completude da cadeia",
-    `${cadeia.presentes}/${cadeia.total} · ${av.pct}% · ${av.rotulo}`,
-    av.tom === "ok"
+    "Referências documentais localizadas",
+    `${cadeia.presentes}/${cadeia.total} · presença documental, sem validação de autoria`,
+    true
   );
   paragraph(ctx, av.leitura, { size: 9 });
 
@@ -527,7 +908,7 @@ function sectionCustodyChain(ctx, extracted, ipAnalysis = [], geoPresente = fals
       });
 
     doc.fontSize(8.5).font("Helvetica").fillColor(INK);
-    doc.text(`Função probatória: ${e.comprova}`, MARGIN + 12, doc.y + 1, {
+    doc.text(`Finalidade e limite: ${e.comprova}`, MARGIN + 12, doc.y + 1, {
       width: contentWidth - 12,
     });
     doc.fillColor(MUTED).text(`Base normativa: ${e.norma}`, MARGIN + 12, doc.y + 1, {
@@ -547,7 +928,7 @@ function sectionCustodyChain(ctx, extracted, ipAnalysis = [], geoPresente = fals
   if (cadeia.faltantes.length) {
     paragraph(
       ctx,
-      `Elementos ausentes (${cadeia.faltantes.length}): ${cadeia.faltantes.map((e) => e.nome.toLowerCase()).join("; ")}.`,
+      `Referências não localizadas (${cadeia.faltantes.length}): ${cadeia.faltantes.map((e) => e.nome.toLowerCase()).join("; ")}.`,
       { color: DANGER, size: 9 }
     );
   }
@@ -647,7 +1028,7 @@ function sectionGeo(ctx, result, mapas = {}) {
   // ─── Ponto de referência ───────────────────────────────────────────────────
   paragraph(
     ctx,
-    "Esta seção apresenta TRÊS confrontos independentes, cada um com seu mapa. Eles respondem a perguntas diferentes e não se somam: o primeiro verifica de onde partiu a CONEXÃO que gerou o ato; o segundo verifica o que o DOCUMENTO afirma sobre o local do ato; ambos usam como referência a residência informada. O terceiro confronta a geolocalização declarada com a origem da conexão e não depende da residência, por isso continua valendo quando ela é recusada.",
+    "Esta seção avalia três confrontos independentes; cálculos e mapas são apresentados quando os respectivos pontos estão disponíveis. Eles respondem a perguntas diferentes e não se somam: o primeiro verifica de onde partiu a CONEXÃO que gerou o ato; o segundo verifica o que o DOCUMENTO afirma sobre o local do ato; ambos usam como referência a residência informada. O terceiro confronta a geolocalização declarada com a origem da conexão e não depende da residência, por isso continua valendo quando ela é recusada.",
     { size: 9 }
   );
 
@@ -673,13 +1054,20 @@ function sectionGeo(ctx, result, mapas = {}) {
     }
   }
 
-  // MED-01: recusado o confronto, o endereço aparece como não utilizado e o
-  // alerta acima é o único motivo impresso.
   const referenciaRecusada = ["RECUSADO_CONFLITO", "INDISPONIVEL_NAO_INFORMADO"].includes(result.home?.estado_confronto);
   const enderecoInformado = result.home?.conflito?.manual?.texto || result.home?.query;
   if (referenciaRecusada) {
     if (enderecoInformado) field(ctx, "Endereço informado, não utilizado", enderecoInformado);
-  } else if (result.home?.query) field(ctx, `Endereço (${result.home.source || "referência"})`, result.home.query);
+  } else if (result.home?.query) {
+    field(ctx, `Endereço (${result.home.source || "referência"})`, result.home.query);
+    if (result.home?.estado_confronto === "DIVERGENCIA_CADASTRAL" || result.home?.conflito) {
+      const instRotulo = [result.home.instrumento?.cidade, result.home.instrumento?.uf, result.home.instrumento?.cep].filter(Boolean).join(", ") || "município do contrato";
+      field(ctx, "Endereço extraído do contrato", instRotulo);
+      if (result.home.distancia_divergencia_cadastral != null) {
+        field(ctx, "Divergência cadastral entre os endereços", `${result.home.distancia_divergencia_cadastral.toFixed(1)} km`);
+      }
+    }
+  }
   if (!referenciaRecusada && home && Number.isFinite(home.lat) && Number.isFinite(home.lon)) {
     // A coordenada NUMÉRICA é obrigatória: todas as distâncias abaixo derivam
     // dela, e sem o valor o laudo deixa de ser reproduzível por terceiro.
@@ -711,7 +1099,7 @@ function sectionGeo(ctx, result, mapas = {}) {
   subheading(ctx, "§ 5.1 · Confronto 1 · origem da conexão (IP) × residência informada");
   paragraph(
     ctx,
-    "Pergunta: a conexão que originou a assinatura partiu da região onde o contratante reside? A localização do IP tem precisão de nível de operadora, isto é, aponta o roteador de saída e não o aparelho. A margem, portanto, é de dezenas de quilômetros, e só a incompatibilidade de ordem de grandeza tem valor indiciário.",
+    "Compara o ponto retornado pela consulta do IP com uma referência residencial disponível. A base externa fornece uma estimativa, sem margem de erro aferida neste exame. O resultado não identifica aparelho, roteador ou presença física.",
     { color: MUTED, size: 8.5 }
   );
 
@@ -727,7 +1115,7 @@ function sectionGeo(ctx, result, mapas = {}) {
     field(ctx, "Endereço IP", ipRef.endereco, { mono: true });
     field(
       ctx,
-      "Origem da conexão",
+      "Estimativa retornada pela consulta do IP",
       `${[ipRef.geo.city, ipRef.geo.region, ipRef.geo.country].filter(Boolean).join(" / ")} (${ipRef.geo.lat}, ${ipRef.geo.lon})`
     );
     const d = ipRef.divergenciaResidencia;
@@ -738,12 +1126,15 @@ function sectionGeo(ctx, result, mapas = {}) {
     } else if (!home) {
       paragraph(ctx, "Distância não calculada: falta a coordenada de referência.", { color: MUTED, size: 8.5 });
     }
+    if (ipRef.distanceToInstrumento != null) {
+      field(ctx, "Distância entre a origem do IP e o endereço do contrato", `${ipRef.distanceToInstrumento.toFixed(2)} km`);
+    }
 
     if (mapas.mapaIpResidencia) {
       drawMap(
         ctx,
         mapas.mapaIpResidencia,
-        "Mapa 1. Origem da conexão pelo endereço IP (I, vermelho) × residência informada (R, azul). A linha representa a distância geodésica (Haversine). O ponto I indica o ponto de presença da operadora, NÃO a posição do aparelho. Base cartográfica OpenStreetMap."
+        "Mapa 1. Origem da conexão pelo endereço IP (I, vermelho) × residência informada (R, azul). A linha representa a distância geodésica (Haversine). O ponto I é uma estimativa do provedor de geolocalização; não identifica a posição do aparelho nem comprova ponto de presença da operadora. Base cartográfica OpenStreetMap."
       );
     }
   }
@@ -752,7 +1143,7 @@ function sectionGeo(ctx, result, mapas = {}) {
   subheading(ctx, "§ 5.2 · Confronto 2 · residência informada × geolocalização declarada no documento");
   paragraph(
     ctx,
-    "Pergunta: a coordenada que o próprio documento registra como local da assinatura corresponde à residência do contratante? Aqui as duas coordenadas são de precisão métrica (GPS declarado e ponto confirmado). A comparação é direta e, ao contrário do Confronto 1, uma divergência de poucos quilômetros já é significativa.",
+    "Pergunta: a coordenada que o próprio documento registra como local da assinatura corresponde à residência do contratante? A precisão depende da origem dos dois pontos. Coordenada declarada, ponto confirmado e referência municipal têm limites diferentes; sem referência residencial válida não há distância residencial aferida.",
     { color: MUTED, size: 8.5 }
   );
 
@@ -768,6 +1159,8 @@ function sectionGeo(ctx, result, mapas = {}) {
     if (cg.endereco) field(ctx, "Endereço declarado", cg.endereco);
     field(ctx, "Coordenada declarada", `${cg.lat}, ${cg.lon}`, { mono: true });
     field(ctx, "   Origem da coordenada", `${cg.fonte || "não informada"} (precisão ${precisionText(cg)})`);
+    field(ctx, "   Forma de obtenção", cg.geocoded ? "coordenada obtida por geocodificação do endereço declarado" : "coordenada GPS extraída do log");
+    if (cg.precisao) field(ctx, "   Precisão declarada", `${cg.precisao} m`);
     if (cg.dataHora) field(ctx, "   Data / hora do registro", cg.dataHora);
     if (cg.municipio) field(ctx, "   Município do local declarado", `${cg.municipio}${cg.uf ? `/${cg.uf}` : ""}`);
 
@@ -786,12 +1179,15 @@ function sectionGeo(ctx, result, mapas = {}) {
       paragraph(ctx, declarado.sintese, { size: 9 });
       if (declarado.ressalva) paragraph(ctx, declarado.ressalva, { color: MUTED, size: 8.5 });
     }
+    if (cg.distanceToInstrumento != null) {
+      field(ctx, "Distância entre o local declarado e o endereço do contrato", `${cg.distanceToInstrumento.toFixed(2)} km`);
+    }
 
     if (mapas.mapaResidenciaDeclarado) {
       drawMap(
         ctx,
         mapas.mapaResidenciaDeclarado,
-        "Mapa 2. Residência informada (R, azul) × geolocalização declarada no documento (A, âmbar). A linha representa a distância geodésica (Haversine). Ambos os pontos têm precisão métrica, ao contrário do Mapa 1. Base cartográfica OpenStreetMap."
+        "Mapa 2. Residência informada (R, azul) × geolocalização declarada no documento (A, âmbar). A linha representa a distância geodésica (Haversine). A precisão depende das fontes declaradas para cada ponto. Base cartográfica OpenStreetMap."
       );
     }
   }
@@ -802,7 +1198,7 @@ function sectionGeo(ctx, result, mapas = {}) {
   subheading(ctx, "§ 5.2.1 · Confronto 3 · geolocalização declarada × origem da conexão (IP)");
   paragraph(
     ctx,
-    "Pergunta: a conexão que originou a assinatura partiu da região que o próprio documento registra como local do ato? Não usa a residência. A precisão é a do IP, de nível de operadora: divergências de dezenas de quilômetros são esperadas, e só a incompatibilidade de ordem de grandeza tem valor indiciário.",
+    "Compara a coordenada declarada no documento com o ponto retornado pela consulta do IP, independentemente da residência. A consulta atual não comprova localização na data do ato; sem margem de erro validada, a distância não determina compatibilidade física.",
     { color: MUTED, size: 8.5 }
   );
   const ipAssinatura = (result.ipAnalysis || []).find((ip) => ip.divergenciaAssinatura?.km != null);
@@ -818,13 +1214,13 @@ function sectionGeo(ctx, result, mapas = {}) {
     const da = ipAssinatura.divergenciaAssinatura;
     reserve(ctx, 105);
     field(ctx, "Endereço IP", ipAssinatura.endereco, { mono: true });
-    badge(ctx, "Distância entre a geolocalização declarada e a origem do IP", `${da.km.toFixed(2)} km · ${da.rotulo}`, da.tom === "ok");
+    field(ctx, "Distância entre GPS declarado e consulta do IP", `cerca de ${Math.round(da.km)} km · ${da.rotulo} · consulta atual, sem comprovação histórica`);
     paragraph(ctx, da.sintese, { size: 9, color: da.tom === "danger" ? DANGER : INK });
     if (mapas.mapaDeclaradoIp) {
       drawMap(
         ctx,
         mapas.mapaDeclaradoIp,
-        "Mapa 3. Geolocalização declarada no documento (A, âmbar) × origem da conexão pelo endereço IP (I, vermelho). A linha representa a distância geodésica (Haversine). O ponto I indica o ponto de presença da operadora, NÃO a posição do aparelho. Base cartográfica OpenStreetMap."
+        "Mapa 3. Geolocalização declarada no documento (A, âmbar) × estimativa retornada para o IP registrado (I, vermelho). A linha representa a distância geodésica (Haversine). O ponto I é uma estimativa do provedor de geolocalização; não identifica a posição do aparelho nem comprova ponto de presença da operadora. Base cartográfica OpenStreetMap."
       );
     }
   }
@@ -894,7 +1290,7 @@ function sectionIpTrace(ctx, result) {
 
   paragraph(
     ctx,
-    "Um endereço IP não carrega coordenada. A localização abaixo vem de base que mapeia blocos de IP ao ponto de presença da operadora, ou seja, ao roteador de saída, não ao aparelho. Em rede móvel brasileira, com CGNAT e blocos IPv6 alocados por região, o ponto devolvido tende à capital ou ao centro de operação do estado. Divergências de dezenas de quilômetros são esperadas; o que tem valor indiciário é a incompatibilidade de ordem de grandeza.",
+    "Um endereço IP não contém coordenadas geográficas. A localização abaixo é uma estimativa de serviço externo, sujeita a atualização e imprecisão. Não identifica, por si só, o aparelho, um roteador específico, o signatário ou a localização na data do ato.",
     { color: MUTED, size: 8.5 }
   );
 
@@ -921,22 +1317,24 @@ function sectionIpTrace(ctx, result) {
         { width: contentWidth - 12 }
       );
 
+    if (ip.contexto) field(ctx, "   Contexto no documento", ip.contexto);
+    if (ip.classe) field(ctx, "   Classe técnica", ip.classe);
     if (ip.data_hora) field(ctx, "   Data / hora do registro", ip.data_hora);
     if (ip.porta) {
-      field(ctx, "   Porta lógica de origem", `${ip.porta} (porta efêmera / cliente-servidor ativa)`);
+      field(ctx, "   Porta lógica de origem", `${ip.porta} (valor declarado; não comprova sessão ativa)`);
     }
 
     if (ip.rdap) {
-      if (ip.rdap.asn) field(ctx, "   ASN Oficial (Registro.br / LACNIC)", `${ip.rdap.asn} — ${ip.rdap.owner || ""}`);
+      if (ip.rdap.asn) field(ctx, "   ASN Oficial (Registro.br / LACNIC)", [ip.rdap.asn, ip.rdap.owner].filter(Boolean).join(" · "));
+      else if (ip.rdap.owner) field(ctx, "   Titular do bloco (RDAP)", ip.rdap.owner);
       if (ip.rdap.cidr) field(ctx, "   Bloco / Faixa CIDR alocada", ip.rdap.cidr);
     }
 
     if (ip.parsedUserAgent) {
       const ua = ip.parsedUserAgent;
       field(ctx, "   Ambiente do dispositivo", `${ua.os} ${ua.osVersion || ""} · ${ua.browser} ${ua.browserVersion || ""} (${ua.deviceType})`);
-    } else if (ip.user_agent) {
-      field(ctx, "   Dispositivo declarado", ip.user_agent);
     }
+    if (ip.user_agent) field(ctx, "   User-Agent registrado", ip.user_agent);
 
     // Endereço de CGNAT não é ausência de dado nem falha de consulta: é um
     // endereço que, por natureza, não localiza ninguém. Tratá-lo com a mesma
@@ -972,11 +1370,15 @@ function sectionIpTrace(ctx, result) {
 
     field(
       ctx,
-      "   Origem da conexão",
+      "   Estimativa da consulta de geolocalização",
       `${[ip.geo.city, ip.geo.region, ip.geo.country].filter(Boolean).join(" / ")} (${ip.geo.lat}, ${ip.geo.lon})`
     );
-    if (ip.geo.isp) field(ctx, "   Operadora (ISP)", ip.geo.isp);
+    if (ip.geo.isp) field(ctx, "   Operadora (ISP / ASN)", ip.geo.isp);
+    if (ip.geo.timezone) field(ctx, "   Fuso horário", ip.geo.timezone);
     field(ctx, "   Fonte da geolocalização", ip.geo.source || "não informada");
+    field(ctx, "   Consulta externa", `${ip.geo.queryId || "ID não registrado"} · ${ip.geo.queriedAt || "data não registrada"}`);
+    field(ctx, "   Granularidade", ip.historico?.precisionOverride || ip.geo.granularity || "não informada");
+    paragraph(ctx, "Consulta externa atual não comprova localização histórica na data do ato; a margem de erro do serviço não foi fornecida.", { size: 8, color: MUTED });
     // Motor pericial v2: registro do bloco na data do ato (RIPEstat).
     if (ip.historico?.label) field(ctx, "   Registro do bloco na data do ato", ip.historico.label);
     if (ip.historico?.note) paragraph(ctx, ip.historico.note, { color: MUTED, size: 8.5 });
@@ -991,7 +1393,7 @@ function sectionIpTrace(ctx, result) {
 
     const da = ip.divergenciaAssinatura;
     if (da) {
-      badge(ctx, "   IP × GPS declarado no contrato", `${da.km.toFixed(2)} km · ${da.rotulo}`, da.tom === "ok");
+      field(ctx, "   IP × GPS declarado no contrato", `cerca de ${Math.round(da.km)} km · ${da.rotulo} · consulta atual, sem comprovação histórica`);
       paragraph(ctx, da.sintese, { size: 8.5, color: da.tom === "danger" ? DANGER : INK });
     }
   }
@@ -1023,24 +1425,30 @@ function sectionIrregularities(ctx, extracted, projecao = null) {
   // divergir do sumário, que é o defeito que o D5 corrige. Projeção vazia é
   // resposta, não ausência de resposta, por isso o teste é de tipo e não de
   // comprimento.
-  const achados = temProjecao
-    ? projecao.map((f) => ({ codigo: f.key, gravidade: f.severity, titulo: f.title, texto: f.text }))
-    : Array.isArray(extracted.achados_irregularidade) ? extracted.achados_irregularidade : [];
-  heading(ctx, "§ 6 · Evidências de irregularidade", { danger: evs.length > 0 || achados.length > 0 });
+  // Mesma lista, ordem e agrupamento do § de achados da tela (reportIssues).
+  const achados = temProjecao || Array.isArray(extracted.achados_irregularidade)
+    ? reportIssues(temProjecao ? {} : extracted, temProjecao ? projecao : null)
+    : [];
+  heading(ctx, "§ 6 · Achados técnicos e diligências", { danger: evs.length > 0 || achados.length > 0 });
 
   // Motor pericial v2: achado estruturado com código e gravidade.
   if (achados.length) {
-    for (const achado of achados) {
-      reserve(ctx, 60);
-      const { doc, contentWidth } = ctx;
-      const grave = /CR[IÍ]TIC|ALTA|ALTO/i.test(achado.gravidade || "");
-      doc
-        .fontSize(9.5)
-        .font("Helvetica-Bold")
-        .fillColor(grave ? DANGER : INK)
-        .text(`${achado.codigo} · ${achado.gravidade || ""} · ${achado.titulo}`, MARGIN, doc.y, { width: contentWidth });
-      if (achado.texto) paragraph(ctx, achado.texto, { size: 9 });
-      else doc.moveDown(0.3);
+    for (const [grupo, titulo] of GRUPOS_ACHADOS) {
+      const itens = achados.filter((a) => issueBucket(a) === grupo);
+      if (!itens.length) continue;
+      subheading(ctx, titulo);
+      for (const achado of itens) {
+        reserve(ctx, 60);
+        const { doc, contentWidth } = ctx;
+        const grave = /CR[IÍ]TIC|ALTA|ALTO/i.test(achado.gravidade || "");
+        doc
+          .fontSize(9.5)
+          .font("Helvetica-Bold")
+          .fillColor(grave ? DANGER : INK)
+          .text(`${achado.codigo} · ${achado.gravidade || ""} · ${achado.titulo}`, MARGIN, doc.y, { width: contentWidth });
+        if (achado.texto) paragraph(ctx, achado.texto, { size: 9 });
+        else doc.moveDown(0.3);
+      }
     }
     return;
   }
@@ -1057,7 +1465,7 @@ function sectionIrregularities(ctx, extracted, projecao = null) {
   for (const ev of evs) {
     const { doc, contentWidth } = ctx;
     reserve(ctx, 32);
-    doc.fontSize(9.5).font("Helvetica").fillColor(DANGER).text("▸ ", MARGIN, doc.y, { continued: true });
+    doc.fontSize(9.5).font("Helvetica").fillColor(DANGER).text("• ", MARGIN, doc.y, { continued: true });
     doc.fillColor(INK).text(ev, { width: contentWidth });
     doc.moveDown(0.2);
   }
@@ -1076,96 +1484,110 @@ const PROCEDENCIA_PDF = {
 };
 
 /** § 1.2 — assinatura digital incorporada, proveniência e imagens. */
-function sectionDigitalSignature(ctx, metadata, extracted) {
+function sectionDigitalSignature(ctx, metadata) {
   const ds = metadata?.digitalSignature;
-  const imagens = extracted.imagens_pdf;
-  if (!ds && !imagens) return;
-  heading(ctx, "§ 1.2 · Assinatura digital, proveniência e imagens do arquivo");
+  if (!ds) return;
+  heading(ctx, "§ 1.2 · Assinatura digital e proveniência do arquivo");
 
-  if (ds) {
-    badge(ctx, "Assinatura criptográfica incorporada", ds.estado || "INDETERMINADO", ds.estado === "PRESENTE");
-    if (ds.motivo) paragraph(ctx, ds.motivo, { color: MUTED, size: 8.5 });
-    if (ds.procedencia?.procedencia) {
-      const p = ds.procedencia;
-      field(
-        ctx,
-        "Proveniência do arquivo",
-        `${PROCEDENCIA_PDF[p.procedencia] || p.procedencia}${p.sistema ? ` (${[p.sistema, p.tribunal].filter(Boolean).join("/")})` : ""}`
-      );
-      if (p.data_juntada) field(ctx, "   Data da juntada", p.data_juntada);
-      if (p.movimento) field(ctx, "   Movimento", `${p.movimento}${p.descricao_movimento ? ` · ${p.descricao_movimento}` : ""}`);
-      if (p.juntado_por) field(ctx, "   Juntado por (assinatura digital)", p.juntado_por);
-      if (p.identificador_validacao) field(ctx, "   Identificador de validação", p.identificador_validacao, { mono: true });
-      if (ds.procedencia.indicios?.length) field(ctx, "Indícios", ds.procedencia.indicios.join(" · "));
-      if (ds.procedencia.mensagem) paragraph(ctx, ds.procedencia.mensagem, { size: 8.5 });
+  badge(ctx, "Assinatura criptográfica incorporada", ds.estado || "INDETERMINADO", ds.estado === "PRESENTE");
+  if (ds.motivo) paragraph(ctx, ds.motivo, { color: MUTED, size: 8.5 });
+  if (ds.procedencia?.procedencia) {
+    const p = ds.procedencia;
+    field(
+      ctx,
+      "Proveniência indicada por elementos do arquivo (não validada)",
+      `${PROCEDENCIA_PDF[p.procedencia] || p.procedencia}${p.sistema ? ` (${[p.sistema, p.tribunal].filter(Boolean).join("/")})` : ""}`
+    );
+    if (p.data_juntada) field(ctx, "   Data da juntada", p.data_juntada);
+    if (p.movimento) field(ctx, "   Movimento", `${p.movimento}${p.descricao_movimento ? ` · ${p.descricao_movimento}` : ""}`);
+    if (p.juntado_por) field(ctx, "   Assinatura mencionada no carimbo (não validada)", p.juntado_por);
+    if (p.identificador_validacao) field(ctx, "   Identificador de validação", p.identificador_validacao, { mono: true });
+    if (ds.procedencia.indicios?.length) field(ctx, "Indícios", ds.procedencia.indicios.join(" · "));
+    if (ds.procedencia.mensagem) paragraph(ctx, ds.procedencia.mensagem, { size: 8.5 });
+  }
+  if (ds.catalog) {
+    field(ctx, "Formulário AcroForm", ds.catalog.acroform);
+    field(ctx, "Atualizações incrementais", `${ds.catalog.incrementalUpdates ?? 0} (${ds.catalog.eofCount ?? 0} marca(s) %%EOF)`);
+  }
+  const camposAssinatura = ds.catalog?.fields || [];
+  if (camposAssinatura.length) {
+    subheading(ctx, "Campos de assinatura no catálogo do PDF");
+    table(
+      ctx,
+      [
+        { titulo: "Campo", largura: 0.2 },
+        { titulo: "xref", largura: 0.07, mono: true },
+        { titulo: "Retângulo", largura: 0.2, mono: true },
+        { titulo: "Visibilidade", largura: 0.15 },
+        { titulo: "Assinado", largura: 0.09 },
+        { titulo: "Dic. sig.", largura: 0.08, mono: true },
+        { titulo: "Data declarada", largura: 0.11 },
+        { titulo: "Subfiltro", largura: 0.1 },
+      ],
+      camposAssinatura.map((f) => [
+        f.nome,
+        f.xref,
+        f.rect,
+        f.invisivel ? "Invisível (/Rect [0 0 0 0])" : "Visível",
+        f.assinado ? "Sim" : "Não",
+        f.dicionario_sig,
+        f.data_declarada,
+        f.subfilter,
+      ])
+    );
+  }
+  if (ds.pdfsig?.assinaturas?.length) subheading(ctx, "Validação criptográfica pelo pdfsig");
+  for (const sig of ds.pdfsig?.assinaturas || []) {
+    reserve(ctx, 80);
+    subheading(ctx, `Assinatura #${sig.numero}${sig.campo ? ` · ${sig.campo}` : ""}`);
+    field(ctx, "   Signatário (CN)", sig.signatario_cn);
+    field(ctx, "   DN completo", sig.signatario_dn);
+    field(ctx, "   Data da assinatura", sig.data_assinatura);
+    field(ctx, "   Algoritmo de resumo", sig.algoritmo_resumo);
+    field(ctx, "   Tipo / subfiltro", sig.subfilter);
+    field(ctx, "   Validação da assinatura", sig.validacao_assinatura || "NÃO AFERÍVEL");
+    field(ctx, "   Validação do certificado", sig.validacao_certificado);
+    if (sig.bytesCobertos != null) field(ctx, "   Bytes cobertos", sig.bytesCobertos.toLocaleString("pt-BR"));
+    if (sig.coberturaPercentual != null) {
+      field(ctx, "   Cobertura do documento", `${String(sig.coberturaPercentual).replace(".", ",")}%`);
     }
-    if (ds.catalog) {
-      field(ctx, "Formulário AcroForm", ds.catalog.acroform);
-      field(ctx, "Atualizações incrementais", `${ds.catalog.incrementalUpdates ?? 0} (${ds.catalog.eofCount ?? 0} marca(s) %%EOF)`);
-    }
-    for (const sig of ds.pdfsig?.assinaturas || []) {
-      reserve(ctx, 80);
-      subheading(ctx, `Assinatura #${sig.numero}${sig.campo ? ` · ${sig.campo}` : ""}`);
-      field(ctx, "   Signatário (CN)", sig.signatario_cn);
-      field(ctx, "   Data da assinatura", sig.data_assinatura);
-      field(ctx, "   Algoritmo de resumo", sig.algoritmo_resumo);
-      field(ctx, "   Validação da assinatura", sig.validacao_assinatura);
-      field(ctx, "   Validação do certificado", sig.validacao_certificado);
-      if (sig.coberturaPercentual != null) {
-        field(ctx, "   Cobertura do documento", `${String(sig.coberturaPercentual).replace(".", ",")}%`);
-      }
-    }
-    for (const alerta of ds.alerts || []) {
-      paragraph(ctx, `${alerta.codigo} · ${alerta.severidade} · ${alerta.titulo}. ${alerta.detalhe}`, {
-        color: alerta.severidade === "CRÍTICO" ? DANGER : INK,
-        size: 8.5,
-      });
-    }
+    field(ctx, "   Documento integral assinado", sig.notTotalDocumentSigned ? "Não" : "Sim");
+  }
+  for (const alerta of ds.alerts || []) {
+    paragraph(ctx, `${alerta.codigo} · ${alerta.severidade} · ${alerta.titulo}. ${alerta.detalhe}`, {
+      color: alerta.severidade === "CRÍTICO" ? DANGER : INK,
+      size: 8.5,
+    });
   }
 
-  if (imagens) {
-    subheading(ctx, "Inventário de imagens incorporadas");
-    if (!imagens.disponivel) {
-      paragraph(ctx, imagens.observacao || "Inventário de imagens indisponível.", { color: MUTED, size: 8.5 });
-    } else {
-      const lista = imagens.imagens || [];
-      const templates = lista.filter((i) => !i.biometricaProvavel && i.classificacao !== "imagem documental");
-      field(ctx, "Imagens listadas", imagens.total ?? 0);
-      field(ctx, "Fotografia / biometria provável", lista.filter((i) => i.biometricaProvavel).length);
-      field(ctx, "Imagens documentais", lista.filter((i) => i.classificacao === "imagem documental").length);
-      field(ctx, "Elementos de template (logotipos, fios, máscaras)", `${templates.length} · detalhe no anexo técnico`);
-      field(ctx, "Grupos de imagens idênticas", imagens.grupos_repetidos?.length ?? 0);
-      // Análises gravadas antes do MED-03 ainda trazem o IMG2 de template.
-      for (const achado of (imagens.achados || []).filter((a) => !(a.codigo === "IMG2" && a.titulo === "Reuso de imagem de template"))) {
-        paragraph(ctx, `${achado.titulo}. ${achado.detalhe}`, { size: 8.5 });
-      }
-    }
-  }
+  // O inventário de imagens saiu daqui para o § 4.4, junto da selfie e da
+  // prova de vida, como na tela.
 }
 
-const pctBR = (v, casas = 1) => (v == null ? null : `${(v * 100).toFixed(casas).replace(".", ",")}%`);
-
-/** § 2.2: forma de liberação declarada e comprovante do crédito. */
+/** § 2.1: forma de liberação declarada e comprovante do crédito. */
 function sectionCreditRelease(ctx, extracted) {
   const l = extracted.liberacao_credito;
   if (!l?.declarada) return;
-  heading(ctx, "§ 2.2 · Liberação do crédito e comprovante", { danger: !l.comprovante });
+  heading(ctx, "§ 2.1 · Liberação do crédito e comprovante", { danger: !l.comprovante });
   field(ctx, "Forma de liberação declarada", l.declarada.forma);
   field(ctx, "Banco / agência / conta", [l.declarada.banco && `Banco ${l.declarada.banco}`, l.declarada.agencia && `agência ${l.declarada.agencia}`, l.declarada.conta && `conta ${l.declarada.conta}`].filter(Boolean).join(" · "));
-  field(ctx, "Valor a ser creditado", extracted.contrato?.valor_liberado);
+  // A existência do comprovante é prova documental; o quanto foi creditado é
+  // matéria econômica e não entra no laudo.
   badge(ctx, "Comprovante de transferência no arquivo", l.comprovante ? "LOCALIZADO" : "AUSENTE", Boolean(l.comprovante));
-  if (l.comprovante) field(ctx, "   Comprovante", [l.comprovante.pagina && `pág. ${l.comprovante.pagina}`, l.comprovante.valor, l.comprovante.data].filter(Boolean).join(" · "));
+  if (l.comprovante) field(ctx, "   Comprovante", [l.comprovante.pagina && `pág. ${l.comprovante.pagina}`, l.comprovante.data].filter(Boolean).join(" · "));
 }
 
-/** § 2.3: seguro prestamista vinculado. */
+/** § 2.2: seguro prestamista vinculado. */
 function sectionInsurance(ctx, extracted) {
   const sg = extracted.seguro_prestamista;
   if (!sg) return;
-  heading(ctx, "§ 2.3 · Seguro prestamista vinculado à operação", { danger: (sg.achados || []).some((a) => a.gravidade === "ALTA") });
+  heading(ctx, "§ 2.2 · Seguro prestamista vinculado à operação", { danger: (sg.achados || []).some((a) => a.gravidade === "ALTA") });
   field(ctx, "Proposta", sg.proposta);
-  field(ctx, "Prêmio", sg.premio ? `${sg.premio}${sg.premio_sobre_liberado != null ? ` (${pctBR(sg.premio_sobre_liberado, 2)} do valor liberado)` : ""}` : null);
-  field(ctx, "IOF do seguro", sg.iof);
-  field(ctx, "Pró-labore", sg.pro_labore ? `${sg.pro_labore}${sg.pro_labore_sobre_premio != null ? ` (${pctBR(sg.pro_labore_sobre_premio)} do prêmio)` : ""}` : null);
+  field(ctx, "Forma de pagamento", sg.forma_pagamento);
+  field(ctx, "Vigência", sg.vigencia?.premissa);
+  field(ctx, "Marcos de contagem", sg.marcos_temporais);
+  // Prêmio, IOF e pró-labore são preço do seguro: saem do laudo. Ficam a
+  // estrutura da apólice e os prazos, que sustentam a adesão e a vigência.
   field(ctx, "Seguradora", sg.seguradora ? `${sg.seguradora.nome}${sg.seguradora.cnpj ? `, CNPJ ${sg.seguradora.cnpj}` : ""}` : null);
   field(ctx, "Corretora", sg.corretora ? `${sg.corretora.nome}, CNPJ ${sg.corretora.cnpj}, SUSEP ${sg.corretora.susep}` : null);
   field(ctx, "Estipulante", sg.estipulante ? `${sg.estipulante.nome}, CNPJ ${sg.estipulante.cnpj}` : null);
@@ -1174,7 +1596,7 @@ function sectionInsurance(ctx, extracted) {
     field(
       ctx,
       `   ${c.nome}`,
-      [c.premio, c.participacao_premio != null ? `${pctBR(c.participacao_premio)} do prêmio` : null, `carência ${c.carencia_dias ? `${c.carencia_dias} dias` : "não há"}`, `franquia ${c.franquia_dias ? `${c.franquia_dias} dias` : "não há"}`, c.teto_parcelas ? `até ${c.teto_parcelas} parcelas` : null].filter(Boolean).join(" · ")
+      [`carência ${c.carencia_dias == null ? "não identificada" : c.carencia_dias ? `${c.carencia_dias} dias` : "não há"}`, `franquia ${c.franquia_dias == null ? "não identificada" : c.franquia_dias ? `${c.franquia_dias} dias` : "não há"}`, c.teto_parcelas ? `até ${c.teto_parcelas} parcelas` : null].filter(Boolean).join(" · ")
     );
   }
 }
@@ -1186,52 +1608,184 @@ function sectionEventTrail(ctx, extracted) {
   heading(ctx, "§ 4.3 · Trilha de eventos da contratação");
   field(ctx, "Duração total da jornada", `${t.duracao_total} (${t.duracao_total_s} segundos)`);
   if (t.fuso) field(ctx, "Fuso declarado na trilha", `${t.fuso.trilha}; leitura local em ${t.fuso.local}${t.fuso.assinatura_sem_fuso ? "; bloco de assinatura sem fuso" : ""}`);
-  for (const ev of t.eventos) {
-    reserve(ctx, 26);
-    field(
-      ctx,
-      `   ${ev.nome}`,
-      [
-        `${ev.data_hora}${ev.hora_local ? ` (local ${ev.hora_local.split(" ")[1]})` : ""}`,
-        ev.intervalo_s == null ? "referência" : `+${ev.intervalo_s} s`,
-        ev.segundos_por_pagina != null ? `${String(ev.segundos_por_pagina).replace(".", ",")} s/pág. em ${ev.documento_aceito.paginas} págs.` : null,
-        ev.ip ? `IP ${ev.ip}${ev.porta ? `:${ev.porta}` : ""}` : "sem IP",
-        ev.lat != null ? `${ev.lat}, ${ev.lon}` : "sem geolocalização",
-      ].filter(Boolean).join(" · ")
-    );
+  const fusoTrilha = t.fuso?.trilha || "declarada";
+  table(
+    ctx,
+    [
+      { titulo: "Evento", largura: 0.17 },
+      { titulo: `Data/hora (${fusoTrilha})`, largura: 0.12 },
+      { titulo: "Hora local", largura: 0.08 },
+      { titulo: "Intervalo", largura: 0.09 },
+      { titulo: "s/página", largura: 0.09 },
+      { titulo: "Dispositivo", largura: 0.12 },
+      { titulo: "IP : porta", largura: 0.18, mono: true },
+      { titulo: "Geolocalização", largura: 0.15, mono: true },
+    ],
+    t.eventos.map((ev) => [
+      ev.nome,
+      ev.data_hora,
+      ev.hora_local ? ev.hora_local.split(" ")[1] : null,
+      ev.intervalo_s == null ? "referência" : `+${ev.intervalo_s} s`,
+      ev.segundos_por_pagina != null ? `${String(ev.segundos_por_pagina).replace(".", ",")} (${ev.documento_aceito?.paginas} págs.)` : null,
+      ev.aparelho,
+      ev.ip ? `${ev.ip}${ev.porta ? `:${ev.porta}` : ""}` : "ausente",
+      ev.lat != null ? `${ev.lat}, ${ev.lon}` : "ausente",
+    ]),
+    { destaque: (i) => t.eventos[i].segundos_por_pagina != null && t.eventos[i].segundos_por_pagina < 5 }
+  );
+  if (t.eventos.some((ev) => ev.segundos_por_pagina != null)) {
+    paragraph(ctx, "Segundos por página é razão aritmética entre o intervalo e o número de páginas do documento aceito; não mede leitura.", { color: MUTED, size: 8 });
   }
 }
 
-/** Bloco do artefato biométrico, com miniatura. */
-function sectionBiometricArtifact(ctx, extracted) {
+const GRAVIDADE_IMAGEM = /CR[IÍ]TICO|ALTO/i;
+
+/**
+ * § 4.4 · imagens, selfie e prova de vida, com o conteúdo do quadro da tela:
+ * métricas do pdfimages, artefato biométrico com miniatura, achados, grupos de
+ * imagens idênticas, tabela das imagens relevantes e diligências.
+ */
+function sectionImages(ctx, extracted) {
+  const img = extracted.imagens_pdf;
   const b = extracted.imagem_biometrica;
-  if (!b) return;
-  heading(ctx, "§ 4.4 · Artefato biométrico", { danger: Boolean(b.achado) });
-  if (b.miniatura && /^data:image\/(jpeg|png);base64,/.test(b.miniatura)) {
-    // Decodifica primeiro: miniatura ilegível não pode custar uma quebra de
-    // página que depois ninguém preenche.
-    let buffer = null;
-    try {
-      buffer = Buffer.from(b.miniatura.split(",")[1], "base64");
-      ctx.doc.openImage(buffer);
-    } catch {
-      buffer = null; // Imagem ilegível para o PDFKit: seguem só os metadados.
+  if (!img && !b) return;
+  // MED-03: análises gravadas antes da correção ainda trazem o IMG2 de template.
+  const achados = (img?.achados || []).filter((f) => !(f.codigo === "IMG2" && f.titulo === "Reuso de imagem de template"));
+  heading(ctx, "§ 4.4 · Imagens, selfie e prova de vida", {
+    danger: Boolean(b?.achado) || achados.some((f) => GRAVIDADE_IMAGEM.test(f.severidade || "")),
+  });
+  paragraph(
+    ctx,
+    "Auditoria automática com Poppler/pdfimages. O objetivo é verificar se o PDF contém fotos/selfies extraíveis, qual a resolução real dessas imagens e se alguma prova visual foi reutilizada byte a byte dentro do mesmo documento.",
+    { color: MUTED, size: 8.5 }
+  );
+
+  const relevante = (item) => item.biometricaProvavel || item.classificacao === "imagem documental";
+  const lista = img?.imagens || [];
+  const listadas = lista.filter(relevante);
+  const templates = lista.filter((item) => !relevante(item));
+  if (img) {
+    if (img.disponivel === false) {
+      paragraph(ctx, img.observacao || "Inventário de imagens indisponível.", { color: MUTED, size: 8.5 });
     }
-    if (buffer) {
-      reserve(ctx, 182); // a miniatura ocupa 176pt e não se parte
-      const y = ctx.doc.y;
-      ctx.doc.image(buffer, MARGIN, y, { fit: [96, 170] });
-      ctx.doc.y = y + 176;
+    field(ctx, "Imagens listadas", img.total ?? 0);
+    field(ctx, "Arquivos extraídos", img.extraidas ?? 0);
+    field(ctx, "Grupos de imagens idênticas (hashes repetidos)", img.grupos_repetidos?.length ?? 0);
+    field(ctx, "Ferramenta", img.disponivel ? "pdfimages" : "indisponível");
+    field(ctx, "Fotografia / biometria provável", lista.filter((i) => i.biometricaProvavel).length);
+    field(ctx, "Imagens documentais", lista.filter((i) => i.classificacao === "imagem documental").length);
+  }
+
+  if (b) {
+    subheading(ctx, `Artefato biométrico · pág. ${b.pagina}`);
+    if (b.miniatura && /^data:image\/(jpeg|png);base64,/.test(b.miniatura)) {
+      // Decodifica primeiro: miniatura ilegível não pode custar uma quebra de
+      // página que depois ninguém preenche.
+      let buffer = null;
+      try {
+        buffer = Buffer.from(b.miniatura.split(",")[1], "base64");
+        ctx.doc.openImage(buffer);
+      } catch {
+        buffer = null; // Imagem ilegível para o PDFKit: seguem só os metadados.
+      }
+      if (buffer) {
+        reserve(ctx, 182); // a miniatura ocupa 176pt e não se parte
+        const y = ctx.doc.y;
+        ctx.doc.image(buffer, MARGIN, y, { fit: [96, 170] });
+        ctx.doc.y = y + 176;
+      }
+    }
+    field(ctx, "Página / dimensões", `pág. ${b.pagina} · ${b.largura} x ${b.altura} pixels (${String(b.megapixels).replace(".", ",")} megapixel)`);
+    field(ctx, "Formato e tamanho", [b.formato, b.bytes ? `${b.bytes.toLocaleString("pt-BR")} bytes` : null].filter(Boolean).join(" · "));
+    field(ctx, "SHA-256 da imagem", b.sha256, { mono: true });
+    field(ctx, "EXIF", b.exif === false ? "ausente" : b.exif ? "presente" : "não aferido");
+    field(ctx, "Imagens faciais no arquivo", b.contagem_faciais);
+    if (b.dados_do_processo_ausentes?.length) field(ctx, "Não apresentado pelo dossiê", b.dados_do_processo_ausentes.join(", "));
+    if (b.achado) paragraph(ctx, b.achado.texto, { color: DANGER, size: 9 });
+  }
+
+  if (achados.length) {
+    subheading(ctx, "Achados de imagem");
+    for (const f of achados) {
+      reserve(ctx, 40);
+      const { doc, contentWidth } = ctx;
+      doc
+        .fontSize(9)
+        .font("Helvetica-Bold")
+        .fillColor(GRAVIDADE_IMAGEM.test(f.severidade || "") ? DANGER : INK)
+        .text(`${f.codigo} · ${f.severidade || "ATENÇÃO"} · ${f.titulo}`, MARGIN, doc.y, { width: contentWidth });
+      if (f.detalhe) paragraph(ctx, f.detalhe, { size: 8.5 });
+      else doc.moveDown(0.3);
     }
   }
-  field(ctx, "Página / dimensões", `pág. ${b.pagina} · ${b.largura} x ${b.altura} pixels (${String(b.megapixels).replace(".", ",")} megapixel)`);
-  field(ctx, "Formato e tamanho", [b.formato, b.bytes ? `${b.bytes.toLocaleString("pt-BR")} bytes` : null].filter(Boolean).join(" · "));
-  field(ctx, "SHA-256 da imagem", b.sha256, { mono: true });
-  field(ctx, "EXIF", b.exif === false ? "ausente" : b.exif ? "presente" : "não aferido");
-  field(ctx, "Imagens faciais no arquivo", b.contagem_faciais);
-  if (b.dados_do_processo_ausentes?.length) field(ctx, "Não apresentado pelo dossiê", b.dados_do_processo_ausentes.join(", "));
-  if (b.achado) paragraph(ctx, b.achado.texto, { color: DANGER, size: 9 });
+
+  if (templates.length) {
+    const gruposRelevantes = (img?.grupos_repetidos || []).filter((g) => (g.imagens || []).some(relevante));
+    const repetidos = (img?.grupos_repetidos?.length || 0) - gruposRelevantes.length;
+    const porClasse = templates.reduce((acc, item) => ({ ...acc, [item.classificacao || "outra"]: (acc[item.classificacao || "outra"] || 0) + 1 }), {});
+    const classes = Object.entries(porClasse).map(([classe, n]) => `${n} ${classe}`).join("; ");
+    paragraph(
+      ctx,
+      `${templates.length === 1 ? "1 imagem de template, sem relevância" : `${templates.length} imagens de template, sem relevância`} para a perícia (${classes})${repetidos ? `, em ${repetidos === 1 ? "1 grupo repetido" : `${repetidos} grupos repetidos`}` : ""}. Inventário completo no anexo técnico.`,
+      { color: MUTED, size: 8.5 }
+    );
+  }
+
+  const grupos = (img?.grupos_repetidos || []).filter((g) => (g.imagens || []).some(relevante));
+  if (grupos.length) {
+    subheading(ctx, "Imagens repetidas byte a byte");
+    grupos.forEach((g, i) => {
+      reserve(ctx, 60);
+      field(ctx, `Grupo repetido #${i + 1}`, `${g.ocorrencias} ocorrências · SHA-256 ${shortHash(g.sha256, 18, 10)}`);
+      field(ctx, "   Páginas", g.paginas?.join(" · "));
+      (g.imagens || []).forEach((item, j) => {
+        field(ctx, `   Ocorrência ${j + 1}`, `pág. ${item.page}, img ${item.num}, ${item.width} x ${item.height}px, ${item.size || "tamanho não informado"}`);
+      });
+      paragraph(
+        ctx,
+        (g.imagens || []).some((item) => item.biometricaProvavel)
+          ? "A repetição byte a byte não prova fraude isoladamente, mas impede tratar as ocorrências como capturas independentes. Se uma delas estiver rotulada como prova de vida, recomenda-se exigir logs brutos, desafio de vivacidade, score e laudo do fornecedor biométrico."
+          : "Reuso esperado de elemento gráfico do template em todas as páginas. Sem relevância forense biométrica.",
+        { color: MUTED, size: 8.5 }
+      );
+    });
+  }
+
+  if (listadas.length) {
+    subheading(ctx, "Imagens relevantes para a perícia");
+    const repetida = (item) => item.sha256 && (img?.grupos_repetidos || []).some((g) => g.sha256 === item.sha256);
+    table(ctx, COLUNAS_IMAGEM, listadas.map(linhaImagem), { destaque: (i) => repetida(listadas[i]) });
+  }
+
+  if (lista.some((item) => item.biometricaProvavel)) {
+    subheading(ctx, "Leitura forense da biometria visual");
+    for (const d of [
+      "Exigir do banco a imagem original capturada, e não apenas a imagem reembutida no PDF.",
+      "Exigir prova de vida com desafio, score de similaridade, limiar de aceitação, base comparada e fornecedor do algoritmo.",
+      "Confrontar hashes individuais das fotos quando o dossiê apresentar “identificação” e “prova de vida” como etapas distintas.",
+    ]) bullet(ctx, d);
+  }
 }
+
+const COLUNAS_IMAGEM = [
+  { titulo: "Pág.", largura: 0.07 },
+  { titulo: "Img", largura: 0.07 },
+  { titulo: "Tipo", largura: 0.1 },
+  { titulo: "Dimensão", largura: 0.13, mono: true },
+  { titulo: "Classe", largura: 0.2 },
+  { titulo: "Tam.", largura: 0.1 },
+  { titulo: "SHA-256", largura: 0.33, mono: true },
+];
+
+const linhaImagem = (item) => [
+  item.page,
+  item.num,
+  item.type,
+  `${item.width} x ${item.height}`,
+  item.classificacao || item.enc,
+  item.size,
+  shortHash(item.sha256 || "-", 14, 8),
+];
 
 /** Anexo técnico: inventário completo de imagens, fora do corpo do laudo. */
 function sectionImageAnnex(ctx, extracted) {
@@ -1242,136 +1796,29 @@ function sectionImageAnnex(ctx, extracted) {
   // terminava no alto da página.
   reserve(ctx, 220);
   heading(ctx, "Anexo técnico · Inventário de imagens");
-  paragraph(ctx, "Todas as imagens listadas por pdfimages, com classificação e SHA-256 individual.", { color: MUTED, size: 8.5 });
-  for (const item of lista) {
-    reserve(ctx, 14);
-    ctx.doc.fontSize(7.5).font("Courier").fillColor(INK).text(
-      `pág. ${item.page} · img ${item.num} · ${item.type} · ${item.width}x${item.height} · ${item.classificacao || item.enc} · ${item.size} · ${String(item.sha256 || "-").slice(0, 16)}`,
-      { width: ctx.contentWidth }
-    );
-  }
-  ctx.doc.font("Helvetica");
+  paragraph(ctx, "Todas as imagens listadas por pdfimages, com classificação e SHA-256 individual. Os achados do § 4.4 consideram este conjunto completo.", { color: MUTED, size: 8.5 });
+  table(ctx, COLUNAS_IMAGEM, lista.map(linhaImagem));
 }
 
-/** § 2.1 — dados econômicos complementares e aferição matemática. */
-function sectionEconomics(ctx, extracted) {
-  const c = extracted.contrato || {};
-  const m = extracted.afericao_matematica;
-  const cartao = c.cartao;
-  const linhas = [
-    ["Valor liberado", c.valor_liberado],
-    ["Saldo portado / refinanciado", c.saldo_portado],
-    ["Tarifa de cadastro", c.tarifa_cadastro],
-    ["Seguros", c.seguros],
-    ["IOF financiado", c.iof_financiado],
-    ["Somatório das parcelas", c.valor_total_parcelas],
-    // D6: o rótulo segue a origem. Chamar de "declarado" um valor que o sistema
-    // calculou afirma que o instrumento o trouxe, e não trouxe.
-    [c.prazo_dias_origem === "CALCULADO_PELO_SISTEMA" ? "Prazo da operação (dias) · calculado pelo sistema" : "Prazo declarado (dias)", c.prazo_dias],
-    // D4: a ficha publica o token completo. Reduzir a "6 meses" um campo que diz
-    // "6 meses ou até o pagamento da última parcela" reproduz, na apresentação,
-    // exatamente o corte que o comparador fazia.
-    ["Prazo total declarado", c.prazo_total_declarado
-      ? (c.prazo_total_declarado.condicional
-        ? `${c.prazo_total_declarado.texto} · declaração condicional`
-        : `${c.prazo_total_declarado.quantidade} ${c.prazo_total_declarado.unidade}`)
-      : null],
-    ["Prazo efetivo, da emissão ao último vencimento (dias)", c.prazo_efetivo_dias],
-    ["Carência até o 1º vencimento (dias)", c.carencia_dias],
-    ["Juros acumulados na carência", c.juros_carencia],
-    ["Custo total (somatório − liberado)", c.custo_total ? `${c.custo_total} (${c.custo_total_percentual} do liberado)` : null],
-    ["Taxa anual calculada · calculada pelo sistema", c.taxa_juros_anual_calculada],
-    [c.prazo_operacao_meses_aprox_origem === "CALCULADO_PELO_SISTEMA" ? "Prazo da operação (meses, aprox.) · calculado pelo sistema" : "Prazo da operação (meses, aprox.)", c.prazo_operacao_meses_aprox],
-    ["Tipo de operação", c.tipo_operacao ? `${c.tipo_operacao}${c.tipo_operacao_desmarcadas?.length ? ` (desmarcadas: ${c.tipo_operacao_desmarcadas.join(", ").toLowerCase()})` : ""}` : null],
-    ["Operação portada", c.operacao_portada === true ? "Sim" : c.operacao_portada === false ? "Não" : null],
-    ["Modalidade de desconto provável", c.modalidade_desconto_provavel],
-    ["CNPJ da instituição", c.cnpj_instituicao],
-  ].filter(([, v]) => v !== null && v !== undefined && v !== "");
-  if (!linhas.length && !m && !cartao && !c.datas_nota) return;
-
-  heading(ctx, "§ 2.1 · Dados econômicos complementares e aferição matemática");
-  for (const [rotulo, valor] of linhas) field(ctx, rotulo, valor);
-  if (c.datas_nota) paragraph(ctx, c.datas_nota, { color: DANGER, size: 8.5 });
-
-  if (cartao) {
-    subheading(ctx, "Cartão consignado de benefício");
-    field(ctx, "Limite do cartão", cartao.limiteCartao);
-    field(ctx, "Valor máximo de saque", cartao.valorMaximoSaque);
-    field(ctx, "Valor consignado mensal", cartao.valorConsignadoMensal);
-    field(ctx, "Prazo previsto de liquidação (meses)", cartao.prazoPrevistoLiquidacaoMeses);
-    field(ctx, "Tarifa de emissão", cartao.tarifaEmissao);
-  }
-
-  if (m) {
-    subheading(ctx, "Aferição matemática");
-    const confere = (rotulo, valor, detalhe) => {
-      if (valor === null || valor === undefined) return;
-      badge(ctx, `${rotulo}${detalhe ? ` (${detalhe})` : ""}`, valor ? "CONFERE" : "NÃO CONFERE", valor);
-    };
-    // D4: prazo condicional não é CONFERE nem NÃO CONFERE, e também não pode
-    // sumir. Omitir a linha esconderia do laudo o campo que motivou o achado.
-    if (m.prazo_declarado_condicional) {
-      badge(ctx, `Prazo declarado × datas${m.prazo_descricao ? ` (${m.prazo_descricao})` : ""}`, "NÃO AFERIDO", null);
-      if (m.prazo_declarado_ressalva) {
-        paragraph(ctx, `O campo de prazo traz ressalva no próprio texto: "${m.prazo_declarado_ressalva}". Não há prazo fechado a confrontar com as datas.`, { color: MUTED, size: 8.5 });
-      }
-    } else {
-      confere("Prazo declarado × datas", m.prazo_confere, m.prazo_descricao || (m.prazo_calculado_dias != null ? `${m.prazo_calculado_dias} dias` : null));
-    }
-    confere("Somatório das parcelas", m.somatorio_confere, m.somatorio_calculado);
-    confere("Composição do financiado", m.composicao_confere, m.composicao_financiado_calculada);
-    if (m.composicao_nota) paragraph(ctx, m.composicao_nota, { color: MUTED, size: 8.5 });
-    confere("Valor presente pela taxa declarada", m.vp_confere, m.vp_taxa_declarada);
-    if (m.juros_implicito_mensal) {
-      field(
-        ctx,
-        "Taxa implícita sobre o valor financiado",
-        `${m.juros_implicito_mensal} a.m. · ${m.juros_implicito_confere ? "confere com" : "diverge da"} taxa declarada${m.juros_implicito_delta_pp !== null ? ` (diferença de ${Math.abs(m.juros_implicito_delta_pp).toFixed(3).replace(".", ",")} ponto)` : ""} · valor presente a essa taxa ${m.vp_taxa_implicita}`
-      );
-    }
-    // As duas convenções lado a lado: a diferença entre elas não é divergência.
-    confere(
-      m.cet_anual_base === "IMPLICITO" ? `CET anual × CET implícito ${m.cet_anual_base_mensal} a.m.` : "CET anual × CET mensal",
-      m.cet_anual_confere,
-      m.cet_anual_calculado ? `365 dias ${m.cet_anual_calculado} · 12 meses ${m.cet_anual_calculado_12m}${m.cet_anual_convencao ? ` · contrato usa ${m.cet_anual_convencao}` : ""}` : null
-    );
-    if (m.cet_anual_calculado_declarado) field(ctx, "Anualização do CET mensal declarado, arredondado (informativa)", `${m.cet_anual_calculado_declarado} em 365 dias`);
-    confere(
-      "Juros anual × juros mensal",
-      m.juros_anual_confere,
-      m.juros_anual_calculado_365 ? `365 dias ${m.juros_anual_calculado_365} · 12 meses ${m.juros_anual_calculado_12m}${m.juros_anual_convencao ? ` · contrato usa ${m.juros_anual_convencao}` : ""}` : null
-    );
-    if (m.cet_implicito_mensal) {
-      field(ctx, "CET implícito no fluxo", `${m.cet_implicito_mensal} a.m.${m.cet_implicito_veredito ? ` · ${m.cet_implicito_veredito}` : ""}`);
-    } else if (m.cet_implicito_status === "NAO_AFERIDO" && m.cet_implicito_motivo) {
-      field(ctx, "CET implícito no fluxo", `não aferido: ${m.cet_implicito_motivo}`);
-    }
-    if (m.cet_implicito_nota) paragraph(ctx, m.cet_implicito_nota, { color: MUTED, size: 8.5 });
-    if (m.conclusao) paragraph(ctx, m.conclusao, { size: 9 });
-  }
-}
+/*
+ * O § de dados econômicos complementares e de aferição matemática (somatório,
+ * composição do financiado, valor presente, taxa implícita, CET) saiu do laudo:
+ * é exame econômico da operação, não verificação de cadeia de custódia. O motor
+ * continua calculando e gravando a aferição, que fica disponível no resultado.
+ */
 
 /** § 4.2 — trilha da contratação. */
-function sectionContractingTrail(ctx, extracted) {
+function sectionContractingTrail(ctx, extracted, result = {}) {
   const a = extracted.assinatura || {};
   const trilha = extracted.trilha_acesso;
   const linha = a.linha_do_tempo;
-  const placar = extracted.cadeia_custodia?.placar;
-  if (!a.forma_aceite && !linha && !trilha && !placar && !a.plataforma_nota) return;
+  if (!a.forma_aceite && !linha && !trilha && !a.plataforma_nota) return;
 
   heading(ctx, "§ 4.2 · Trilha da contratação");
   field(ctx, "Forma de aceite", a.forma_aceite);
   field(ctx, "Telefone do aceite", a.telefone_aceite);
   field(ctx, "Dispositivo", a.dispositivo?.resumo);
   field(ctx, "Código de autenticação declarado", a.codigo_autenticacao_declarado, { mono: true });
-  if (placar) {
-    badge(
-      ctx,
-      "Itens eliminatórios da cadeia de custódia",
-      `${placar.eliminatorios_presentes}/${placar.eliminatorios_total} · auxiliares ${placar.auxiliares_presentes}/${placar.auxiliares_total}`,
-      placar.eliminatorios_presentes === placar.eliminatorios_total
-    );
-  }
   if (a.plataforma_nota) paragraph(ctx, a.plataforma_nota, { size: 9 });
   if (a.assinatura_manual_textual) paragraph(ctx, a.assinatura_manual_textual, { size: 9 });
 
@@ -1382,37 +1829,177 @@ function sectionContractingTrail(ctx, extracted) {
     field(ctx, "   Intervalo até o primeiro aceite", linha.intervalo_primeiro_aceite);
   }
 
-  if (trilha?.events?.length) {
-    subheading(ctx, `Histórico de ações do dossiê (${trilha.eventCount} eventos)`);
-    for (const ev of trilha.events) {
-      field(
-        ctx,
-        `   ${ev.action}`,
-        [
-          [ev.date, ev.time].filter(Boolean).join(" "),
-          ev.ip ? `${ev.ip}${ev.port ? `:${ev.port}` : ""}` : null,
-          Number.isFinite(ev.lat) && Number.isFinite(ev.lon) ? `${ev.lat.toFixed(5)}, ${ev.lon.toFixed(5)}` : null,
-        ]
-          .filter(Boolean)
-          .join(" · ")
-      );
-    }
-    if (trilha.chronologyInconsistent) {
-      paragraph(
-        ctx,
-        "Os carimbos de tempo da trilha não se conciliam com o horário da assinatura, nem no fuso UTC nem no de Brasília. Os logs brutos devem esclarecer o fuso efetivamente aplicado.",
-        { color: DANGER, size: 9 }
-      );
-    }
+  if (trilha?.events?.length) sectionAccessAudit(ctx, trilha, result);
+}
+
+/**
+ * Auditoria do trilho de acesso (Histórico de Ações do dossiê), com o mesmo
+ * conteúdo do quadro da tela: métricas, histórico completo com dispositivo,
+ * dispersão das coordenadas, leitura forense e diligências.
+ */
+function sectionAccessAudit(ctx, audit, result = {}) {
+  const ips = result.ipAnalysis || [];
+  const primaryIp = ips.find((ip) => ip.endereco === audit.uniqueIps?.[0]) || ips[0];
+  const cg = result.contractGeo;
+  const gpsIpDistance =
+    cg && Number.isFinite(cg.lat) && Number.isFinite(cg.lon) && Number.isFinite(primaryIp?.geo?.lat) && Number.isFinite(primaryIp?.geo?.lon)
+      ? haversineKm(cg.lat, cg.lon, primaryIp.geo.lat, primaryIp.geo.lon)
+      : null;
+
+  subheading(ctx, "Auditoria da assinatura e do trilho de acesso");
+  paragraph(
+    ctx,
+    "Quadro técnico consolidado a partir do Histórico de Ações do documento. IP, portas, horários, coordenadas e dispositivo são transcritos por OCR e devem ser confrontados com os logs brutos da plataforma antes do uso como prova técnica definitiva.",
+    { color: MUTED, size: 8.5 }
+  );
+  field(ctx, "Eventos detectados", audit.eventCount ?? audit.events.length);
+  field(ctx, "IPs únicos", `${audit.uniqueIps?.length || 0}${audit.uniqueIps?.length ? ` (${audit.uniqueIps.join(", ")})` : ""}`);
+  field(ctx, "Portas de origem", `${audit.ports?.length || 0}${audit.ports?.length ? ` (${audit.ports.join(", ")})` : ""}`);
+  field(ctx, "Pontos GPS legíveis", `${audit.coordinateCount || 0}/${audit.eventCount ?? audit.events.length}`);
+  field(ctx, "Fuso da linha do tempo", audit.eventTimezone || "não identificado");
+
+  subheading(ctx, `Histórico de ações completo (${audit.events.length} eventos)`);
+  const chave = (ev) => /Selfie|Finalizado/.test(ev.action || "");
+  table(
+    ctx,
+    [
+      { titulo: "#", largura: 0.04 },
+      { titulo: "Ação", largura: 0.18 },
+      { titulo: "Data e hora", largura: 0.13 },
+      { titulo: "IP : porta", largura: 0.23, mono: true },
+      { titulo: "Latitude", largura: 0.12, mono: true },
+      { titulo: "Longitude", largura: 0.12, mono: true },
+      { titulo: "Dispositivo", largura: 0.18 },
+    ],
+    audit.events.map((ev, i) => [
+      i + 1,
+      ev.action,
+      [ev.date, ev.time].filter(Boolean).join(" "),
+      ev.ip ? `${ev.ip}${ev.port ? `:${ev.port}` : ""}` : null,
+      Number.isFinite(ev.lat) ? ev.lat.toFixed(6) : null,
+      Number.isFinite(ev.lon) ? ev.lon.toFixed(6) : null,
+      ev.device || "Não identificado",
+    ]),
+    { destaque: (i) => chave(audit.events[i]) }
+  );
+
+  dispersionPlot(ctx, audit);
+
+  subheading(ctx, "Leitura forense");
+  if (audit.chronologyInconsistent) {
+    bullet(
+      ctx,
+      `Inconsistência · Carimbos de tempo não conciliados. O campo do assinante está rotulado como UTC (${audit.signatureTimestampUtc}). Convertido para o fuso -03:00, corresponde a ${audit.signatureLocalTime}, antes do primeiro evento às ${audit.firstTime}. Se interpretado como horário local, fica após o último evento às ${audit.lastTime}. A plataforma deve apresentar os logs brutos e o fuso efetivamente aplicado.`,
+      { color: DANGER }
+    );
+  } else {
+    bullet(ctx, "A conferir · Cronologia sem inconsistência automática conclusiva. Os horários extraídos não permitiram confirmar, de forma automática, uma contradição temporal. Recomenda-se confrontar o rótulo de fuso e os logs brutos da plataforma.");
   }
+  if (!audit.deviceIdentifiable) {
+    bullet(
+      ctx,
+      `Lacuna · Dispositivo sem vínculo inequívoco com hardware. O trilho informa ${audit.device || "sistema operacional e navegador"}, mas não apresenta fabricante, modelo ou IMEI legíveis. Esses dados identificam o ambiente de acesso, não um aparelho físico atribuído ao consumidor.`,
+      { color: DANGER }
+    );
+  }
+  const nIps = audit.uniqueIps?.length || 0;
+  bullet(
+    ctx,
+    `A diligenciar · IP público e rastreável. O fluxo utiliza ${nIps === 1 ? `um único IP (${audit.uniqueIps[0]})` : `${nIps} IPs`}, com ${audit.ports?.length || 0} porta(s) de origem. ${primaryIp?.geo ? `A base de geolocalização aponta ${primaryIp.geo.city || "cidade não informada"}/${primaryIp.geo.region || "região não informada"}, provedor ${semPontoFinal(primaryIp.geo.isp) || "não identificado"}.` : "A localização externa do IP não estava disponível."} A identificação do assinante da conexão na data e hora depende de ordem judicial e informação da operadora.`
+  );
+  if (audit.coordinateCount > 1) {
+    const metros = (v) => (Number.isFinite(v) ? v.toFixed(1).replace(".", ",") : "n/d");
+    bullet(
+      ctx,
+      `Ponto de atenção · Coordenadas do trilho formam agrupamento concentrado. Os pontos GPS legíveis apresentam amplitude aproximada de ${metros(audit.northSouthMeters)} m no eixo norte-sul e ${metros(audit.eastWestMeters)} m no eixo leste-oeste. ${gpsIpDistance !== null ? `A distância entre o GPS da assinatura e a localização aproximada do IP é ${gpsIpDistance.toFixed(2).replace(".", ",")} km, classificada como ${gpsIpDistance < 50 ? "geograficamente convergente" : "geograficamente divergente"}.` : "Não foi possível confrontar o agrupamento com a localização do IP."} A concentração favorece coerência espacial, mas não comprova, isoladamente, autoria.`
+    );
+  }
+
+  subheading(ctx, "Diligências sugeridas");
+  for (const d of [
+    "Requisitar à operadora a identificação do assinante da conexão vinculada ao IP e ao intervalo temporal registrado, mediante autorização judicial.",
+    "Exigir os logs brutos da plataforma de assinatura, com carimbos em formato técnico, fuso, identificador de sessão e política de retenção.",
+    "Solicitar fabricante, modelo, identificador do aparelho e método técnico de vinculação da selfie ao dispositivo utilizado, quando esses elementos forem declarados pela plataforma.",
+    "Confrontar o titular da conta que recebeu o crédito com o contratante e com os demais elementos de autenticação.",
+  ]) bullet(ctx, d);
+}
+
+/**
+ * Dispersão das coordenadas do trilho, desenhada em vetor: cada ponto é o GPS
+ * de um evento, numerado na ordem do histórico, com o norte para cima.
+ */
+function dispersionPlot(ctx, audit) {
+  const { doc, contentWidth } = ctx;
+  const pontos = (audit.events || []).filter((ev) => Number.isFinite(ev.lat) && Number.isFinite(ev.lon));
+  const W = 300;
+  const H = 190;
+  const pad = 26;
+  // Título e figura juntos: a guarda do subtítulo sozinha deixava o título no
+  // pé da página e o gráfico na seguinte.
+  if (pontos.length) reserve(ctx, H + 70);
+  subheading(ctx, "Dispersão das coordenadas");
+  if (!pontos.length) {
+    paragraph(ctx, "Não houve coordenadas suficientes para calcular a dispersão dos eventos.", { color: MUTED, size: 8.5 });
+    return;
+  }
+  const x0 = MARGIN + (contentWidth - W) / 2;
+  const y0 = doc.y + 4;
+  const lats = pontos.map((p) => p.lat);
+  const lons = pontos.map((p) => p.lon);
+  const minLat = Math.min(...lats), maxLat = Math.max(...lats);
+  const minLon = Math.min(...lons), maxLon = Math.max(...lons);
+  const latSpan = Math.max(maxLat - minLat, 0.00001);
+  const lonSpan = Math.max(maxLon - minLon, 0.00001);
+  const xy = (p) => ({
+    x: x0 + pad + ((p.lon - minLon) / lonSpan) * (W - pad * 2),
+    y: y0 + pad + ((maxLat - p.lat) / latSpan) * (H - pad * 2),
+  });
+
+  doc.rect(x0 + pad, y0 + pad, W - pad * 2, H - pad * 2).lineWidth(0.6).strokeColor("#9ca3af").stroke();
+  for (let passo = 1; passo <= 3; passo += 1) {
+    const gx = x0 + pad + ((W - pad * 2) * passo) / 4;
+    const gy = y0 + pad + ((H - pad * 2) * passo) / 4;
+    doc.moveTo(gx, y0 + pad).lineTo(gx, y0 + H - pad).lineWidth(0.3).strokeColor(RULE).stroke();
+    doc.moveTo(x0 + pad, gy).lineTo(x0 + W - pad, gy).lineWidth(0.3).strokeColor(RULE).stroke();
+  }
+  doc.fontSize(8).font("Helvetica-Bold").fillColor(MUTED).text("N", x0, y0 + 8, { width: W, align: "center" });
+  pontos.forEach((p, i) => {
+    const { x, y } = xy(p);
+    const extremo = i === 0 || i === pontos.length - 1;
+    doc.circle(x, y, extremo ? 7 : 5.5).fillColor(extremo ? DANGER : "#475569").fill();
+    doc.fontSize(6).font("Helvetica-Bold").fillColor("#ffffff").text(String(i + 1), x - 7, y - 2.5, { width: 14, align: "center", lineBreak: false });
+  });
+  doc.y = y0 + H + 4;
+  doc.x = MARGIN;
+  const metros = (v) => (Number.isFinite(v) ? v.toFixed(1).replace(".", ",") : "n/d");
+  doc
+    .fontSize(8)
+    .font("Helvetica-Oblique")
+    .fillColor(MUTED)
+    .text(`Cada ponto representa o GPS de um evento, na ordem do histórico. Norte para cima. Amplitude aproximada: N-S ${metros(audit.northSouthMeters)} m · L-O ${metros(audit.eastWestMeters)} m.`, MARGIN, doc.y, { width: contentWidth, align: "center" });
+  doc.moveDown(0.5);
 }
 
 /** § 6.1 — confronto com o processo judicial. */
 function sectionProcessComparison(ctx, confronto) {
-  if (!confronto || confronto.status !== "COMPLETED") return;
+  if (!confronto || confronto.status !== "COMPLETED") {
+    // A tela mantém a seção com a explicação; omitir deixaria o leitor sem
+    // saber se o confronto foi tentado.
+    heading(ctx, "§ 6.1 · Confronto com o processo judicial");
+    paragraph(ctx, "Não foi anexado PDF do processo para confronto. Esta seção fica sem conteúdo até que o arquivo dos autos seja fornecido.", { color: MUTED, size: 9 });
+    return;
+  }
   const divergencias = confronto.divergences || [];
-  heading(ctx, "§ 6.1 · Confronto com o processo judicial", { danger: divergencias.length > 0 });
-  field(ctx, "Resultado", confronto.resultado);
+  const parcial = confronto.resultado === "CONFRONTO PARCIAL";
+  heading(ctx, "§ 6.1 · Confronto com o processo judicial", { danger: divergencias.length > 0 || parcial });
+  badge(
+    ctx,
+    "Resultado do confronto automático",
+    `${confronto.resultado || "não informado"} · ${divergencias.length ? `${divergencias.length} ponto(s)` : parcial ? "parcial" : "sem divergência"}`,
+    !divergencias.length && !parcial
+  );
+  const cnj = extractCnjFromName(confronto.file?.name);
+  if (cnj) field(ctx, "Processo", `Processo nº ${cnj}`);
   field(ctx, "Arquivo do processo", confronto.file?.name);
   field(ctx, "SHA-256 do processo", confronto.file?.sha256, { mono: true });
   field(ctx, "Páginas do processo", confronto.metadata?.totalPages);
@@ -1420,46 +2007,122 @@ function sectionProcessComparison(ctx, confronto) {
   if (confronto.confirmations?.length) {
     subheading(ctx, "Dados do contrato procurados no processo");
     for (const c of confronto.confirmations) {
-      field(ctx, `   ${c.label}`, `${c.contrato ?? "—"} · ${c.processo}`);
+      field(ctx, `   ${c.label}`, [c.contrato ?? "não informado", c.processo, labelComparisonStatus(c.status)].filter(Boolean).join(" · "));
     }
   }
+  if (divergencias.length) subheading(ctx, "Divergências / pontos de atenção");
   for (const d of divergencias) {
     reserve(ctx, 60);
-    paragraph(ctx, `${d.label}: contrato ${d.contrato} × processo ${d.processo}. ${d.detalhe}`, {
+    paragraph(ctx, `${d.label}${d.severidade ? ` (${d.severidade})` : ""}: contrato ${d.contrato} × processo ${d.processo}.${d.detalhe ? ` ${d.detalhe}` : ""}`, {
       color: d.severidade === "DIVERGÊNCIA" ? DANGER : INK,
       size: 9,
     });
     if (d.trecho) paragraph(ctx, `“${d.trecho}”`, { color: MUTED, size: 8, italic: true });
   }
+  if (confronto.observations?.length) subheading(ctx, "Observações processuais");
   for (const o of confronto.observations || []) {
     paragraph(ctx, `${o.label}. ${o.detalhe}`, { size: 9 });
+    if (o.trecho) paragraph(ctx, `Trecho: “${o.trecho}”`, { color: MUTED, size: 8, italic: true });
   }
   if (confronto.status_note) paragraph(ctx, confronto.status_note, { color: MUTED, size: 8.5 });
 }
 
 /** Sumário executivo de irregularidades, ao final do laudo. */
+/** Identificação que abre a folha do sumário, igual à da tela. */
+function identificacaoDoSumario(sumario, reportId) {
+  const contrato = [sumario.bank, sumario.contractNumber].filter(Boolean).join(" ");
+  return {
+    marca: "ForenseDoc",
+    subMarca: "Verificação de cadeia de custódia documental",
+    etiqueta: "Sumário executivo",
+    linhas: [
+      reportId ? `Laudo ${reportId}` : null,
+      [contrato || null, sumario.cpf ? `CPF ${sumario.cpf}` : null].filter(Boolean).join(" · ") || null,
+    ].filter(Boolean),
+  };
+}
+
+/** Cabeçalho da folha no tema clássico, sem os recursos do cartão. */
+function cabecalhoSumarioClassico(ctx, dados) {
+  const { doc, contentWidth } = ctx;
+  const altura = 46;
+  reserve(ctx, altura + 90);
+  const y = doc.y;
+  const meia = contentWidth / 2;
+
+  doc.save();
+  doc.rect(MARGIN, y, contentWidth, 2).fillColor(ACCENT).fill();
+  doc.restore();
+
+  doc.fontSize(10).font("Helvetica-Bold").fillColor(ACCENT)
+    .text(dados.marca.toUpperCase(), MARGIN, y + 10, { width: meia, characterSpacing: 0.8, lineBreak: false });
+  doc.fontSize(6).font("Helvetica").fillColor(MUTED)
+    .text(dados.subMarca.toUpperCase(), MARGIN, y + 24, { width: meia + 40, characterSpacing: 0.4, lineBreak: false });
+
+  doc.fontSize(7).font("Helvetica-Bold").fillColor(INK)
+    .text(dados.etiqueta.toUpperCase(), MARGIN + meia, y + 9, { width: meia, align: "right", characterSpacing: 0.6, lineBreak: false });
+  let linhaY = y + 20;
+  for (const linha of dados.linhas) {
+    doc.fontSize(6.6).font("Helvetica").fillColor(MUTED)
+      .text(linha, MARGIN + meia - 60, linhaY, { width: meia + 60, align: "right", lineBreak: false });
+    linhaY += 9;
+  }
+
+  doc.moveTo(MARGIN, y + altura - 5).lineTo(MARGIN + contentWidth, y + altura - 5)
+    .lineWidth(0.7).strokeColor(RULE).stroke();
+  doc.x = MARGIN;
+  doc.y = y + altura;
+}
+
 function sectionExecutiveSummary(ctx, sumario, reportId) {
   if (!sumario) return;
-  // Mesma regra do anexo: o sumário ganha página limpa quando sobra pouco, e
-  // segue na página corrente quando ela mal foi usada.
-  reserve(ctx, 260);
-  heading(ctx, `Sumário executivo de irregularidades${reportId ? ` · ${reportId}` : ""}`);
-  if (sumario.suspicionGrade) {
-    badge(
-      ctx,
-      "Grau de suspeição técnica",
-      sumario.suspicionGrade.label,
-      !["CRÍTICA", "ALTA"].includes(sumario.suspicionGrade.label)
-    );
-    if (sumario.suspicionGrade.rationale) paragraph(ctx, sumario.suspicionGrade.rationale, { color: MUTED, size: 8.5 });
-  }
+  /*
+   * O sumário abre com o MESMO cabeçalho da tela, e não com um título de seção
+   * qualquer. Na tela ele é peça destacável, e é por "FORENSEDOC · VERIFICAÇÃO
+   * DE CADEIA DE CUSTÓDIA DOCUMENTAL · SUMÁRIO EXECUTIVO" que o operador o
+   * procura. O conteúdo já saía no PDF antes disto, mas como seção corrida no
+   * meio do laudo: quem folheava não reconhecia o bloco e concluía que o
+   * sumário não tinha sido impresso.
+   *
+   * O cabeçalho reserva a própria altura mais o começo do conteúdo, pelo mesmo
+   * motivo do anexo de imagens: cabeçalho sozinho no pé da página é pior que
+   * nenhum cabeçalho, e a quebra incondicional abriria folha em branco sempre
+   * que o corpo do laudo terminasse no alto da página.
+   */
+  const identificacao = identificacaoDoSumario(sumario, reportId);
+  if (ctx.tema === "modelo") temaModelo.cabecalhoSumario(ctx, identificacao);
+  else cabecalhoSumarioClassico(ctx, identificacao);
+
+  heading(ctx, "Irregularidades do laudo ForenseDoc, em síntese");
+  // Banco, contrato e CPF já estão no cabeçalho: repeti-los aqui como campos
+  // duplicaria a mesma identificação a duas linhas de distância.
+  field(ctx, "Orientação de revisão", "REVISÃO DOCUMENTAL NECESSÁRIA");
+  paragraph(ctx, "Conferir as evidências e diligências de cada item. As classificações individuais orientam a revisão; não atestam fraude, autoria ou validade jurídica.", { color: MUTED, size: 8.5 });
   if (sumario.intro) paragraph(ctx, sumario.intro, { size: 9 });
+  const meta = sumario.meta;
+  if (meta) {
+    paragraph(
+      ctx,
+      [
+        meta.contractDate && `Contrato ${meta.contractDate}`,
+        meta.signatureDate && `assinatura ${meta.signatureDate}${meta.methods ? ` (${meta.methods})` : ""}`,
+        meta.sha256 && `SHA-256 ${meta.sha256}`,
+        meta.size,
+        meta.pages,
+      ].filter(Boolean).join(" · "),
+      { color: MUTED, size: 8.5 }
+    );
+  }
 
   subheading(ctx, "Placar de gravidade");
   if (sumario.semAchados) {
     paragraph(ctx, "Sem irregularidade crítica automática conclusiva. Os dados disponíveis não produziram alerta grave, sem prejuízo da revisão humana do contrato e dos logs originais.", { size: 9 });
   }
   for (const f of sumario.findings || []) {
+    if (ctx.tema === "modelo") {
+      temaModelo.achadoPlacar(ctx, { severidade: f.severity, titulo: f.title, texto: f.text });
+      continue;
+    }
     reserve(ctx, 52);
     const { doc, contentWidth } = ctx;
     doc
@@ -1468,7 +2131,7 @@ function sectionExecutiveSummary(ctx, sumario, reportId) {
       .fillColor(f.severity === "ALTA" ? DANGER : f.severity === "FAVORÁVEL" ? ACCENT : INK)
       .text(`${f.severity} · `, MARGIN, doc.y, { width: contentWidth, continued: true })
       .fillColor(INK)
-      .text(f.title, { continued: true })
+      .text(`${f.title} `, { continued: true })
       .font("Helvetica")
       .text(` ${f.text}`, { align: "justify" });
     doc.moveDown(0.3);
@@ -1478,12 +2141,18 @@ function sectionExecutiveSummary(ctx, sumario, reportId) {
   if (sumario.corte?.aviso) {
     paragraph(ctx, sumario.corte.aviso, { color: MUTED, size: 8 });
   }
-  if (sumario.synthesis) {
-    subheading(ctx, "GPS × IP");
-    paragraph(ctx, sumario.synthesis, { size: 9 });
+  // Sempre presente: a verificação geográfica é parte central do laudo.
+  if (sumario.geo) {
+    subheading(ctx, sumario.geo.modo === "pares" ? "Verificação de endereços: os confrontos que importam" : "GPS contra IP: o confronto que importa");
+    paragraph(ctx, `Onde o documento diz que o ato ocorreu. ${sumario.geo.description || ""}`.trim(), { size: 9 });
+    geoScale(ctx, sumario.geo);
   }
   for (const ip of sumario.ipCards || []) {
     field(ctx, `   ${ip.endereco} · ${ip.badge}`, ip.text);
+  }
+  if (sumario.synthesis) {
+    subheading(ctx, "Síntese");
+    paragraph(ctx, sumario.synthesis, { size: 9 });
   }
 
   if (sumario.diligences?.length) {
@@ -1495,12 +2164,72 @@ function sectionExecutiveSummary(ctx, sumario, reportId) {
   if (sumario.disclaimer) paragraph(ctx, sumario.disclaimer, { color: MUTED, size: 8 });
 }
 
+/**
+ * Régua logarítmica de distâncias do sumário (0,1 a 10.000 km), a mesma da
+ * tela: cada ponto é um confronto, com rótulo e distância.
+ */
+/** Encurta o texto, com reticências, até caber em uma linha da largura dada. */
+function caber(doc, texto, largura) {
+  let t = String(texto || "");
+  if (doc.widthOfString(t) <= largura) return t;
+  while (t.length > 1 && doc.widthOfString(`${t}…`) > largura) t = t.slice(0, -1);
+  return `${t.trimEnd()}…`;
+}
+
+function geoScale(ctx, geo) {
+  const itens = (geo.items || []).filter((i) => distanciaKm(i.distance) !== null && !distanciaSuspeita(i.distance));
+  if (!itens.length) return;
+  const { doc, contentWidth } = ctx;
+  const H = 165;
+  reserve(ctx, H + 8);
+  if (ctx.tema === "modelo") temaModelo.fundoParaBloco(ctx, H + 8);
+  const y0 = doc.y + 4;
+  const xIni = MARGIN + 30;
+  const xFim = MARGIN + contentWidth - 30;
+  const eixoY = y0 + 110;
+  const xPara = (km) => xIni + ((Math.log10(Math.max(0.1, Math.min(10000, km))) + 1) / 5) * (xFim - xIni);
+  const cor = (role) => (role === "gps" ? "#2f6846" : role === "access" || role === "laudo" ? "#bc631e" : "#203f52");
+
+  doc.moveTo(xIni, eixoY).lineTo(xFim, eixoY).lineWidth(1.5).strokeColor("#d8d0c3").stroke();
+  for (const marca of [0.1, 1, 10, 100, 1000, 10000]) {
+    const x = xPara(marca);
+    doc.moveTo(x, eixoY - 4).lineTo(x, eixoY + 5).lineWidth(0.6).strokeColor("#bdb3a4").stroke();
+    doc.fontSize(7).font("Courier").fillColor(MUTED).text(`${marca.toLocaleString("pt-BR")} km`, x - 30, eixoY + 9, { width: 60, align: "center", lineBreak: false });
+  }
+  itens.forEach((item, i) => {
+    const x = xPara(distanciaKm(item.distance));
+    const yRotulo = y0 + (i % 4) * 24;
+    doc.moveTo(x, yRotulo + 18).lineTo(x, eixoY - 6).lineWidth(1).strokeColor(cor(item.role)).stroke();
+    doc.circle(x, eixoY, 4.5).fillColor(cor(item.role)).fill();
+    const larguraRotulo = 150;
+    const xRotulo = Math.max(MARGIN, Math.min(MARGIN + contentWidth - larguraRotulo, x - larguraRotulo / 2));
+    doc.fontSize(7).font("Helvetica-Bold").fillColor(cor(item.role)).text(caber(doc, item.label, larguraRotulo), xRotulo, yRotulo, { width: larguraRotulo, align: "center", lineBreak: false });
+    doc.fontSize(7).font("Courier").fillColor(MUTED).text(item.texto || formatarDistancia(item.distance), xRotulo, yRotulo + 9, { width: larguraRotulo, align: "center", lineBreak: false });
+  });
+  const legenda = geo.modo === "pares"
+    ? [["#203f52", "com o endereço do instrumento"], ["#bc631e", "com o endereço do laudo"], ["#2f6846", "GPS do ato × IP"]]
+    : [["#2f6846", "GPS da assinatura"], ["#bc631e", "IP de acesso"], ["#203f52", "Infraestrutura"]];
+  legenda.forEach(([c, texto], i) => {
+    const x = xIni + i * 160;
+    doc.circle(x, eixoY + 32, 3.5).fillColor(c).fill();
+    doc.fontSize(7.5).font("Helvetica").fillColor(MUTED).text(texto, x + 7, eixoY + 28.5, { width: 150, lineBreak: false });
+  });
+  doc.x = MARGIN;
+  doc.y = eixoY + 46;
+  doc.font("Helvetica");
+}
+
 function sectionRemarks(ctx, extracted) {
   heading(ctx, "§ 7 · Observações periciais complementares");
   paragraph(
     ctx,
     extracted.observacoes_periciais ||
       "Não há observação complementar além do que já consta das seções anteriores."
+  );
+  paragraph(
+    ctx,
+    "Este laudo foi produzido por extração automatizada de texto, metadados e objetos gráficos do arquivo original, com verificação criptográfica local. Os campos extraídos devem ser conferidos contra o instrumento antes do uso em peça processual. As conclusões técnicas das seções anteriores decorrem de exame direto do arquivo e independem de valoração jurídica, que compete ao juízo.",
+    { color: MUTED, size: 8.5 }
   );
 }
 
@@ -1513,7 +2242,12 @@ function sectionQuesitos(ctx, extracted, result) {
     { size: 9, color: MUTED }
   );
 
-  const ipItem = result.ipAnalysis?.[0];
+  // Mesmas entradas da tela (montarRelatorio.js): o IP de referência é o
+  // primeiro geolocalizado e a distância é a dele à residência. A distância do
+  // GPS declarado, usada antes aqui, fazia o quesito divergir do exibido.
+  const ips = result.ipAnalysis || [];
+  const ipItem = ips.find((ip) => ip.geo) || ips[0];
+  const distanciaIp = distanciaKm(ipItem?.distance);
   const quesitos = generateJudicialQuesitos({
     clienteNome: extracted.cliente?.nome,
     clienteCpf: extracted.cliente?.cpf,
@@ -1522,12 +2256,13 @@ function sectionQuesitos(ctx, extracted, result) {
     ip: ipItem?.endereco,
     porta: ipItem?.porta,
     gpsCoords: result.contractGeo ? `${result.contractGeo.lat}, ${result.contractGeo.lon}` : null,
-    cidadeIp: ipItem?.geo?.city ? `${ipItem.geo.city}/${ipItem.geo.region || ""}` : null,
+    cidadeIp: ipItem?.geo ? [ipItem.geo.city, ipItem.geo.region].filter(Boolean).join(" / ") : null,
     cidadeDomicilio: result.home?.geo ? result.home.geo.display || result.home.query : null,
-    distanciaKm: result.contractGeo?.distance != null ? result.contractGeo.distance.toFixed(1) : null,
+    distanciaKm: distanciaIp !== null ? distanciaIp.toFixed(1) : null,
     dataHora: ipItem?.data_hora || extracted.assinatura?.data_hora_assinatura,
     achados: extracted.achados_irregularidade || [],
     extracted,
+    cadeiaCustodia: result.cadeiaCustodia || null,
   });
 
   for (const q of quesitos) {
@@ -1541,9 +2276,16 @@ function sectionQuesitos(ctx, extracted, result) {
   }
 }
 
-function sectionLegal(ctx, extracted = {}) {
+function sectionLegal(ctx, extracted = {}, result = {}) {
   heading(ctx, "§ 9 · Fundamentação normativa aplicável");
-  paragraph(ctx, NOTA_FUNDAMENTACAO_RESSALVA, { color: MUTED, size: 8.5 });
+  // Mesma síntese da tela: quais achados têm maior aderência normativa.
+  const hashDeclarado = extracted.assinatura?.hash_documento_assinado;
+  const destaques = [];
+  if (hashDeclarado && !confrontoHash(String(hashDeclarado).trim(), result.hashes?.sha256).ehHash) destaques.push("defeito formal de integridade do documento");
+  destaques.push("validade da assinatura eletrônica e ônus da prova");
+  const longe = (km) => distanciaKm(km) !== null && distanciaKm(km) >= 300;
+  if (longe(result.contractGeo?.distance) || (result.ipAnalysis || []).some((ip) => longe(ip.distance))) destaques.push("incompatibilidade geográfica do ato");
+  paragraph(ctx, `Achados deste laudo com maior aderência normativa: ${destaques.join("; ")}.`, { size: 9 });
   for (const { grupo, itens } of fundamentacaoPara(extracted.contrato?.produto_codigo)) {
     const { doc, contentWidth } = ctx;
     reserve(ctx, 72); // título do grupo + o primeiro dispositivo junto
@@ -1557,10 +2299,12 @@ function sectionLegal(ctx, extracted = {}) {
       doc.moveDown(0.3);
     }
   }
-
+  // A ressalva diz "a fundamentação acima": vem depois dos dispositivos.
+  paragraph(ctx, NOTA_FUNDAMENTACAO_RESSALVA, { color: MUTED, size: 8.5 });
 }
 
 function legalNotice(ctx, timestamp) {
+  if (ctx.tema === "modelo") return temaModelo.avisoLegalBloco(ctx, avisoLegal(timestamp));
   const { doc, contentWidth } = ctx;
   doc.moveDown(0.5);
   reserve(ctx, 96); // régua + aviso legal inteiro, que não se divide bem

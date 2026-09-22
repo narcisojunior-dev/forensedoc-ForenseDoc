@@ -40,7 +40,6 @@ describe("LaudoForense", () => {
       "§ 1 · Identificação e integridade criptográfica",
       "§ 1.1 · Verificação dos metadados internos do PDF",
       "§ 2 · Dados do instrumento contratual",
-      "§ 2.1 · Aferição matemática do instrumento",
       "§ 3 · Qualificação do contratante",
       "§ 4 · Assinatura eletrônica e cadeia de custódia",
       "§ 4.1 · Auditoria da assinatura e do trilho de acesso",
@@ -55,6 +54,48 @@ describe("LaudoForense", () => {
       expect(texto).toContain(titulo);
     }
     expect(texto).toContain("Irregularidades do laudo ForenseDoc, em síntese");
+  });
+
+  /*
+   * O laudo verifica cadeia de custódia. Valor, taxa, CET e prazo saíram do
+   * documento, e com eles os achados, as verificações e as diligências que só
+   * existiam pelo exame econômico.
+   */
+  it("não publica as condições econômicas da operação", () => {
+    const { texto } = montar();
+    expect(texto).toContain("As condições econômicas da operação");
+    for (const proibido of [
+      "R$ 5.000,00",
+      "2,10%",
+      "CET mensal",
+      "Aferição matemática",
+      "Somatório das parcelas",
+      "Valor da parcela",
+      "Taxa de juros mensal",
+    ]) {
+      expect(texto, proibido).not.toContain(proibido);
+    }
+  });
+
+  it("tira do sumário os achados, as verificações e as diligências de eixo financeiro", () => {
+    const { texto } = montar();
+    for (const proibido of [
+      "Demonstrativo de cálculo do CET ausente do instrumento",
+      "Instrumento sem os números essenciais do negócio",
+      "Demonstrativo de cálculo do CET",
+    ]) {
+      expect(texto, proibido).not.toContain(proibido);
+    }
+    // A diligência do instrumento completo continua, sem os itens econômicos.
+    expect(texto).toContain("Instrumento contratual completo");
+    expect(texto).not.toContain("campo de valor liberado ao cliente");
+  });
+
+  it("identifica o laudo pelo ForenseDoc, sem escritório nem OAB", () => {
+    const { texto } = montar();
+    expect(texto).toContain("FORENSEDOC");
+    expect(texto).not.toContain("Ronney");
+    expect(texto).not.toContain("OAB/PI");
   });
 
   it("mantém os acréscimos do SaaS", () => {

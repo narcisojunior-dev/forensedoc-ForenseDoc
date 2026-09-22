@@ -7,6 +7,7 @@ import {
   grantManualCredits,
   suspendTenant,
   activateTenant,
+  cancelarLaudo,
 } from "../controllers/adminController.js";
 import {
   getDashboard,
@@ -50,6 +51,10 @@ router.get("/tenants/:id", getTenant);
 router.post("/tenants/:id/credits", grantManualCredits);
 router.post("/tenants/:id/suspend", suspendTenant);
 router.post("/tenants/:id/activate", activateTenant);
+
+// Cancelamento de laudo. Fica sob /admin, e não sob o tenant, porque desfazer
+// a validade pública de um documento já entregue é poder de plataforma.
+router.post("/laudos/:codigo/cancelar", cancelarLaudo);
 
 // Métricas do operador (RF-18)
 router.get("/dashboard", getDashboard);

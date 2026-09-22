@@ -67,7 +67,7 @@ describe("verificação geográfica independente da residência", () => {
     const report = montarRelatorio({ analysisId: "a1", result: recusadoComGpsEIp() });
     const { container } = render(<LaudoForense report={report} />);
     const texto = container.textContent;
-    expect(texto).toContain("Confronto · geolocalização declarada no contrato × origem da conexão (IP)");
+    expect(texto).toContain("Confronto · GPS declarado × consulta de geolocalização do IP");
     expect(texto).toMatch(/23,31 km · COMPATÍVEL/);
     expect(texto).toContain("Município do local declaradoManaquiri/AM");
     expect(texto).toContain("Distância ao local declarado da assinatura");
@@ -78,4 +78,61 @@ describe("verificação geográfica independente da residência", () => {
     expect(verificarCoerenciaRenderizada(container, { referenciaRecusada: true })).toEqual([]);
   });
 });
+
+describe("DIVERGENCIA_CADASTRAL: laudo renderiza banner de divergência cadastral e duplo confronto", () => {
+  it("renderiza os dois endereços, a distância entre eles e a tabela com distâncias ao instrumento", () => {
+    const res = {
+      ...resultado,
+      home: {
+        query: "Rua Alcides Araújo Mourão, 945 - Pedro II - PI",
+        source: "Informado manualmente",
+        geo: { lat: -4.425, lon: -41.458 },
+        estado_confronto: "DIVERGENCIA_CADASTRAL",
+        distancia_divergencia_cadastral: 2110.6,
+        instrumento: { cidade: "Manaquiri", uf: "AM", cep: "69435-000" },
+        instrumento_geo: { lat: -3.434, lon: -60.459, precisao: "municipio" },
+      },
+      contractGeo: {
+        lat: -3.4340189,
+        lon: -60.4593232,
+        distance: 2111.89,
+        distanceToInstrumento: 1.2,
+        municipio: "Manaquiri",
+        uf: "AM",
+        fonte: "Texto extraído do PDF",
+      },
+      ipAnalysis: [{
+        endereco: "2804::1",
+        geo: { lat: -3.29972, lon: -60.62056, city: "Manacapuru", region: "Amazonas", isp: "TELEFÔNICA BRASIL S.A" },
+        distance: 2129.5,
+        distanceToInstrumento: 23.8,
+        distanceToSignature: 23.3,
+      }],
+      confronto_geografico: {
+        status: "CALCULADO",
+        distancias: {
+          gps_residencia: 2111.89,
+          gps_instrumento: 1.2,
+          ips_residencia: [{ endereco: "2804::1", km: 2129.5 }],
+          ips_instrumento: [{ endereco: "2804::1", km: 23.8 }],
+          divergencia_cadastral: 2110.6,
+        },
+        gps_ip: 23.3,
+      },
+    };
+
+    const report = montarRelatorio({ analysisId: "a2", result: res });
+    const { container } = render(<LaudoForense report={report} />);
+    const texto = container.textContent;
+
+    expect(texto).toContain("Divergência Cadastral Identificada:");
+    expect(texto).toContain("Rua Alcides Araújo Mourão, 945 - Pedro II - PI");
+    expect(texto).toContain("Endereço extraído do contrato");
+    expect(texto).toContain("Manaquiri, AM, 69435-000");
+    expect(texto).toContain("2110,6 km");
+    expect(texto).toContain("Distância entre a origem do IP e o endereço extraído do contrato");
+    expect(texto).toContain("23,80 km");
+  });
+});
+
 

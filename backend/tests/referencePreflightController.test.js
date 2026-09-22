@@ -22,14 +22,15 @@ beforeEach(() => {
   mocks.debit.mockResolvedValue({ balanceBefore: 10 }); mocks.add.mockResolvedValue({});
 });
 const request = home => ({ auth: { userId: "u", tenantId: "t" }, body: { pdfBase64: Buffer.from("%PDF-1.7 test").toString("base64"), homeAddress: home }, headers: {} });
-it("bloqueia UF divergente depois da leitura e antes do débito/fila", async () => {
+it("permite UF divergente e segue para débito e fila sem bloquear com 409", async () => {
   const res = response(); await analyzePdf(request("Rua X, Pedro II, PI, 64255-000"), res);
-  expect(res.status).toHaveBeenCalledWith(409); expect(res.body.code).toBe("CONFLITO_REFERENCIA");
-  expect(mocks.order).toEqual(["leitura"]); expect(mocks.tx).not.toHaveBeenCalled(); expect(mocks.add).not.toHaveBeenCalled(); expect(mocks.release).toHaveBeenCalled();
+  expect(res.status).toHaveBeenCalledWith(202);
+  expect(mocks.order).toEqual(["leitura", "debito"]); expect(mocks.tx).toHaveBeenCalled(); expect(mocks.add).toHaveBeenCalled();
 });
-it("bloqueia CEP divergente antes do débito", async () => {
+it("permite CEP divergente antes do débito sem bloquear com 409", async () => {
   const res = response(); await analyzePdf(request("Rua X, Manaquiri, AM, 69000-000"), res);
-  expect(res.status).toHaveBeenCalledWith(409); expect(res.body.conflito.motivo).toBe("CEP"); expect(mocks.tx).not.toHaveBeenCalled();
+  expect(res.status).toHaveBeenCalledWith(202);
+  expect(mocks.tx).toHaveBeenCalled();
 });
 it("reutiliza no worker a leitura preliminar de referência compatível", async () => {
   const res = response(); await analyzePdf(request("Rua X, Manaquiri, AM, 69435-000"), res);

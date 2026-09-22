@@ -80,12 +80,12 @@ export function generateJudicialQuesitos({
       numero: 4,
       titulo: "Validação Biométrica e Prova de Vida Ativa (Liveness Detection)",
       quesito: `Queira o Sr. Perito informar se os registros biométricos apresentados nos autos contêm comprovação de 'Prova de Vida' ativa (Liveness Detection) com desafio dinâmico no momento da captura da imagem, ou se tratou de mera foto estática ou upload de imagem prévia passível de injeção digital ou deepfake.`,
-      finalidade: "Neutralizar biometrias estáticas fraudadas ou extraídas de documentos vazados.",
+      finalidade: "Verificar o resultado individual da validação biométrica e sua vinculação à operação.",
     },
     porAchado.INT1 || {
       numero: 5,
       titulo: "Integridade Criptográfica e Ônus Probatório (Tema 1.061 STJ e MP 2.200-2/2001)",
-      quesito: `Diante da expressa impugnação de autenticidade formulada pelo consumidor (CPC, art. 429, II c/c Tema 1.061 do STJ), queira informar se a assinatura eletrônica utilizada possui certificado emitido sob a infraestrutura ICP-Brasil (assinatura qualificada) ou se depende exclusivamente de meios eletrônicos avançados/simples, especificando se o código hash do contrato original permaneceu inalterado desde a contratação.`,
+      quesito: `Caso haja impugnação da autenticidade pelo consumidor, observada a hipótese do Tema 1.061 do STJ (CPC, art. 429, II), queira informar se a assinatura eletrônica utilizada possui certificado emitido sob a infraestrutura ICP-Brasil (assinatura qualificada) ou se depende exclusivamente de meios eletrônicos avançados/simples, especificando se o código hash do contrato original permaneceu inalterado desde a contratação.`,
       finalidade: "Fixar a incumbência probatória sobre a instituição financeira requerida.",
     },
     ...especificos,
@@ -104,7 +104,7 @@ export function generateJudicialQuesitos({
  * premissa, e o achado ficaria rebaixado para sempre por falta do documento
  * que o próprio quesito requisita.
  */
-const SEMPRE = new Set(["EMP1", "CAD4", "SEG1"]);
+const SEMPRE = new Set(["EMP1", "CAD4", "SEG1", "TRL1-CCB"]);
 /** Achados cujo quesito toma o lugar do quesito geral do mesmo tema. */
 const SUBSTITUI_GERAL = new Set(["INT1", "BIO2"]);
 
@@ -118,11 +118,10 @@ const dias = (n) => `${n} ${n === 1 ? "dia" : "dias"}`;
 const MODELOS = {
   LIB1(e, { bancoRef, contratoRef }) {
     const d = e.liberacao_credito?.declarada || {};
-    const valor = e.contrato?.valor_liberado;
     const destino = [d.conta ? `conta ${d.conta}` : null, d.agencia ? `agência ${d.agencia}` : null, d.banco ? `Banco ${d.banco}` : null].filter(Boolean).join(", ");
     return {
       titulo: "Comprovação do Crédito Liberado",
-      quesito: `Queira ${bancoRef} apresentar o comprovante de transferência relativo ao crédito${valor ? ` de ${valor}` : ""}${destino ? ` na ${destino}` : ""}${contratoRef ? `, ${contratoRef}` : ""}, com identificação do lançamento, data, valor e titularidade da conta de destino.`.replace(/\s+,/g, ",").replace(/\s{2,}/g, " "),
+      quesito: `Queira ${bancoRef} apresentar o comprovante de transferência relativo ao crédito${destino ? ` na ${destino}` : ""}${contratoRef ? `, ${contratoRef}` : ""}, com identificação do lançamento, data, valor e titularidade da conta de destino.`.replace(/\s+,/g, ",").replace(/\s{2,}/g, " "),
       finalidade: "Exigir a prova da efetiva disponibilização do crédito, que cabe a quem afirma tê-lo realizado.",
     };
   },
@@ -143,7 +142,7 @@ const MODELOS = {
     return {
       titulo: "Cadastro do Contratante",
       quesito: `Queira ${bancoRef} esclarecer a formalização da operação${campos.length ? ` com ${juntarLista(campos)}` : " com campos de qualificação fictícios ou não informados"}, informando qual documento foi efetivamente conferido e por qual canal.`,
-      finalidade: "Evidenciar cadastro feito por terceiro ou sem conferência documental.",
+      finalidade: "Esclarecer as limitações cadastrais e os documentos utilizados na identificação.",
     };
   },
   SEG1(e, { nomeRef }) {
@@ -157,8 +156,8 @@ const MODELOS = {
     const estipulante = sg.estipulante?.nome;
     return {
       titulo: "Seguro Prestamista Vinculado à Operação",
-      quesito: `Queira a seguradora ou o estipulante apresentar a apólice, o certificado individual e a comprovação da opção de ${nomeRef} pela cobertura de ${cobertura.nome}, cuja carência de ${dias(cobertura.carencia_dias)}${cobertura.franquia_dias ? ` e franquia de ${dias(cobertura.franquia_dias)} tornam` : " torna"} a indenização possível apenas ${dias(minimo)} após o início da vigência${Number.isFinite(carencia) && carencia > 0 ? `, em operação cujo primeiro vencimento ocorre ${dias(carencia)} após a emissão` : ""}${sg.pro_labore ? `, bem como a memória do pró-labore de ${sg.pro_labore} pago ao estipulante${estipulante ? ` (${estipulante})` : ""}` : ""}.`,
-      finalidade: "Verificar a voluntariedade da adesão e a utilidade da cobertura no contrato ao qual foi vinculada.",
+      quesito: `Queira a seguradora ou o estipulante apresentar a apólice, o certificado individual e a comprovação da opção de ${nomeRef} pela cobertura de ${cobertura.nome}, esclarecer o início e o fim da vigência e os marcos de contagem da carência de ${dias(cobertura.carencia_dias)} e da franquia de ${dias(cobertura.franquia_dias || 0)}. Os dois prazos têm marcos próprios e não fixam, por soma automática, a primeira indenização.`,
+      finalidade: "Conferir adesão, vigência e condições de cobertura, sem presumir parcelas descobertas.",
     };
   },
   "TRL1-CCB"(e, { bancoRef }) {
@@ -166,7 +165,7 @@ const MODELOS = {
     return {
       titulo: "Tempo de Exibição do Instrumento na Jornada",
       quesito: `Queira ${bancoRef} apresentar os registros de exibição e rolagem da cédula na jornada de contratação${ev ? `, cujo aceite ocorreu ${ev.intervalo_s} segundos após o evento anterior para ${ev.documento_aceito.paginas} páginas` : ""}, informando o tempo em que o documento permaneceu aberto e se houve leitura integral antes do aceite.`,
-      finalidade: "Demonstrar que o consentimento não foi precedido de acesso efetivo ao conteúdo contratado.",
+      finalidade: "Esclarecer quando e qual conteúdo foi disponibilizado antes do aceite, sem presumir tempo de leitura.",
     };
   },
   IDN1(_e, { bancoRef }, achado) {
@@ -180,7 +179,7 @@ const MODELOS = {
     const protocolo = e.assinatura?.codigo_autenticacao_declarado;
     return {
       titulo: "Integridade Criptográfica e Ônus Probatório (Tema 1.061 STJ e MP 2.200-2/2001)",
-      quesito: `Diante da expressa impugnação de autenticidade formulada pelo consumidor (CPC, art. 429, II c/c Tema 1.061 do STJ), e considerando que o dossiê não apresenta resumo criptográfico (hash) do documento assinado${protocolo ? `, mas apenas o protocolo interno ${protocolo}, verificável somente no sítio da própria instituição` : ""}, queira informar se a assinatura possui certificado ICP-Brasil e apresentar o hash do arquivo original, calculado no momento da assinatura, com indicação do algoritmo e do meio de conferência por terceiro.`,
+      quesito: `Caso haja impugnação da autenticidade pelo consumidor, observada a hipótese do Tema 1.061 do STJ (CPC, art. 429, II), e considerando que o dossiê não apresenta resumo criptográfico (hash) do documento assinado${protocolo ? `, mas apenas o protocolo interno ${protocolo}, verificável somente no sítio da própria instituição` : ""}, queira informar se a assinatura possui certificado ICP-Brasil e apresentar o hash do arquivo original, calculado no momento da assinatura, com indicação do algoritmo e do meio de conferência por terceiro.`,
       finalidade: "Fixar a incumbência probatória sobre a instituição financeira e afastar a autoverificação.",
     };
   },
@@ -197,7 +196,7 @@ const MODELOS = {
     return {
       titulo: "Validação Biométrica e Prova de Vida Ativa (Liveness Detection)",
       quesito: `Considerando que o arquivo exibe ${b.contagem_faciais === 1 ? "uma única fotografia" : "fotografia"}${caracteristicas.length ? ` (${caracteristicas.join(", ")})` : ""}, queira o Sr. Perito ou a instituição informar se houve prova de vida ativa com desafio dinâmico no momento da captura${ausentes.length ? ` e apresentar ${juntarLista(ausentes)}` : ""}, esclarecendo se a imagem pode ter sido obtida por upload ou reaproveitamento de foto prévia.`,
-      finalidade: "Neutralizar biometrias estáticas fraudadas ou extraídas de documentos vazados.",
+      finalidade: "Verificar o resultado individual da validação biométrica e sua vinculação à operação.",
     };
   },
 };

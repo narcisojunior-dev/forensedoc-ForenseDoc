@@ -36,6 +36,10 @@
     "vite": "^5.4.0",
     "vitest": "^4.1.10"
   },
+  "//overrides": "dompurify entra por jspdf, que é dependência de PRODUÇÃO e roda na exportação do laudo, sanitizando conteúdo vindo do dossiê e do OCR. A versão que o jspdf traz (3.4.12) tem XSS por subárvore destacada em hook IN_PLACE. 3.4.15 corrige e fica no mesmo major, então o jspdf continua funcionando. Remover quando o jspdf subir a dependência sozinho.",
+  "overrides": {
+    "dompurify": "^3.4.15"
+  },
   "allowScripts": {
     "core-js@3.49.0": true,
     "esbuild@0.21.5": true,

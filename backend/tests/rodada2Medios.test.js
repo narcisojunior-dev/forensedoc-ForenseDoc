@@ -104,12 +104,17 @@ describe("MED-05: quesitos derivados dos achados", () => {
     expect(quesitos.map((q) => q.numero)).toEqual(quesitos.map((_, i) => i + 1));
   });
 
-  it("os quesitos citam os valores do instrumento", () => {
-    expect(todoTexto).toMatch(/R\$ 1\.779,15 na conta 005555-1, agência 1234, Banco 237/);
+  it("os quesitos citam os dados do instrumento, sem as cifras da operação", () => {
+    expect(todoTexto).toMatch(/comprovante de transferência relativo ao crédito na conta 005555-1, agência 1234, Banco 237/);
+    // O laudo não examina condições econômicas: o quesito pede o comprovante e a
+    // titularidade da conta, sem afirmar quanto foi creditado.
+    expect(todoTexto).not.toMatch(/R\$ 1\.779,15/);
     expect(todoTexto).toMatch(/"000007 - CONSIG TRAB"/);
     expect(todoTexto).toMatch(/111111111111/);
-    expect(todoTexto).toMatch(/carência de 90 dias e franquia de 31 dias tornam a indenização possível apenas 121 dias/);
-    expect(todoTexto).toMatch(/pró-labore de R\$ 98,02/);
+    expect(todoTexto).toMatch(/carência de 90 dias e da franquia de 31 dias/);
+    expect(todoTexto).toMatch(/marcos próprios/);
+    expect(todoTexto).not.toMatch(/121 dias/);
+    expect(todoTexto).not.toMatch(/pró-labore/i);
     expect(todoTexto).toMatch(/27 segundos após o evento anterior para 12 páginas/);
     expect(todoTexto).not.toMatch(/undefined|null|NaN|operação ,/);
   });

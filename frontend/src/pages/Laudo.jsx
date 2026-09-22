@@ -8,7 +8,7 @@ import RevisaoCampos from "../components/report/RevisaoCampos.jsx";
 import ConfrontoProcesso from "../components/report/ConfrontoProcesso.jsx";
 import LaudoForense from "../laudo/LaudoForense.jsx";
 import { montarRelatorio } from "../laudo/montarRelatorio.js";
-import { exportarLaudoPdf, verificarCoerenciaRenderizada } from "../laudo/exportarLaudoPdf.js";
+import { baixarLaudoValidado } from "../laudo/baixarLaudoValidado.js";
 import { parseLatLon } from "./Analyze.jsx";
 
 /**
@@ -17,7 +17,7 @@ import { parseLatLon } from "./Analyze.jsx";
  * Acima do documento ficam as ferramentas do SaaS (revisão de campos, coordenada
  * confirmada pelo operador, confronto com o processo), fora da captura do PDF.
  * O documento é o laudo do motor de geração, renderizado a partir do resultado
- * persistido, e é exatamente ele que o botão de PDF exporta.
+ * persistido, e o botão solicita ao servidor o PDF do resultado persistido, validado novamente antes da emissão.
  */
 export default function Laudo() {
   const { id } = useParams();
@@ -34,6 +34,7 @@ export default function Laudo() {
     try {
       const { data } = await api.get(`/analyses/${id}/result`);
       setAnalise({ result: data.result });
+      setPdfDownload(null);
       setErro("");
     } catch (err) {
       setErro(
@@ -56,7 +57,10 @@ export default function Laudo() {
     [analise, id]
   );
 
-  const atualizarResultado = (novo) => setAnalise((atual) => ({ result: { ...atual.result, ...novo } }));
+  const atualizarResultado = (novo) => {
+    setPdfDownload(null);
+    setAnalise((atual) => ({ result: { ...atual.result, ...novo } }));
+  };
 
   const aplicarCoordenada = async () => {
     const coord = parseLatLon(coordenada);
@@ -89,25 +93,19 @@ export default function Laudo() {
   };
 
   const contradicoes = analise?.result?.coerencia || [];
-  const exportacaoBloqueada = Boolean(analise?.result?.coerencia_bloqueante) && contradicoes.length > 0;
+  const exportacaoBloqueada = contradicoes.some(c => c.bloqueante === true);
 
   const gerarPdf = async () => {
-    if (exportacaoBloqueada) {
-      toast.error("O laudo tem contradição entre seções. Revise os campos indicados antes de gerar o PDF.");
-      return;
-    }
-    const renderizado = verificarCoerenciaRenderizada(document.getElementById("fd-report"), {
-      referenciaRecusada: ["RECUSADO_CONFLITO", "INDISPONIVEL_NAO_INFORMADO"].includes(analise?.result?.home?.estado_confronto),
-    });
-    if (renderizado.length) {
-      // Modo alerta: avisa e segue. O bloqueio depende de decisão do escritório.
-      toast.error(`Atenção antes de protocolar: ${renderizado.join("; ")}.`, { duration: 9000 });
-    }
+    if (pdfBusy) return;
+    setPdfBusy(true);
+    setPdfDownload(null);
     try {
-      await exportarLaudoPdf(setPdfBusy, setPdfDownload);
+      const pdf = await baixarLaudoValidado(api, id);
+      setPdfDownload(pdf);
     } catch (err) {
-      toast.error(err.message);
-    }
+      if (err.coerencia) atualizarResultado({ coerencia: err.coerencia, coerencia_bloqueante: true });
+      toast.error(err.message, { duration: 9000 });
+    } finally { setPdfBusy(false); }
   };
 
   const btnPrimary =

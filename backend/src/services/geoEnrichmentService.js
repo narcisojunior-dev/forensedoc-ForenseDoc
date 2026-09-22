@@ -137,6 +137,7 @@ export async function enrichGeography(extracted, homeAddress, homeCoord = null, 
         lat: geoInstrumento.lat,
         lon: geoInstrumento.lon,
         rotulo: consultaInstrumento,
+        fonte: `${geoInstrumento.source || "provedor não identificado"}; geocodificação da consulta "${consultaInstrumento}"`,
         precisao: extractedAddr ? geoInstrumento.precision || "endereco" : "municipio",
       }
     : null;
@@ -161,8 +162,7 @@ export async function enrichGeography(extracted, homeAddress, homeCoord = null, 
       if (contestacao?.contestado && justificativa) {
         estadoConfronto = ESTADO_CONFRONTO.LIBERADO_PELO_OPERADOR;
       } else {
-        estadoConfronto = ESTADO_CONFRONTO.RECUSADO_CONFLITO;
-        homeGeo = null;
+        estadoConfronto = ESTADO_CONFRONTO.DIVERGENCIA_CADASTRAL;
       }
     }
   } else if (enderecoNaoInformado) {
@@ -221,9 +221,11 @@ export async function enrichGeography(extracted, homeAddress, homeCoord = null, 
   const referenciaConfirmada = homeGeo?.precision === "manual";
   const ipAnalysis = ipResults.map((ip) => {
     let distance = null;
+    let distanceToInstrumento = null;
     let distanceToSignature = null;
     if (ip.geo?.lat != null && ip.geo?.lon != null) {
       if (homeGeo) distance = haversineKm(homeGeo.lat, homeGeo.lon, ip.geo.lat, ip.geo.lon);
+      if (pontoInstrumento) distanceToInstrumento = haversineKm(pontoInstrumento.lat, pontoInstrumento.lon, ip.geo.lat, ip.geo.lon);
       if (contractGeo) distanceToSignature = haversineKm(contractGeo.lat, contractGeo.lon, ip.geo.lat, ip.geo.lon);
     }
 
@@ -233,9 +235,18 @@ export async function enrichGeography(extracted, homeAddress, homeCoord = null, 
     return {
       ...ip,
       distance,
+      distanceToInstrumento,
       distanceToSignature,
       divergenciaResidencia: aplicarHistoricoDoIp(
         describeIpDivergence({ km: distance, referenciaConfirmada, referenciaRotulo: homeSource }),
+        ip.historico
+      ),
+      divergenciaInstrumento: aplicarHistoricoDoIp(
+        describeIpDivergence({
+          km: distanceToInstrumento,
+          referenciaConfirmada: pontoInstrumento?.precisao === "endereco",
+          referenciaRotulo: "endereço extraído do instrumento",
+        }),
         ip.historico
       ),
       divergenciaAssinatura: aplicarHistoricoDoIp(
@@ -266,6 +277,11 @@ export async function enrichGeography(extracted, homeAddress, homeCoord = null, 
   let contractToHomeKm = null;
   if (contractGeo && homeGeo) {
     contractToHomeKm = haversineKm(homeGeo.lat, homeGeo.lon, contractGeo.lat, contractGeo.lon);
+  }
+
+  let contractToInstrumentoKm = null;
+  if (contractGeo && pontoInstrumento) {
+    contractToInstrumentoKm = haversineKm(pontoInstrumento.lat, pontoInstrumento.lon, contractGeo.lat, contractGeo.lon);
   }
 
   const pontoIp = ipAnalysis.find((ip) => Number.isFinite(ip.geo?.lat) && Number.isFinite(ip.geo?.lon));
@@ -302,13 +318,20 @@ export async function enrichGeography(extracted, homeAddress, homeCoord = null, 
     gps: contractGeo ? { lat: contractGeo.lat, lon: contractGeo.lon, rotulo: contractGeo.municipio || "coordenada do log", precisao: contractGeo.precision || "gps", fonte: contractGeo.fonte || contractGeo.source || "coordenada declarada no documento" } : null,
   });
 
+  const distanciaCadastral = pontoInstrumento && homeGeo && Number.isFinite(homeGeo.lat) && Number.isFinite(pontoInstrumento.lat)
+    ? haversineKm(homeGeo.lat, homeGeo.lon, pontoInstrumento.lat, pontoInstrumento.lon)
+    : (conflito?.km ?? null);
+
   const home = {
     query: homeQuery,
     source: homeSource,
     geo: homeGeo,
     estado_confronto: estadoConfronto,
     conflito,
-    justificativa: estadoConfronto === ESTADO_CONFRONTO.LIBERADO_PELO_OPERADOR ? String(contestacao.justificativa).trim() : null,
+    justificativa: (estadoConfronto === ESTADO_CONFRONTO.LIBERADO_PELO_OPERADOR || contestacao?.justificativa)
+      ? String(contestacao.justificativa).trim()
+      : null,
+    distancia_divergencia_cadastral: distanciaCadastral,
     instrumento,
     endereco_literal: cliente.endereco_literal || cliente.estados_campos?.endereco?.valor || null,
     endereco_nao_informado: enderecoNaoInformado,
@@ -331,6 +354,7 @@ export async function enrichGeography(extracted, homeAddress, homeCoord = null, 
       ? {
           ...contractGeo,
           distance: contractToHomeKm,
+          distanceToInstrumento: contractToInstrumentoKm,
           divergencia: classifyDeclaredDivergence(contractToHomeKm, { referenciaConfirmada }),
         }
       : null,

@@ -2,6 +2,9 @@ import { ordenarAchados } from "./eixosAchado.js";
 
 // Utilitários de apresentação do laudo técnico pericial. Portados do motor de
 // geração (frontend/src/ForenseDoc.jsx) sem alteração de regra.
+// O PDF do servidor usa uma cópia destas regras em
+// backend/src/reports/laudoApresentacao.js: manter as duas iguais (o teste
+// backend/tests/reportPdfParidadeTela.test.js compara as saídas).
 
 export function classifyHashString(s) {
   if (!s || typeof s !== "string") return null;
@@ -76,11 +79,11 @@ export function noteForDeclaredHashState(state, calc, assinatura = null) {
 }
 
 export function cleanIssueText(value) {
-  return String(value || "")
+  return semCifras(String(value || "")
     .replace(/\b(?:CET1|FIN\d|IMG\d|INT\d|TRB\d|CAD\d|CUS\d|LOG\d)\s+(?:ALTA|MEDIA|MÉDIA|MÉDIO|INFO|CRITICO|CRÍTICO)\s*:\s*/g, "")
     .replace(/\b(?:CET1|FIN\d|IMG\d|INT\d|TRB\d|CAD\d|CUS\d|LOG\d)\s*:\s*/g, "")
     .replace(/\s+/g, " ")
-    .trim();
+    .trim());
 }
 
 export function normalizeIssue(issue, index = 0) {
@@ -95,6 +98,55 @@ export function normalizeIssue(issue, index = 0) {
   const text = cleanIssueText(issue);
   const [title, ...rest] = text.split(/\. +/);
   return { codigo: `LEGADO${index}`, gravidade: "MÉDIA", titulo: (title || "Achado técnico").replace(/\.+$/, ""), texto: rest.join(". ") };
+}
+
+/*
+ * Cifra que sobra no texto de um achado ou de uma diligência.
+ *
+ * Alguns achados que ficam no laudo, como a ausência de comprovante de
+ * transferência, citavam o valor da operação no meio da frase. O achado
+ * continua: o que sai é a cifra. As orações inteiras de valor são removidas,
+ * para a frase seguir correndo bem; a cifra solta que escapar vira uma marca
+ * explícita, porque publicar o número é o que não pode acontecer.
+ */
+const CIFRA = "R\\$\\s?\\d[\\d.]*(?:,\\d{1,2})?";
+const CLAUSULAS_DE_VALOR = [
+  new RegExp(`,?\\s*n[oa]\\s+(?:valor|montante|import[âa]ncia)\\s+de\\s+${CIFRA}`, "gi"),
+  new RegExp(`,?\\s*de\\s+${CIFRA}\\s+(?=na\\s|para\\s)`, "gi"),
+  new RegExp(`\\s*\\(\\s*${CIFRA}\\s*\\)`, "g"),
+];
+
+export function semCifras(texto) {
+  let t = String(texto || "");
+  for (const re of CLAUSULAS_DE_VALOR) t = t.replace(re, "");
+  return t
+    .replace(new RegExp(CIFRA, "g"), "valor suprimido")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([,.;:])/g, "$1")
+    .trim();
+}
+
+/**
+ * Achados de valor, taxa e custo ficam fora do laudo.
+ *
+ * O objeto do laudo é a verificação e a validação da cadeia de custódia. O que
+ * a operação cobra não confirma nem afasta autoria e integridade do documento,
+ * e levar esses números ao juízo abre uma discussão revisional que este exame
+ * não fez. DAT fica fora da lista: data de contratação divergente é cronologia,
+ * não preço.
+ *
+ * O corte é de apresentação, não de motor: o resultado gravado continua
+ * completo, e laudos já emitidos passam a sair sem os valores ao serem
+ * reabertos ou reexportados.
+ *
+ * SEG2, SEG5, SEG6, SEG7 e SEG8 tratam de prêmio, pró-labore e diferença de
+ * centavos: são preço do seguro. SEG1, SEG3, SEG4 e SEG9 seguem no laudo,
+ * porque tratam de carência, vigência, papéis das partes e rotulagem.
+ */
+const CODIGOS_FINANCEIROS = /^(CET\d|FIN\d|PRZ\d|TRB\d|TET\d|RMC\d|TAR\d|SEG[25678](?!\d)|economics)/i;
+
+export function achadoFinanceiro(codigo) {
+  return CODIGOS_FINANCEIROS.test(String(codigo || ""));
 }
 
 /**
@@ -115,7 +167,7 @@ export function reportIssues(extracted = {}, projecao = null) {
   // `[]` cair no caminho legado e ressuscitar achados que a projeção excluiu
   // deliberadamente (os de residência, quando o confronto é recusado).
   if (Array.isArray(projecao)) {
-    return ordenarAchados(projecao.map((f) => ({
+    return ordenarAchados(projecao.filter((f) => !achadoFinanceiro(f.key)).map((f) => ({
       codigo: f.key,
       gravidade: f.severity,
       titulo: cleanIssueText(f.title || "Achado técnico").replace(/\.+$/, ""),
@@ -126,6 +178,7 @@ export function reportIssues(extracted = {}, projecao = null) {
   const legacy = structured.length ? [] : (extracted.evidencias_irregularidade || []);
   const seen = new Set();
   const issues = [...structured, ...legacy].map(normalizeIssue).filter((issue) => {
+    if (achadoFinanceiro(issue.codigo)) return false;
     if (!issue.titulo && !issue.texto) return false;
     if (seen.has(issue.codigo)) return false;
     seen.add(issue.codigo);

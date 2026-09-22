@@ -127,6 +127,7 @@ export function extrairSeguroPrestamista({ texto, segmentacao, contrato = {} }) 
     periodicidade: valorAbaixoDoRotulo(trecho, /Periodicidade\s+de\s+Pagamento/i),
     forma_pagamento: valorAbaixoDoRotulo(trecho, /Forma\s+de\s+pagamento/i),
     pro_labore: proLabore,
+    marcos_temporais: /Car[êe]ncia:[\s\S]{0,400}in[íi]cio\s+de\s+vig[êe]ncia/i.test(trecho) && /Franquia:[\s\S]{0,400}(?:sinistro|evento)/i.test(trecho) ? "A carência é contada do início da vigência; a franquia, da ocorrência do sinistro, conforme definições da proposta." : null,
     coberturas: coberturas.map((c) => ({
       ...c,
       participacao_premio: c.premio && premioCents ? moneyToCents(c.premio) / premioCents : null,
@@ -173,15 +174,12 @@ export function extrairSeguroPrestamista({ texto, segmentacao, contrato = {} }) 
     || /certificado\s+individual\s+(?:de\s+seguro\s+)?n[ºo°]\s*[:\-]?\s*\S+/i.test(t);
 
   const remissaoTexto = remissaoVigencia ? remissaoVigencia[0].replace(/\s+/g, " ").trim() : null;
-  const premissaPresumida = !vigenciaDeclarada && Boolean(contrato.data_contrato);
   seguro.vigencia = {
     inicio_declarado: vigenciaDeclarada || null,
     premissa: vigenciaDeclarada
-      ? `Início de vigência declarado na própria proposta (${vigenciaDeclarada}).`
-      : premissaPresumida
-        ? `Premissa adotada: início de vigência na data do contrato (${contrato.data_contrato}), porque a proposta não declara a data.${remissaoTexto ? ` A proposta remete as datas ao certificado individual do seguro${certificadoNoArquivo ? ", que consta do arquivo e deve ser conferido" : ", que não foi localizado no arquivo examinado"}.` : ""}`
-        : "Início de vigência não declarado na proposta e sem data de contrato para adotar como premissa.",
-    premissa_origem: vigenciaDeclarada ? "DECLARADO_NA_PROPOSTA" : premissaPresumida ? "PRESUMIDO_DATA_DO_CONTRATO" : "INDETERMINADO",
+      ? `Início de vigência declarado na proposta (${vigenciaDeclarada}).`
+      : `Início de vigência não demonstrado pela extração da proposta. ${remissaoTexto || "Solicitar o certificado individual."}`,
+    premissa_origem: vigenciaDeclarada ? "DECLARADO_NA_PROPOSTA" : "INDETERMINADO",
     // Três estados, não dois: localizado, não localizado, e não verificado.
     certificado_individual: certificadoNoArquivo
       ? "LOCALIZADO_NO_ARQUIVO"
@@ -211,7 +209,17 @@ export function extrairSeguroPrestamista({ texto, segmentacao, contrato = {} }) 
       coberturas_somadas: seguro.coberturas.length,
     }
     : null;
+  const instrumento = segmentacao?.documentos?.find(d => d.tipo === "INSTRUMENTO_PRINCIPAL");
+  const paginas = t.split("\f");
+  for (let i = (instrumento?.paginaInicial || 1) - 1; i < (instrumento?.paginaFinal || paginas.length); i++) {
+    const linha = paginas[i]?.split("\n").find(l => /Forma de Pagamento:/i.test(l) && /\[\s*[xX]\s*\]/.test(l));
+    const marcado = linha?.match(/\[\s*[xX]\s*\]\s*([ÀàAa]\s*Vista|Financiado)/i)?.[1];
+    if (marcado) { seguro.forma_pagamento_instrumento = { valor: marcado, pagina: i + 1, trecho: linha.trim() }; break; }
+  }
   seguro.achados = avaliarSeguro(seguro, contrato);
+  if (seguro.forma_pagamento_instrumento && seguro.forma_pagamento && seguro.forma_pagamento_instrumento.valor.toLowerCase() !== seguro.forma_pagamento.toLowerCase()) {
+    seguro.achados.push({ codigo: "SEG9", gravidade: "INFO", titulo: "Formas de pagamento do seguro com rótulos distintos", texto: `O instrumento assinala "${seguro.forma_pagamento_instrumento.valor}" (pág. ${seguro.forma_pagamento_instrumento.pagina}); a proposta de seguro informa "${seguro.forma_pagamento}"${seguro.documento ? ` (pág. ${seguro.documento.paginaInicial})` : ""}. Os rótulos podem se referir a relações diferentes: repasse à seguradora e financiamento ao consumidor. Solicitar conciliação documental; a diferença, isoladamente, não prova cobrança duplicada.` });
+  }
   if (seguro.conferencia_premio && !seguro.conferencia_premio.confere) {
     const dif = seguro.conferencia_premio.diferenca_centavos;
     const reais = (n) => `R$ ${(Math.abs(n) / 100).toFixed(2).replace(".", ",")}`;
@@ -244,56 +252,17 @@ function avaliarSeguro(seguro, contrato) {
   const achados = [];
   const add = (codigo, gravidade, titulo, texto) => achados.push({ codigo, gravidade, titulo, texto });
 
-  // SEG1: carência + franquia contra o cronograma de parcelas.
-  // D9: quando a vigência é declarada, ela é a base do confronto. A data do
-  // contrato entra apenas como premissa explícita, e só na falta daquela.
-  const vigenciaDeclarada = parsePtDate(seguro.vigencia?.inicio_declarado);
-  const base = vigenciaDeclarada || parsePtDate(contrato.data_contrato);
-  // O rótulo acompanha a base efetivamente usada. Dizer "após a emissão" quando
-  // a contagem partiu do início de vigência declarado descreve mal o cálculo.
-  const rotuloDaBase = vigenciaDeclarada
-    ? `o início de vigência declarado (${seguro.vigencia.inicio_declarado})`
-    : "a emissão";
-
-  /*
-   * A conclusão antiga era absoluta: "a cobertura vendida tem pouca ou nenhuma
-   * serventia no contrato ao qual foi vinculada". Isso contradiz a própria
-   * premissa condicional do achado, porque a serventia da cobertura depende de
-   * quando a vigência começou, que é justamente o que não se sabe sem o
-   * certificado. A conclusão passa a se limitar ao efeito verificável sobre o
-   * cronograma, que é o que os números demonstram.
-   */
-  const conclusaoDoAchado = vigenciaDeclarada
-    ? "Nessas condições, as parcelas vencidas dentro do período de carência e franquia não contam com a cobertura contratada."
-    : "Mantida essa premissa de início de vigência, as parcelas vencidas dentro do período de carência e franquia não contariam com a cobertura contratada. A extensão do efeito depende da data de início de vigência, que o certificado individual deve esclarecer.";
-  const primeiro = parsePtDate(contrato.data_primeiro_vencimento);
-  const parcelas = Number(contrato.numero_parcelas);
-  const diasParcelas = base && primeiro && parcelas > 0
-    ? vencimentosMensais(primeiro, parcelas).map((d) => diasEntre(base, d))
-    : [];
+  // Carência e franquia têm marcos diferentes; vencimento não é sinistro.
   for (const c of seguro.coberturas) {
-    const espera = (c.carencia_dias || 0) + (c.franquia_dias || 0);
-    if (!espera || !diasParcelas.length) continue;
-    const descobertas = diasParcelas.filter((d) => d <= espera).length;
-    if (espera > diasParcelas[0] || descobertas / diasParcelas.length > 1 / 3) {
-      add(
-        "SEG1",
-        // D9: sem o certificado individual, o início de vigência é premissa, e
-        // achado que depende de premissa não declarada não sustenta gravidade
-        // máxima. Volta a ALTA quando a vigência for declarada ou o certificado
-        // for juntado.
-        seguro.vigencia?.premissa_origem === "PRESUMIDO_DATA_DO_CONTRATO" ? "MÉDIA" : "ALTA",
-        "Carência e franquia do seguro incompatíveis com o prazo da operação",
-        `A cobertura "${c.nome}" tem carência de ${c.carencia_dias || 0} dias e franquia de ${c.franquia_dias || 0} dias: a primeira indenização só é possível ${espera} dias após o início da vigência.${seguro.vigencia?.premissa_origem === "PRESUMIDO_DATA_DO_CONTRATO" ? ` ${seguro.vigencia.premissa}${seguro.vigencia.certificado_individual === "NAO_LOCALIZADO_NO_ARQUIVO" ? " Enquanto o certificado individual não for juntado, este achado depende dessa premissa e deve ser lido com essa ressalva." : " Este achado depende dessa premissa e deve ser lido com essa ressalva."}` : seguro.vigencia?.inicio_declarado ? ` O confronto usa o início de vigência declarado na proposta (${seguro.vigencia.inicio_declarado}), não a data do contrato.` : ""} O primeiro vencimento ocorre ${diasParcelas[0]} dias após ${rotuloDaBase}, e ${descobertas} de ${diasParcelas.length} parcelas ${descobertas === 1 ? "vence" : "vencem"} antes desse prazo mínimo${c.teto_parcelas ? `; a cobertura paga no máximo ${c.teto_parcelas} parcelas` : ""}. ${conclusaoDoAchado}`
-      );
-      break;
-    }
+    if (!(c.carencia_dias > 0 || c.franquia_dias > 0)) continue;
+    add("SEG1", "INFO", "Carência, franquia e vigência a conferir",
+      `A cobertura "${c.nome}" declara carência de ${c.carencia_dias ?? "não identificado"} dias e franquia de ${c.franquia_dias ?? "não identificado"} dias. ${seguro.marcos_temporais || "Os marcos de contagem devem ser conferidos nas condições da cobertura."} ${seguro.vigencia?.premissa || "Solicitar o certificado individual para identificar a vigência."}${c.teto_parcelas ? ` O limite declarado é de até ${c.teto_parcelas} parcelas.` : ""} Esses prazos não permitem contar parcelas descobertas nem fixar a primeira indenização sem vigência, data e enquadramento do sinistro.`);
   }
 
   // SEG2: cobertura que concentra o prêmio e tem carência ou franquia.
   const concentrada = seguro.coberturas.find((c) => c.participacao_premio > 0.6 && ((c.carencia_dias || 0) > 0 || (c.franquia_dias || 0) > 0));
   if (concentrada) {
-    add("SEG2", "MÉDIA", "Prêmio concentrado em cobertura com carência", `A cobertura "${concentrada.nome}" responde por ${pct(concentrada.participacao_premio)} do prêmio (${concentrada.premio} de ${seguro.premio}) e é justamente a que tem carência${concentrada.franquia_dias ? " e franquia" : ""}.`);
+    add("SEG2", "INFO", "Prêmio concentrado em cobertura com carência", `A cobertura "${concentrada.nome}" responde por ${pct(concentrada.participacao_premio)} do prêmio (${concentrada.premio} de ${seguro.premio}) e é justamente a que tem carência${concentrada.franquia_dias ? " e franquia" : ""}.`);
   }
 
   // SEG3 e SEG4: estipulante e beneficiário iguais ao credor.
@@ -306,20 +275,20 @@ function avaliarSeguro(seguro, contrato) {
     || (credorNome && seguro.estipulante?.nome && normal(seguro.estipulante.nome).includes(credorNome.split(/\s+/)[0]))
   );
   if (estipulanteIgualCredor) {
-    add("SEG3", "MÉDIA", "Estipulante do seguro é o próprio credor", `O estipulante da apólice é ${seguro.estipulante.nome}${seguro.estipulante.cnpj ? ` (CNPJ ${seguro.estipulante.cnpj})` : ""}, a mesma instituição que concede o empréstimo. Quem vende o crédito contrata o seguro em nome do consumidor.`);
+    add("SEG3", "INFO", "Estipulante do seguro é o próprio credor", `O estipulante da apólice é ${seguro.estipulante.nome}${seguro.estipulante.cnpj ? ` (CNPJ ${seguro.estipulante.cnpj})` : ""}, a mesma instituição que concede o empréstimo. Essa coincidência de papéis não demonstra irregularidade por si.`);
   }
   if (seguro.beneficiario && (/estipulante/i.test(seguro.beneficiario) ? estipulanteIgualCredor : credorNome && normal(seguro.beneficiario).includes(credorNome.split(/\s+/)[0]))) {
-    add("SEG4", "MÉDIA", "Beneficiário do seguro é o credor", `A proposta define que "o beneficiário será ${seguro.beneficiario.toLowerCase().startsWith("o ") ? "" : "o "}${seguro.beneficiario}", que é o credor. O seguro pago pelo consumidor protege, antes de tudo, o crédito da instituição.`);
+    add("SEG4", "INFO", "Beneficiário do seguro é o credor", `A proposta define que "o beneficiário será ${seguro.beneficiario.toLowerCase().startsWith("o ") ? "" : "o "}${seguro.beneficiario}", que é o credor. A destinação ao credor é compatível com a natureza prestamista; não demonstra irregularidade por si.`);
   }
 
   // SEG5: remuneração do estipulante.
   if (seguro.pro_labore_sobre_premio > 0.2) {
-    add("SEG5", "MÉDIA", "Pró-labore elevado sobre o prêmio", `O pró-labore declarado é ${seguro.pro_labore}, ${pct(seguro.pro_labore_sobre_premio)} do prêmio de ${seguro.premio}. Quase metade do valor pago pelo consumidor volta como remuneração para quem intermediou a venda.`.replace("Quase metade", seguro.pro_labore_sobre_premio >= 0.4 ? "Quase metade" : "Parte relevante"));
+    add("SEG5", "INFO", "Pró-labore declarado sobre o prêmio", `O pró-labore declarado é ${seguro.pro_labore}, ${pct(seguro.pro_labore_sobre_premio)} do prêmio de ${seguro.premio}. Quase metade do valor pago pelo consumidor volta como remuneração para quem intermediou a venda.`.replace("Quase metade", seguro.pro_labore_sobre_premio >= 0.4 ? "Quase metade" : "Parte relevante"));
   }
 
   // SEG6: peso do prêmio sobre o valor liberado.
   if (seguro.premio_sobre_liberado > 0.05) {
-    add("SEG6", "MÉDIA", "Prêmio do seguro elevado em relação ao valor liberado", `O prêmio de ${seguro.premio} equivale a ${pct(seguro.premio_sobre_liberado, 2)} do valor liberado (${contrato.valor_liberado}) e foi financiado junto com o empréstimo, com juros.`);
+    add("SEG6", "INFO", "Relação entre prêmio e valor liberado", `O prêmio de ${seguro.premio} equivale a ${pct(seguro.premio_sobre_liberado, 2)} do valor liberado (${contrato.valor_liberado}) na proposta examinada.${/financiado/i.test(seguro.forma_pagamento || "") ? " A forma de pagamento da proposta é financiada." : " O modo de pagamento deve ser conferido no instrumento."}`);
   }
 
   // SEG7: prêmio da proposta contra o seguro da planilha do contrato.

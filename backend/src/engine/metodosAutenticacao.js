@@ -233,7 +233,6 @@ export function extrairMetodosDescritos(text, opcoes = {}) {
     if (!FLUXO.test(texto)) continue;
 
     for (const entrada of CATALOGO) {
-      if (entrada.codigo === "BIOMETRIA" && biometriaRegistradaComoEvento) continue;
       // Um achado por método. O primeiro segmento que o sustenta é a âncora.
       if (achados.has(entrada.codigo)) continue;
 
