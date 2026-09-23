@@ -100,6 +100,28 @@ async function geocodeByCep(cep) {
   const hasStreet = Boolean(d.address_name || d.district);
   const displayParts = [d.address, d.district, d.city, d.state].filter(Boolean);
 
+  // CEP genérico de município: a AwesomeAPI devolve o centroide da área do
+  // município, que num município grande do interior fica a dezenas de km da
+  // sede (Manaquiri/AM: 55 km). A sede é a referência menos ruim, e o Nominatim
+  // devolve o nó do povoado quando se busca pelo nome.
+  if (!hasStreet && d.city && d.state) {
+    const sede = await geocodeMunicipalSeat(d.city, d.state).catch(() => null);
+    if (sede) {
+      return {
+        lat: sede.lat,
+        lon: sede.lon,
+        display: `${d.city}, ${d.state} (sede do município)`,
+        precision: "city",
+        precisionNote: "sede do município (CEP genérico, sem logradouro)",
+        source: "awesomeapi-cep+nominatim",
+        matchedCity: d.city,
+        matchedUf: d.state,
+        cityMatch: true,
+        query: `CEP ${cep}`,
+      };
+    }
+  }
+
   return {
     lat,
     lon,
@@ -134,6 +156,22 @@ function nominatimPrecision(item) {
 function nominatimCity(item) {
   const a = item.address || {};
   return a.city || a.town || a.village || a.municipality || a.county || null;
+}
+
+/**
+ * Sede (povoado) do município pelo nome, preferindo o nó de lugar ao limite
+ * administrativo, cujo ponto é o centroide da área.
+ */
+async function geocodeMunicipalSeat(city, uf) {
+  const url = buildSearchUrl(`${city}, ${uf}, Brasil`, { addressdetails: 1, countrycodes: "br", limit: 5 });
+  const results = await fetchJson(url);
+  if (!Array.isArray(results) || !results.length) return null;
+  const doMunicipio = results.filter((item) => sameCity(nominatimCity(item), city));
+  const chosen = doMunicipio.find((item) => item.class === "place") || doMunicipio[0] || null;
+  if (!chosen) return null;
+  const lat = parseFloat(chosen.lat);
+  const lon = parseFloat(chosen.lon);
+  return Number.isFinite(lat) && Number.isFinite(lon) ? { lat, lon, display: chosen.display_name } : null;
 }
 
 async function geocodeByNominatim(rawQuery) {

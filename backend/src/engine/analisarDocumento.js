@@ -4,6 +4,8 @@ import { applySourceProvenance, inspectDocumentEligibility } from "./documentEli
 import { separarCarimboProcessual } from "./carimboProcessual.js";
 import { analisarBiometria } from "./biometria.js";
 import { analisarClausulasAdesao } from "./clausulasAdesao.js";
+import { avaliarDatasDoArquivo, avisoAutorMetadados } from "./metadadosDatas.js";
+import { analisarDispositivo } from "./dispositivo.js";
 import {
   humanYearsMonthsFromDays, parseFormattedPdfDate, parsePtDate, parsePtDateTime, plural, stripDiacritics,
 } from "./format.js";
@@ -175,11 +177,49 @@ export async function analisarDocumento({
     fallback.assinatura.certificadora_ac = sig.signatario_dn?.match(/OU=([^,]*Autoridade Certificadora[^,]*)/)?.[1] || fallback.assinatura.certificadora_ac;
   }
 
+  // Datas internas confrontadas entre si e com o instante do aceite (INT3, INT4),
+  // e linhagem de template do arquivo. Ver metadadosDatas.js.
+  const adicionarAchado = (achado) => {
+    if (!achado || fallback.achados_irregularidade.some((issue) => issue.codigo === achado.codigo)) return;
+    fallback.achados_irregularidade.push(achado);
+  };
+  const datas = derivedSource
+    ? { achados: [], warnings: [], linhagemTemplate: false }
+    : avaliarDatasDoArquivo({
+      creationDate: metadata.creationDate,
+      modificationDate: metadata.modificationDate,
+      creator: metadata.creator,
+      producer: metadata.producer,
+      rotulosMsip: Boolean(metadata.rotulosMsip),
+      dataHoraAssinatura: fallback.assinatura?.data_hora_assinatura || null,
+      eventos: fallback.trilha_eventos?.eventos || [],
+      fusoTrilha: fallback.trilha_eventos?.fuso?.trilha || null,
+    });
+  for (const achado of datas.achados) adicionarAchado(achado);
+  for (const aviso of datas.warnings) if (!metadata.warnings.includes(aviso)) metadata.warnings.push(aviso);
+  metadata.linhagemTemplate = datas.linhagemTemplate;
+
   const metadataAuthor = stripDiacritics(metadata.author || "").toLowerCase();
   const clientName = stripDiacritics(fallback.cliente?.nome || "").toLowerCase();
   if (!derivedSource && metadataAuthor && clientName && !clientName.includes(metadataAuthor) && !metadataAuthor.includes(clientName)) {
-    metadata.warnings.push(`O autor declarado nos metadados (${metadata.author}) difere do nome do contratante extraído (${fallback.cliente.nome}). A divergência não comprova fraude, mas deve ser contextualizada.`);
+    metadata.warnings.push(avisoAutorMetadados({
+      author: metadata.author,
+      clientName: fallback.cliente.nome,
+      linhagemTemplate: datas.linhagemTemplate,
+      creator: metadata.creator,
+      producer: metadata.producer,
+      rotulosMsip: Boolean(metadata.rotulosMsip),
+    }));
   }
+
+  // Aparelho e navegador registrados no dossiê, como bloco próprio (§ 4.2).
+  fallback.dispositivo = analisarDispositivo({
+    flat: cleanedExtraction.text.replace(/\s+/g, " "),
+    ips: fallback.ips || [],
+    dataAto: fallback.assinatura?.data_hora_assinatura || fallback.trilha_eventos?.eventos?.at(-1)?.data_hora || fallback.contrato?.data_contrato || null,
+    fusoAto: fallback.trilha_eventos?.fuso?.trilha || null,
+  });
+  for (const achado of fallback.dispositivo?.achados || []) adicionarAchado(achado);
 
   // Exportação de sistema processual (PROJUDI, PJe): o arquivo é o que o
   // tribunal carimbou e devolveu, não uma reimpressão do banco. No dossiê C6 o

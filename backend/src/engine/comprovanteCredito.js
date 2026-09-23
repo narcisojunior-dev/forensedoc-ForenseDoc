@@ -100,8 +100,18 @@ export function avaliarComprovanteCredito({ texto, flat, segmentacao, contrato =
     divergencias.push(`valor comprovado ${centsToMoney(comprovadoCents)} contra liberado ${contrato.valor_liberado}`);
   }
   const digitos = (v) => String(v || "").replace(/\D/g, "");
+  // Crédito em favor de terceiro é o anel que mais decide o caso (Súmula 479
+  // do STJ, fortuito interno): sai como achado próprio, e não misturado com
+  // divergência de valor ou de conta.
   if (comprovante.cpf && cliente.cpf && digitos(comprovante.cpf) !== digitos(cliente.cpf)) {
-    divergencias.push("CPF do comprovante diferente do CPF do contratante");
+    achados.push({
+      codigo: "LIB3",
+      gravidade: "ALTA",
+      titulo: "Crédito registrado em favor de pessoa diversa do contratante",
+      texto: `O comprovante localizado${comprovante.pagina ? ` na pág. ${comprovante.pagina}` : ""} registra como destinatário do crédito${comprovante.valor ? ` (${comprovante.valor})` : ""} um documento de identificação diferente do que consta na qualificação do contratante. Segundo o próprio dossiê, o valor liberado não chegou à esfera do contratante. A titularidade da conta de destino e o destino posterior do valor são a diligência central do caso.`,
+      grau: "CONSTATADO",
+      ancora: { pagina: comprovante.pagina, trecho: "destinatário do comprovante" },
+    });
   }
   if (comprovante.conta && liberacao.conta && digitos(comprovante.conta) !== digitos(liberacao.conta)) {
     divergencias.push(`conta do comprovante (${comprovante.conta}) diferente da declarada (${liberacao.conta})`);
@@ -112,6 +122,8 @@ export function avaliarComprovanteCredito({ texto, flat, segmentacao, contrato =
       gravidade: "ALTA",
       titulo: "Comprovante de transferência diverge do instrumento",
       texto: `O comprovante localizado${comprovante.pagina ? ` na pág. ${comprovante.pagina}` : ""} não confere com a liberação declarada: ${divergencias.join("; ")}.`,
+      grau: "CONSTATADO",
+      ancora: { pagina: comprovante.pagina, trecho: divergencias[0] },
     });
   }
   return { liberacao, comprovante, achados };

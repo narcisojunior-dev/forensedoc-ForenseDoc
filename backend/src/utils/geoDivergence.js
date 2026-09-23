@@ -165,6 +165,27 @@ export function classifyDeclaredDivergence(km, { referenciaConfirmada = false } 
 }
 
 /**
+ * Veredito para referência residencial resolvida só em nível de município
+ * quando o ponto do ato cai nesse mesmo município. Substitui a régua de km:
+ * a distância até um centroide ou até a sede não mede a distância até a casa.
+ * Serve ao § 5.1 (IP) e ao § 5.2 (GPS declarado).
+ */
+export function naoAferidoMesmoMunicipio({ km = null, municipio = null, tipo = "gps" } = {}) {
+  const onde = municipio ? ` (${municipio})` : "";
+  return {
+    nivel: "nao_aferido",
+    rotulo: "MESMO MUNICÍPIO · DISTÂNCIA NÃO AFERIDA",
+    tom: "ok",
+    km: Number.isFinite(km) ? km : null,
+    mesmo_municipio: true,
+    sintese: tipo === "ip"
+      ? `A origem estimada da conexão e a residência de referência caem no mesmo município${onde}. A referência residencial foi resolvida apenas em nível de município, e o ponto adotado é um centroide ou a sede, não a casa do contratante; a distância em quilômetros até ele não mede nada e não é aferida. O confronto válido aqui é o de município, e ele coincide.`
+      : `O local declarado da assinatura e a residência de referência caem no mesmo município${onde}. A referência residencial foi resolvida apenas em nível de município, e o ponto adotado é um centroide ou a sede, não a casa do contratante; a distância em quilômetros até ele não mede nada e não é aferida. O confronto válido aqui é o de município, e ele coincide.`,
+    ressalva: "Para medir distância residencial, o operador precisa confirmar a coordenada da residência ou informar logradouro geocodificável.",
+  };
+}
+
+/**
  * Régua de distância suprimida pelo histórico do IP (motor pericial).
  *
  * Quando o RIPEstat mostra que o bloco mudou de detentor depois do ato, ou que

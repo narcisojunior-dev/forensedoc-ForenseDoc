@@ -19,6 +19,7 @@ import { generateJudicialQuesitos } from "../reports/quesitosTemplate.js";
 import { montarConfrontoGeografico } from "../utils/distancia.js";
 import { descreverIndisponibilidade } from "../utils/confrontoEnderecos.js";
 import { fichaBeneficioSeAplica } from "../engine/produto.js";
+import { GRAUS, DESCRICAO_GRAU, classificarGrauProcessual } from "../engine/grausConclusao.js";
 import { distanciaKm, distanciaSuspeita, formatarDistancia } from "../utils/distancia.js";
 import { haversineKm } from "../utils/geoUtils.js";
 import {
@@ -1084,9 +1085,11 @@ function sectionGeo(ctx, result, mapas = {}) {
   if (home && (home.precision === "city" || !home.precision)) {
     paragraph(
       ctx,
-      "Atenção: a coordenada da residência foi resolvida apenas em nível de cidade. As distâncias derivadas dela são aproximadas e não devem ser tratadas como medidas exatas sem confirmação da coordenada pelo operador.",
+      `Atenção: a coordenada da residência foi resolvida apenas em nível de município${home.precisionNote ? ` (${home.precisionNote})` : ""}. Ponto do ato que caia no mesmo município não recebe distância residencial: ela mediria a distância até um centroide ou até a sede, não até a casa. Fora do município, as distâncias são aproximadas e não devem ser tratadas como medidas exatas sem confirmação da coordenada pelo operador.`,
       { color: DANGER, size: 8.5 }
     );
+    const confrontoRef = result.confronto_geografico || montarConfrontoGeografico(result);
+    for (const nota of confrontoRef.notas || []) paragraph(ctx, nota, { color: MUTED, size: 8.5 });
   }
   if (!home && !result.home?.alerta) {
     paragraph(
@@ -1122,8 +1125,11 @@ function sectionGeo(ctx, result, mapas = {}) {
     const d = ipRef.divergenciaResidencia;
     if (d) {
       reserve(ctx, 105); // mesmo motivo do § 5.2: veredito e síntese juntos
-      badge(ctx, "Distância entre a origem do IP e a residência", `${d.km.toFixed(2)} km · ${d.rotulo}`, d.tom === "ok");
+      // Referência em nível de município e IP no mesmo município: sem número
+      // de km no selo, porque ele mediria a distância até um centroide.
+      badge(ctx, "Distância entre a origem do IP e a residência", d.nivel === "nao_aferido" ? d.rotulo : `${d.km.toFixed(2)} km · ${d.rotulo}`, d.tom === "ok");
       paragraph(ctx, d.sintese, { size: 9, color: d.tom === "danger" ? DANGER : INK });
+      if (d.nivel === "nao_aferido" && d.ressalva) paragraph(ctx, d.ressalva, { color: MUTED, size: 8.5 });
     } else if (!home) {
       paragraph(ctx, "Distância não calculada: falta a coordenada de referência.", { color: MUTED, size: 8.5 });
     }
@@ -1174,8 +1180,8 @@ function sectionGeo(ctx, result, mapas = {}) {
       badge(
         ctx,
         "Distância entre o local declarado e a residência",
-        `${declarado.km.toFixed(2)} km · ${declarado.rotulo}`,
-        declarado.nivel === "compativel"
+        declarado.nivel === "nao_aferido" ? declarado.rotulo : `${declarado.km.toFixed(2)} km · ${declarado.rotulo}`,
+        declarado.nivel === "compativel" || declarado.nivel === "nao_aferido"
       );
       paragraph(ctx, declarado.sintese, { size: 9 });
       if (declarado.ressalva) paragraph(ctx, declarado.ressalva, { color: MUTED, size: 8.5 });
@@ -1330,6 +1336,12 @@ function sectionIpTrace(ctx, result) {
       else if (ip.rdap.owner) field(ctx, "   Titular do bloco (RDAP)", ip.rdap.owner);
       if (ip.rdap.cidr) field(ctx, "   Bloco / Faixa CIDR alocada", ip.rdap.cidr);
     }
+    if (ip.faixa) {
+      field(ctx, "   Natureza da rede", `${ip.faixa.rotulo} (${ip.faixa.motivo})`);
+      if (ip.faixa.alerta) {
+        paragraph(ctx, "Provedor de hospedagem, nuvem ou VPN não é rede de acesso residencial ou móvel. Conexão dessa natureza na trilha de assinatura não parte do aparelho de um consumidor em rede comum e deve ser explicada pelos registros da plataforma.", { color: DANGER, size: 8.5 });
+      }
+    }
 
     if (ip.parsedUserAgent) {
       const ua = ip.parsedUserAgent;
@@ -1434,6 +1446,17 @@ function sectionIrregularities(ctx, extracted, projecao = null) {
 
   // Motor pericial v2: achado estruturado com código e gravidade.
   if (achados.length) {
+    // Cada achado diz o que o laudo pode afirmar sobre ele (engine/grausConclusao.js).
+    const grauDe = (a) => a.grau || classificarGrauProcessual(a.codigo, a.gravidade);
+    paragraph(
+      ctx,
+      `Cada achado traz o seu grau. ${Object.entries(GRAUS).map(([chave, rotulo]) => `${rotulo}: ${DESCRICAO_GRAU[chave]}`).join(" ")} Quando há âncora, ela indica a página ou o campo do arquivo de onde o achado foi lido.`,
+      { color: MUTED, size: 8.5 }
+    );
+    const contagem = achados.reduce((acc, a) => { const g = grauDe(a); acc[g] = (acc[g] || 0) + 1; return acc; }, {});
+    field(ctx, "Constatados no arquivo", contagem[GRAUS.CONSTATADO] || 0);
+    field(ctx, "Não verificáveis pelo arquivo (lacunas do banco)", contagem[GRAUS.NAO_VERIFICAVEL] || 0);
+    field(ctx, "Indícios", contagem[GRAUS.INDICIO] || 0);
     for (const [grupo, titulo] of GRUPOS_ACHADOS) {
       const itens = achados.filter((a) => issueBucket(a) === grupo);
       if (!itens.length) continue;
@@ -1447,6 +1470,15 @@ function sectionIrregularities(ctx, extracted, projecao = null) {
           .font("Helvetica-Bold")
           .fillColor(grave ? DANGER : INK)
           .text(`${achado.codigo} · ${achado.gravidade || ""} · ${achado.titulo}`, MARGIN, doc.y, { width: contentWidth });
+        const grau = grauDe(achado);
+        const ancora = achado.ancora
+          ? [achado.ancora.pagina ? `pág. ${achado.ancora.pagina}` : null, achado.ancora.trecho ? `«${String(achado.ancora.trecho).slice(0, 140)}»` : null].filter(Boolean).join(", ")
+          : null;
+        doc
+          .fontSize(8.5)
+          .font("Helvetica-Oblique")
+          .fillColor(grau === GRAUS.CONSTATADO ? DANGER : MUTED)
+          .text(`Grau: ${grau}${ancora ? ` · Âncora: ${ancora}` : ""}`, MARGIN, doc.y + 1, { width: contentWidth });
         if (achado.texto) paragraph(ctx, achado.texto, { size: 9 });
         else doc.moveDown(0.3);
       }
@@ -1657,7 +1689,7 @@ function sectionImages(ctx, extracted) {
   });
   paragraph(
     ctx,
-    "Auditoria automática com Poppler/pdfimages. O objetivo é verificar se o PDF contém fotos/selfies extraíveis, qual a resolução real dessas imagens e se alguma prova visual foi reutilizada byte a byte dentro do mesmo documento.",
+    `Auditoria automática dos objetos de imagem do arquivo${img?.ferramenta ? ` (${img.ferramenta})` : ""}. O objetivo é verificar se o PDF contém fotos/selfies extraíveis, qual a resolução real dessas imagens e se alguma prova visual foi reutilizada byte a byte dentro do mesmo documento.`,
     { color: MUTED, size: 8.5 }
   );
 
@@ -1672,7 +1704,8 @@ function sectionImages(ctx, extracted) {
     field(ctx, "Imagens listadas", img.total ?? 0);
     field(ctx, "Arquivos extraídos", img.extraidas ?? 0);
     field(ctx, "Grupos de imagens idênticas (hashes repetidos)", img.grupos_repetidos?.length ?? 0);
-    field(ctx, "Ferramenta", img.disponivel ? "pdfimages" : "indisponível");
+    field(ctx, "Ferramenta", img.disponivel ? (img.ferramenta || "pdfimages") : "indisponível");
+    if (img.disponivel && img.observacao && /interno/i.test(img.observacao)) paragraph(ctx, img.observacao, { color: MUTED, size: 8 });
     field(ctx, "Fotografia / biometria provável", lista.filter((i) => i.biometricaProvavel).length);
     field(ctx, "Imagens documentais", lista.filter((i) => i.classificacao === "imagem documental").length);
   }
@@ -1747,6 +1780,20 @@ function sectionImages(ctx, extracted) {
           paragraph(ctx, b.ela.achado.texto, { color: MUTED, size: 8.5 });
         }
       }
+    }
+  }
+
+  // Reúso entre dossiês do mesmo escritório (services/imageReuseService.js).
+  const reuso = extracted.reuso_imagens;
+  if (reuso && reuso.hashes_conferidos > 0) {
+    subheading(ctx, "Confronto com outros dossiês analisados");
+    if (reuso.ocorrencias?.length) {
+      for (const o of reuso.ocorrencias) {
+        field(ctx, `   ${o.hash.slice(0, 12)}…`, `${o.reportId || o.analysisId}${o.contrato ? ` · contrato ${o.contrato}` : ""}${o.createdAt ? ` · ${new Date(o.createdAt).toLocaleDateString("pt-BR")}` : ""}`);
+      }
+      paragraph(ctx, "A mesma fotografia biométrica, byte a byte, já constava de outro dossiê analisado. Duas contratações distintas não produzem a mesma captura. Ver IMG6 no § 6.", { color: DANGER, size: 8.5 });
+    } else {
+      paragraph(ctx, `${reuso.hashes_conferidos === 1 ? "A fotografia biométrica deste arquivo não consta" : `As ${reuso.hashes_conferidos} fotografias biométricas deste arquivo não constam`} de nenhum outro dossiê analisado por este escritório até a data do laudo.${reuso.erro ? " A conferência não pôde ser concluída nesta emissão." : ""}`, { color: MUTED, size: 8.5 });
     }
   }
 
@@ -1864,6 +1911,19 @@ function sectionContractingTrail(ctx, extracted, result = {}) {
   field(ctx, "Forma de aceite", a.forma_aceite);
   field(ctx, "Telefone do aceite", a.telefone_aceite);
   field(ctx, "Dispositivo", a.dispositivo?.resumo);
+  // Aparelho e navegador registrados no dossiê (engine/dispositivo.js). O
+  // modelo é pergunta direta para o cliente; a versão do navegador, para o
+  // perito.
+  const d = extracted.dispositivo;
+  if (d) {
+    field(ctx, "Aparelho registrado", d.modelo || d.modelo_nota || "modelo não declarado");
+    field(ctx, "Sistema e navegador", [d.sistema && `${d.sistema}${d.versao_sistema ? ` ${d.versao_sistema}` : ""}`, d.navegador && `${d.navegador}${d.versao_navegador ? ` ${d.versao_navegador}` : ""}`, d.webview_provavel ? "WebView provável" : null].filter(Boolean).join(" · ") || null);
+    field(ctx, "Identificador do aparelho", d.identificador, { mono: true });
+    if (d.defasagem_navegador?.meses !== null && d.defasagem_navegador?.meses !== undefined) {
+      field(ctx, "Versão do navegador na data do ato", `${d.defasagem_navegador.versao} registrada; cerca de ${d.defasagem_navegador.esperado} esperada (${d.defasagem_navegador.meses} meses de diferença)`);
+    }
+    if (d.user_agent) field(ctx, "User-Agent registrado", d.user_agent);
+  }
   field(ctx, "Código de autenticação declarado", a.codigo_autenticacao_declarado, { mono: true });
   if (a.plataforma_nota) paragraph(ctx, a.plataforma_nota, { size: 9 });
   if (a.assinatura_manual_textual) paragraph(ctx, a.assinatura_manual_textual, { size: 9 });

@@ -234,12 +234,20 @@ export function reportIssues(extracted = {}, projecao = null) {
       grau: f.grau || classificarGrauProcessual(f.key, f.severity),
       titulo: cleanIssueText(f.title || "Achado técnico").replace(/\.+$/, ""),
       texto: cleanIssueText(f.text || ""),
+      ...(f.ancora ? { ancora: f.ancora } : {}),
     })));
   }
   const structured = Array.isArray(extracted.achados_irregularidade) ? extracted.achados_irregularidade : [];
   const legacy = structured.length ? [] : (extracted.evidencias_irregularidade || []);
   const seen = new Set();
-  const issues = [...structured, ...legacy].map(normalizeIssue).filter((issue) => {
+  const issues = [...structured, ...legacy].map((raw) => {
+    const issue = normalizeIssue(raw);
+    if (raw && typeof raw === "object") {
+      if (raw.grau) issue.grau = raw.grau;
+      if (raw.ancora) issue.ancora = raw.ancora;
+    }
+    return issue;
+  }).filter((issue) => {
     if (achadoFinanceiro(issue.codigo)) return false;
     if (!issue.titulo && !issue.texto) return false;
     if (seen.has(issue.codigo)) return false;
