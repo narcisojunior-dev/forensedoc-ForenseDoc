@@ -1520,6 +1520,9 @@ export default function LaudoForense({ report }) {
                                         <Badge label={issue.gravidade} color={severityColor(issue.gravidade)} />
                                       </span>
                                     )}
+                                    {issue.ancora && (issue.ancora.pagina || issue.ancora.trecho) && (
+                                      <em className="issue-anchor"> Âncora: {[issue.ancora.pagina ? `pág. ${issue.ancora.pagina}` : null, issue.ancora.trecho ? `«${String(issue.ancora.trecho).slice(0, 140)}»` : null].filter(Boolean).join(", ")}</em>
+                                    )}
                                   </span>
                                 </div>
                               ))}

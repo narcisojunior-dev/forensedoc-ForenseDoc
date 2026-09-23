@@ -49,6 +49,11 @@ A partir do upload de um contrato em PDF e do endereço residencial do cliente, 
 9. **Fundamentação normativa** aplicável, amarrada aos achados.
 10. **Auditoria de metadados internos**: versão PDF, autor, produtor, datas, páginas, formulários, criptografia, assinatura digital incorporada e alertas de consistência.
 11. **Exportação em PDF** do laudo, com paginação protegida e folha exclusiva para o conjunto geográfico.
+12. **Datas internas confrontadas** (22/09/2026): ModDate anterior ao CreationDate (INT3), PDF gerado no instante do aceite ou da biometria (INT4), linhagem de template de editor de texto.
+13. **Inventário de imagens sem Poppler**: objetos de imagem lidos do próprio arquivo, com hash do fluxo bruto e EXIF, quando o `pdfimages` falta; e **reúso da mesma fotografia** em outro dossiê do mesmo escritório (IMG6).
+14. **Aparelho, navegador e faixa do IP**: modelo e user agent no § 4.2, navegador defasado para a data do ato (DEV2), natureza da rede (operadora, provedor regional, hospedagem, VPN) no § 5.3.
+15. **Grau e âncora de cada achado** no § 6: constatado no arquivo, não verificável pelo arquivo, indício; página e trecho de origem. Ver `docs/pericia-seis-camadas-2026-09-22.md`.
+16. **Referência residencial em nível de município**: CEP genérico resolve na sede do município, e ponto do ato no mesmo município da referência não recebe distância residencial (o confronto passa a ser de município).
 
 ---
 

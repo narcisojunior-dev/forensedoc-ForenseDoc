@@ -14,6 +14,7 @@ import { analisarDocumento } from "../engine/analisarDocumento.js";
 import { verificarCoerencia, coerenciaBloqueante } from "../engine/coerenciaLaudo.js";
 import { montarConfrontoGeografico } from "../utils/distancia.js";
 import { buildSummaryForResult } from "../services/analysisRecompute.js";
+import { localizarReusoDeImagem, montarAchadoReuso } from "../services/imageReuseService.js";
 
 function fileHashes(buffer) {
   return {
@@ -76,6 +77,23 @@ export async function processAnalysis(job) {
       rawMetadata: metadata,
     });
     const fallback = analise.extracted;
+
+    // Mesma fotografia biométrica em outro dossiê do mesmo escritório (IMG6).
+    // Consulta ao banco em try/catch próprio: falha aqui não pode derrubar a
+    // análise nem estornar o crédito.
+    try {
+      const hashes = (fallback?.imagens_pdf?.imagens || []).filter((i) => i.biometricaProvavel && i.sha256).map((i) => i.sha256);
+      const ocorrencias = hashes.length ? await localizarReusoDeImagem({ tenantId, analysisId, hashes }) : [];
+      fallback.reuso_imagens = { hashes_conferidos: hashes.length, ocorrencias };
+      const achadoReuso = montarAchadoReuso(ocorrencias, { contratoAtual: fallback?.contrato?.numero || null });
+      if (achadoReuso && !(fallback.achados_irregularidade || []).some((a) => a.codigo === "IMG6")) {
+        fallback.achados_irregularidade = [...(fallback.achados_irregularidade || []), achadoReuso];
+        fallback.evidencias_irregularidade = fallback.achados_irregularidade.map((issue) => `${issue.titulo}. ${issue.texto}`);
+      }
+    } catch (reusoError) {
+      console.error(`[AnalysisWorker] Conferência de reúso de imagem falhou para ${analysisId}:`, reusoError.message);
+      fallback.reuso_imagens = { hashes_conferidos: 0, ocorrencias: [], erro: reusoError.message };
+    }
 
     // Confronto geográfico (§5). Depende de serviços externos instáveis
     // (Nominatim, ipapi.co), então roda em try/catch PRÓPRIO: se a geo falhar,

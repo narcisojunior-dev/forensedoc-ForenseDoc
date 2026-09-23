@@ -230,19 +230,23 @@ export function buildIrregularitySummary(report = {}) {
   const diligenceKeys = new Set();
 
   const addCheck = (domain, key, status, detail = "") => checks.push({ domain, key, status, detail });
-  const addFinding = (severity, key, title, text, grau = null) => {
+  // O quinto argumento aceita o grau (string) ou { grau, ancora }: grau e
+  // âncora viajam com o achado até o § 6 (ver grausConclusao.js).
+  const addFinding = (severity, key, title, text, extra = {}) => {
     const identidade = JSON.stringify([key, title, String(text || "").replace(/\s+/g, " ").trim()]);
     if (issueKeys.has(identidade)) return;
     issueKeys.add(identidade);
     // O texto entra integral. Quem resume é a página do sumário, em
     // `displayFindings`, e o corpo do laudo publica o texto completo.
+    const opcoes = typeof extra === "string" ? { grau: extra } : (extra || {});
     const entry = {
       severity,
       key,
       title,
       text: String(text || "").replace(/\s+/g, " ").trim(),
-      grau: grau || classificarGrauProcessual(key, severity),
+      grau: opcoes.grau || classificarGrauProcessual(key, severity),
     };
+    if (opcoes.ancora) entry.ancora = opcoes.ancora;
     if (severity === "FAVORÁVEL") favorable.push(entry); else findings.push(entry);
   };
   const addDiligence = (key, title, text) => {
@@ -425,6 +429,10 @@ export function buildIrregularitySummary(report = {}) {
     addCheck("F", "gps-residencia", "INDETERMINADO", "Confronto recusado: endereço informado conflita com o do instrumento.");
   } else if (confronto.status === STATUS_CONFRONTO.INDISPONIVEL_NAO_INFORMADO) {
     addCheck("F", "gps-residencia", "INDETERMINADO", "Confronto indisponível: instrumento registra o endereço como não informado.");
+  } else if (confronto.status === STATUS_CONFRONTO.REFERENCIA_MUNICIPAL) {
+    // Referência em nível de município e pontos do ato no mesmo município: a
+    // conferência que vale é a de município (abaixo), não a de quilômetros.
+    addCheck("F", "gps-residencia", "INDETERMINADO", "Referência residencial em nível de município; os pontos do ato caem no mesmo município e a distância até o centroide não é aferida.");
   } else {
     addCheck("F", "gps-residencia", "INDETERMINADO", "Distância residencial indisponível.");
   }
@@ -523,9 +531,31 @@ export function buildIrregularitySummary(report = {}) {
     const mergedText = `${issue.titulo}. ${issue.texto}`;
     if (/metadados descritivos insuficientes/i.test(mergedText)) continue;
     if (/^(Ausência de endereço IP|Ausência de geolocalização GPS|Trilha de auditoria não identificada)/i.test(mergedText)) continue;
-    addFinding(issue.gravidade === "MÉDIO" ? "MÉDIA" : issue.gravidade, issue.codigo, `${issue.titulo}.`, issue.texto);
+    addFinding(issue.gravidade === "MÉDIO" ? "MÉDIA" : issue.gravidade, issue.codigo, `${issue.titulo}.`, issue.texto, { grau: rawIssue?.grau, ancora: rawIssue?.ancora });
   }
   addCheck("H", "fundamentacao", "CONFERIDO", "Achados vinculados ao dever de informação, autenticidade, integridade e proteção de dados.");
+
+  // Natureza da rede do endereço de acesso (utils/ipFaixa.js): hospedagem,
+  // nuvem ou VPN na trilha de assinatura não é conexão de aparelho de consumidor.
+  for (const ip of report.ipAnalysis || []) {
+    if (!ip?.faixa?.alerta) continue;
+    const papel = classifyIpRole(ip, report);
+    if (papel === "bank" || papel === "cdn") continue;
+    addFinding(
+      "ALTA",
+      "ip-infraestrutura",
+      `Conexão de ${ip.faixa.rotulo} na trilha de contratação.`,
+      `O endereço ${ip.endereco}${ip.rotulo ? ` (registrado como "${ip.rotulo}")` : ""} pertence a bloco classificado como ${ip.faixa.rotulo}: ${ip.faixa.motivo}. Rede de hospedagem, nuvem ou VPN não é rede de acesso residencial ou móvel. A classificação é feita pelo nome do titular do bloco e deve ser confirmada com o registro do bloco na data do ato e com os logs da plataforma.`,
+      { grau: "CONSTATADO", ancora: { pagina: null, trecho: `endereço ${ip.endereco}` } }
+    );
+    addCheck("F", "ip-faixa", "ALERTA", `${ip.endereco}: ${ip.faixa.rotulo}.`);
+    break;
+  }
+  // Origem da coordenada declarada: o PDF não distingue GPS do aparelho, IP e
+  // cadastro, e a distância só prova presença se a fonte for o aparelho.
+  if (report.contractGeo) {
+    addDiligence("origem-coordenada", "Origem da coordenada declarada", "Exigir da plataforma a origem da coordenada registrada no ato (GPS do aparelho, geolocalização por IP ou dado cadastral), a precisão informada pelo sistema e o consentimento de localização do aparelho na sessão. Coordenada de cadastro ou de IP não demonstra presença física do contratante.");
+  }
 
   if (accessIp) {
     addDiligence("ip-holder", "Identificação do titular da conexão", `Requisitar à operadora os dados da conexão vinculada ao IP ${accessIp.endereco}${accessIp.data_hora ? ` em ${accessIp.data_hora}` : signature.data_hora_assinatura ? ` na data/hora ${signature.data_hora_assinatura}` : " no intervalo registrado"}, mediante autorização judicial.`);

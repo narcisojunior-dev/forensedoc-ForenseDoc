@@ -45,6 +45,7 @@ export const STATUS_CONFRONTO = {
   INDISPONIVEL_NAO_INFORMADO: "INDISPONIVEL_NAO_INFORMADO",
   SEM_REFERENCIA: "SEM_REFERENCIA",
   SEM_PONTOS: "SEM_PONTOS",
+  REFERENCIA_MUNICIPAL: "REFERENCIA_MUNICIPAL",
 };
 
 const MOTIVOS = {
@@ -52,7 +53,18 @@ const MOTIVOS = {
   INDISPONIVEL_NAO_INFORMADO: "confronto de residência indisponível: o instrumento registra o endereço do contratante como não informado",
   SEM_REFERENCIA: "sem coordenada de referência residencial",
   SEM_PONTOS: "sem coordenada de assinatura nem de IP para confrontar com a residência",
+  REFERENCIA_MUNICIPAL: "referência residencial resolvida apenas em nível de município, e os pontos do ato caem nesse mesmo município: a distância até o centroide não mede nada e não é aferida",
 };
+
+/** Nomes de município iguais, sem acento, caixa ou espaço extra. (Cópia de backend/src/utils/distancia.js.) */
+export function mesmoMunicipio(a, b) {
+  const norm = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+  return Boolean(a && b && norm(a) === norm(b));
+}
+
+export function referenciaMunicipal(home = {}) {
+  return ["city", "municipio"].includes(String(home?.geo?.precision || ""));
+}
 
 /**
  * Estado canônico do confronto com a residência.
@@ -65,11 +77,26 @@ const MOTIVOS = {
 export function montarConfrontoGeografico(result = {}) {
   const home = result.home || {};
   const ips = result.ipAnalysis || [];
-  const gps = distanciaKm(result.contractGeo?.distance);
   const gpsInstrumento = distanciaKm(result.contractGeo?.distanceToInstrumento);
-  const ipsResidencia = ips.map((ip) => ({ endereco: ip.endereco || null, km: distanciaKm(ip.distance) }));
   const ipsInstrumento = ips.map((ip) => ({ endereco: ip.endereco || null, km: distanciaKm(ip.distanceToInstrumento) }));
   const divergenciaCadastral = distanciaKm(home.distancia_divergencia_cadastral);
+
+  const municipal = referenciaMunicipal(home);
+  const cidadeReferencia = home.geo?.matchedCity || home.instrumento?.cidade || null;
+  const notas = [];
+  let gps = distanciaKm(result.contractGeo?.distance);
+  if (municipal && gps !== null && mesmoMunicipio(result.contractGeo?.municipio, cidadeReferencia)) {
+    notas.push(`GPS da assinatura no mesmo município da referência (${cidadeReferencia}); referência resolvida em nível de município, distância não aferida`);
+    gps = null;
+  }
+  const ipsResidencia = ips.map((ip) => {
+    const km = distanciaKm(ip.distance);
+    if (municipal && km !== null && mesmoMunicipio(ip.geo?.city, cidadeReferencia)) {
+      notas.push(`IP ${ip.endereco || ""} localizado no mesmo município da referência (${cidadeReferencia}); distância não aferida`);
+      return { endereco: ip.endereco || null, km: null, mesmo_municipio: true };
+    }
+    return { endereco: ip.endereco || null, km };
+  });
 
   let status;
   if (home.estado_confronto === "RECUSADO_CONFLITO" || home.estado_confronto === "INDISPONIVEL_NAO_INFORMADO") {
@@ -77,7 +104,7 @@ export function montarConfrontoGeografico(result = {}) {
   } else if (!home.geo || !Number.isFinite(home.geo.lat) || !Number.isFinite(home.geo.lon)) {
     status = STATUS_CONFRONTO.SEM_REFERENCIA;
   } else if (gps === null && ipsResidencia.every((ip) => ip.km === null)) {
-    status = STATUS_CONFRONTO.SEM_PONTOS;
+    status = notas.length ? STATUS_CONFRONTO.REFERENCIA_MUNICIPAL : STATUS_CONFRONTO.SEM_PONTOS;
   } else {
     status = STATUS_CONFRONTO.CALCULADO;
   }
@@ -86,7 +113,9 @@ export function montarConfrontoGeografico(result = {}) {
 
   return {
     status,
-    motivo: calculado ? null : home.alerta || MOTIVOS[status],
+    referencia_municipal: municipal,
+    notas,
+    motivo: calculado ? null : (status === STATUS_CONFRONTO.REFERENCIA_MUNICIPAL ? MOTIVOS[status] : home.alerta || MOTIVOS[status]),
     distancias: {
       gps_residencia: calculado ? gps : null,
       gps_instrumento: gpsInstrumento,

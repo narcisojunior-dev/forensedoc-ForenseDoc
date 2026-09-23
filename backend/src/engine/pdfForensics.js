@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { cleanMetadataText, formatPdfDate, parseFormattedPdfDate, plural } from "./format.js";
 import { analisarELA } from "./elaAnalysis.js";
+import { inventarioImagensInterno } from "./pdfImagensInterno.js";
 
 const execFileAsync = promisify(execFile);
 const PDFSIG_CANDIDATES = [process.env.PDFSIG_PATH, "pdfsig"].filter(Boolean);
@@ -402,18 +403,93 @@ export function buildImageFindings(images, repeatedGroups, extractedCount, avail
   return findings;
 }
 
-export async function inspectPdfImages(pdfBuffer, rawText = "") {
-  const pdfimages = await findPdfimages();
-  if (!pdfimages) {
+/** Grupos de imagens com o mesmo SHA-256, no formato que o § 4.4 e o IMG2 leem. */
+function agruparRepetidas(images) {
+  const groups = new Map();
+  for (const image of images) {
+    if (!image.sha256) continue;
+    if (!groups.has(image.sha256)) groups.set(image.sha256, []);
+    groups.get(image.sha256).push(image);
+  }
+  return Array.from(groups.entries())
+    .filter(([, group]) => group.length > 1)
+    .map(([sha256, group]) => ({
+      sha256,
+      ocorrencias: group.length,
+      paginas: group.map((img) => img.page),
+      imagens: group.map((img) => ({
+        page: img.page,
+        num: img.num,
+        objectId: img.objectId,
+        width: img.width,
+        height: img.height,
+        size: img.size,
+        classificacao: img.classificacao,
+        biometricaProvavel: img.biometricaProvavel,
+      })),
+    }));
+}
+
+/**
+ * Inventário sem o Poppler: objetos de imagem lidos do próprio arquivo e
+ * páginas atribuídas pelo pdf.js. Mesmo formato de saída do caminho pdfimages,
+ * para que classificação, grupos repetidos e achados IMG não mudem. O laudo
+ * FD-20260920-538F54AACD saiu sem hash da única fotografia do dossiê porque o
+ * pdfimages faltava no ambiente; falha de ambiente não pode virar lacuna do
+ * laudo.
+ */
+export async function inspectPdfImagesInterno(pdfBuffer, rawText = "", motivo = "pdfimages não localizado no ambiente") {
+  let inventario;
+  try {
+    inventario = await inventarioImagensInterno(pdfBuffer);
+  } catch (e) {
     return {
       disponivel: false,
+      ferramenta: null,
       total: 0,
       imagens: [],
       grupos_repetidos: [],
       achados: buildImageFindings([], [], 0, false),
-      observacao: "pdfimages não localizado no ambiente.",
+      observacao: `${motivo}; o inventário interno também falhou (${e?.message || e}).`,
     };
   }
+  const images = inventario.imagens;
+  for (const image of images) {
+    image.classificacao = classifyEmbeddedImage(image);
+    image.biometricaProvavel = image.classificacao === "fotografia/biometria provável";
+    // Miniatura só da fotografia provável: é dado biométrico (LGPD, art. 11).
+    if (!image.biometricaProvavel) delete image.miniatura;
+    // ELA também no caminho sem Poppler: os bytes do JPEG estão na miniatura.
+    if (image.biometricaProvavel && image.formato === "JPEG" && image.miniatura) {
+      try {
+        const data = Buffer.from(String(image.miniatura).split(",")[1], "base64");
+        if (data.length > 1024) image.ela = await analisarELA(data);
+      } catch (e) {
+        image.ela = { disponivel: false, erro: e.message };
+      }
+    } else if (image.biometricaProvavel && image.formato === "PNG") {
+      image.ela = { disponivel: false, formato: "PNG", motivo: "Análise ELA não aplicável a imagens PNG (lossless)" };
+    }
+  }
+  const repeatedGroups = agruparRepetidas(images);
+  const biometryMentioned = /biometr|selfie|prova\s+de\s+vida|facial|vivacidade|liveness/i.test(rawText);
+  const extraidas = images.filter((i) => i.sha256).length;
+  return {
+    disponivel: true,
+    ferramenta: "leitor interno (objetos do PDF + pdf.js)",
+    total: images.length,
+    extraidas,
+    objetos_no_arquivo: inventario.objetos,
+    imagens: images,
+    grupos_repetidos: repeatedGroups,
+    achados: buildImageFindings(images, repeatedGroups, extraidas, true, { biometryMentioned }),
+    observacao: `${motivo}. ${inventario.observacao}`,
+  };
+}
+
+export async function inspectPdfImages(pdfBuffer, rawText = "") {
+  const pdfimages = await findPdfimages();
+  if (!pdfimages) return inspectPdfImagesInterno(pdfBuffer, rawText);
   const tempDir = await mkdtemp(join(tmpdir(), "forensedoc-images-"));
   try {
     const pdfPath = join(tempDir, "input.pdf");
@@ -424,9 +500,21 @@ export async function inspectPdfImages(pdfBuffer, rawText = "") {
       const list = await execFileAsync(pdfimages, ["-list", pdfPath], { maxBuffer: 1024 * 1024 * 20, timeout: 120000 });
       listOutput = list.stdout || "";
     } catch (e) {
+      // `findPdfimages` devolve "pdfimages" como candidato mesmo sem conferir o
+      // PATH. Sem esta guarda, binário ausente virava "nenhuma imagem listada"
+      // num dossiê cheio de fotos.
+      if (e?.code === "ENOENT" || e?.code === "EACCES") {
+        return inspectPdfImagesInterno(pdfBuffer, rawText, `pdfimages não pôde ser executado (${e.code})`);
+      }
       listOutput = e.stdout || "";
     }
     const images = parsePdfimagesList(listOutput);
+    if (!images.length) {
+      // Poppler não listou nada: antes de afirmar IMG1, o leitor interno confere
+      // se há objetos de imagem no arquivo.
+      const interno = await inspectPdfImagesInterno(pdfBuffer, rawText, "pdfimages não listou imagens");
+      if (interno.total) return interno;
+    }
     try {
       await execFileAsync(pdfimages, ["-all", pdfPath, prefix], { maxBuffer: 1024 * 1024 * 80, timeout: 120000 });
     } catch {
@@ -487,32 +575,11 @@ export async function inspectPdfImages(pdfBuffer, rawText = "") {
         };
       }
     }
-    const groups = new Map();
-    for (const image of images) {
-      if (!image.sha256) continue;
-      if (!groups.has(image.sha256)) groups.set(image.sha256, []);
-      groups.get(image.sha256).push(image);
-    }
-    const repeatedGroups = Array.from(groups.entries())
-      .filter(([, group]) => group.length > 1)
-      .map(([sha256, group]) => ({
-        sha256,
-        ocorrencias: group.length,
-        paginas: group.map((img) => img.page),
-        imagens: group.map((img) => ({
-          page: img.page,
-          num: img.num,
-          objectId: img.objectId,
-          width: img.width,
-          height: img.height,
-          size: img.size,
-          classificacao: img.classificacao,
-          biometricaProvavel: img.biometricaProvavel,
-        })),
-      }));
+    const repeatedGroups = agruparRepetidas(images);
     const biometryMentioned = /biometr|selfie|prova\s+de\s+vida|facial|vivacidade|liveness/i.test(rawText);
     return {
       disponivel: true,
+      ferramenta: "pdfimages (Poppler)",
       total: images.length,
       extraidas: extracted.length,
       imagens: images,
@@ -606,6 +673,10 @@ export async function extractPdfMetadata(pdfBuffer) {
       linearized: Boolean(info.IsLinearized),
       hasXfa: Boolean(info.IsXFAPresent),
       trailerFingerprint: cleanMetadataText(result.fingerprints?.[0]),
+      // Rótulos de classificação corporativa (Microsoft Information Protection)
+      // no dicionário de informações: o PDF herdou metadados de um documento de
+      // Office, e o campo Autor identifica o template, não o contratante.
+      rotulosMsip: pdfBuffer.includes(Buffer.from("/MSIP_Label_", "latin1")),
     };
     const digitalSignature = await inspectDigitalSignatures(pdfBuffer, baseMeta);
     const hasAcroForm = digitalSignature.catalog.acroform === "PRESENTE";

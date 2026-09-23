@@ -8,6 +8,9 @@ import { lookupRdapIp } from "./rdapService.js";
 import { parseUserAgentForensic } from "../utils/userAgentParser.js";
 import { ESTADO_CONFRONTO, avaliarConflitoReferencia, descreverEstadoConfronto } from "../utils/referenciaResidencial.js";
 import { montarConfrontoEnderecos } from "../utils/confrontoEnderecos.js";
+import { classificarFaixaIp } from "../utils/ipFaixa.js";
+import { mesmoMunicipio, referenciaMunicipal } from "../utils/distancia.js";
+import { naoAferidoMesmoMunicipio } from "../utils/geoDivergence.js";
 
 /**
  * Confronto geográfico do §5 do laudo (Módulo 4, Fase A).
@@ -83,6 +86,9 @@ export async function enrichGeography(extracted, homeAddress, homeCoord = null, 
       geo: historico?.suppressDistanceRisk && geo ? { ...geo, registro_na_data_nota: historico.note } : geo,
       historico,
       rdap,
+      // Natureza da rede (operadora, provedor regional, hospedagem, VPN), por
+      // nome do titular. Ninguém contrata consignado de dentro de um servidor.
+      faixa: classificarFaixaIp({ isp: geo?.isp || null, owner: rdap?.owner || null, asn: rdap?.asn || null }),
       parsedUserAgent: parsedUa,
       // Distingue "o documento não trazia" de "a consulta falhou" — num laudo,
       // as duas ausências têm significados diferentes.
@@ -219,6 +225,10 @@ export async function enrichGeography(extracted, homeAddress, homeCoord = null, 
   //      forjado ou assinatura por terceiro. (Geo por IP é de nível de operadora,
   //      então serve como indício de larga escala, não como coordenada exata.)
   const referenciaConfirmada = homeGeo?.precision === "manual";
+  // Referência só em nível de município: ponto do ato no mesmo município não
+  // recebe régua de km (ver utils/distancia.js, referenciaMunicipal).
+  const cidadeReferencia = homeGeo?.matchedCity || instrumento.cidade || null;
+  const mesmoMunicipioDaReferencia = (municipio) => referenciaMunicipal({ geo: homeGeo }) && mesmoMunicipio(municipio, cidadeReferencia);
   const ipAnalysis = ipResults.map((ip) => {
     let distance = null;
     let distanceToInstrumento = null;
@@ -237,10 +247,12 @@ export async function enrichGeography(extracted, homeAddress, homeCoord = null, 
       distance,
       distanceToInstrumento,
       distanceToSignature,
-      divergenciaResidencia: aplicarHistoricoDoIp(
-        describeIpDivergence({ km: distance, referenciaConfirmada, referenciaRotulo: homeSource }),
-        ip.historico
-      ),
+      divergenciaResidencia: distance !== null && mesmoMunicipioDaReferencia(ip.geo?.city)
+        ? naoAferidoMesmoMunicipio({ km: distance, municipio: ip.geo.city, tipo: "ip" })
+        : aplicarHistoricoDoIp(
+          describeIpDivergence({ km: distance, referenciaConfirmada, referenciaRotulo: homeSource }),
+          ip.historico
+        ),
       divergenciaInstrumento: aplicarHistoricoDoIp(
         describeIpDivergence({
           km: distanceToInstrumento,
@@ -355,7 +367,9 @@ export async function enrichGeography(extracted, homeAddress, homeCoord = null, 
           ...contractGeo,
           distance: contractToHomeKm,
           distanceToInstrumento: contractToInstrumentoKm,
-          divergencia: classifyDeclaredDivergence(contractToHomeKm, { referenciaConfirmada }),
+          divergencia: contractToHomeKm !== null && mesmoMunicipioDaReferencia(contractGeo.municipio)
+            ? naoAferidoMesmoMunicipio({ km: contractToHomeKm, municipio: contractGeo.municipio, tipo: "gps" })
+            : classifyDeclaredDivergence(contractToHomeKm, { referenciaConfirmada }),
         }
       : null,
     geoDeclaredPresent: !!(g && g.presente),
