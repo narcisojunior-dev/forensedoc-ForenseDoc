@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { cleanMetadataText, formatPdfDate, parseFormattedPdfDate, plural } from "./format.js";
+import { analisarELA } from "./elaAnalysis.js";
 
 const execFileAsync = promisify(execFile);
 const PDFSIG_CANDIDATES = [process.env.PDFSIG_PATH, "pdfsig"].filter(Boolean);
@@ -465,6 +466,25 @@ export async function inspectPdfImages(pdfBuffer, rawText = "") {
       image.jfif = jpeg ? data.includes(Buffer.from("JFIF\0", "latin1")) : false;
       if ((jpeg || png) && data.length <= 400 * 1024) {
         image.miniatura = `data:image/${jpeg ? "jpeg" : "png"};base64,${data.toString("base64")}`;
+      }
+      if (image.formato === "JPEG" && data.length > 1024) {
+        try {
+          image.ela = await analisarELA(data);
+        } catch (e) {
+          image.ela = { disponivel: false, erro: e.message };
+        }
+      } else if (image.formato === "PNG") {
+        image.ela = {
+          disponivel: false,
+          formato: "PNG",
+          motivo: "Análise ELA não aplicável a imagens PNG (lossless)",
+          achado: {
+            codigo: "ELA3",
+            gravidade: "INFO",
+            titulo: "Análise ELA não aplicável ao formato",
+            texto: "A imagem biométrica extraída está no formato PNG. A análise de nível de erro (ELA) baseia-se na quantização DCT do padrão JPEG, não sendo aplicável a formatos sem perdas (lossless).",
+          },
+        };
       }
     }
     const groups = new Map();

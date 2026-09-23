@@ -340,7 +340,7 @@ export function fundoParaBloco(ctx, altura) {
  * à esquerda. Em prosa justificada, as linhas curtas do placar abriam vãos
  * enormes entre as palavras.
  */
-export function achadoPlacar(ctx, { severidade, titulo, texto }) {
+export function achadoPlacar(ctx, { severidade, grau, titulo, texto }) {
   const { doc } = ctx;
   garantirCartao(ctx);
   const paleta = {
@@ -351,8 +351,18 @@ export function achadoPlacar(ctx, { severidade, titulo, texto }) {
     FAVORÁVEL: { fundo: COR.okFundo, tinta: COR.okTexto },
   }[String(severidade || "").toUpperCase()] || { fundo: "#eef3f5", tinta: COR.rotulo };
 
-  const larguraSelo = 54;
-  const larguraTexto = LARGURA_TEXTO - larguraSelo - 10;
+  const paletaGrau = {
+    CONSTATADO: { fundo: "#fee2e2", tinta: "#991b1b" },
+    "NÃO VERIFICÁVEL": { fundo: "#fef3c7", tinta: "#92400e" },
+    INDÍCIO: { fundo: "#e0f2fe", tinta: "#0369a1" },
+  }[String(grau || "").toUpperCase()] || null;
+
+  const temGrau = Boolean(paletaGrau);
+  const larguraSeloSev = temGrau ? 44 : 54;
+  const larguraSeloGrau = temGrau ? 84 : 0;
+  const espacoSelos = temGrau ? larguraSeloSev + 4 + larguraSeloGrau + 8 : larguraSeloSev + 10;
+  const larguraTexto = LARGURA_TEXTO - espacoSelos;
+
   doc.fontSize(8.2).font("Helvetica");
   const alturaTexto = doc.heightOfString(`${titulo} ${texto || ""}`.trim(), { width: larguraTexto, lineGap: 1.3 });
   const altura = Math.max(alturaTexto, 14) + 8;
@@ -362,9 +372,10 @@ export function achadoPlacar(ctx, { severidade, titulo, texto }) {
   const y = doc.y;
   fundoDoBloco(doc, altura);
 
+  // Selo 1: Severidade técnica
   doc.save();
   doc
-    .roundedRect(MARGEM_TEXTO, y + 1.5, larguraSelo, 12, 2)
+    .roundedRect(MARGEM_TEXTO, y + 1.5, larguraSeloSev, 12, 2)
     .fillColor(paleta.fundo)
     .fill();
   doc.restore();
@@ -373,12 +384,32 @@ export function achadoPlacar(ctx, { severidade, titulo, texto }) {
     .font("Helvetica-Bold")
     .fillColor(paleta.tinta)
     .text(String(severidade || "").toUpperCase(), MARGEM_TEXTO, y + 5, {
-      width: larguraSelo,
+      width: larguraSeloSev,
       align: "center",
       lineBreak: false,
     });
 
-  const x = MARGEM_TEXTO + larguraSelo + 10;
+  // Selo 2: Grau processual (se presente)
+  if (temGrau) {
+    const xGrau = MARGEM_TEXTO + larguraSeloSev + 4;
+    doc.save();
+    doc
+      .roundedRect(xGrau, y + 1.5, larguraSeloGrau, 12, 2)
+      .fillColor(paletaGrau.fundo)
+      .fill();
+    doc.restore();
+    doc
+      .fontSize(6.2)
+      .font("Helvetica-Bold")
+      .fillColor(paletaGrau.tinta)
+      .text(String(grau || "").toUpperCase(), xGrau, y + 5, {
+        width: larguraSeloGrau,
+        align: "center",
+        lineBreak: false,
+      });
+  }
+
+  const x = MARGEM_TEXTO + espacoSelos;
   doc.fontSize(8.2).font("Helvetica-Bold").fillColor(COR.texto);
   if (texto) {
     doc.text(`${titulo} `, x, y + 1, { width: larguraTexto, lineGap: 1.3, continued: true });

@@ -8,6 +8,7 @@ import {
 import SumarioIrregularidades from "./SumarioIrregularidades.jsx";
 import { distanciaKm } from "./distancia.js";
 import { fichaBeneficioSeAplica } from "./produto.js";
+import { contarPorGrau } from "./grausConclusao.js";
 
 /**
  * Laudo técnico pericial, portado do motor de geração.
@@ -505,6 +506,7 @@ export default function LaudoForense({ report }) {
                   ["Produto", report.extracted.contrato?.produto],
                   ["Modalidade", labelModalidade(report.extracted.contrato?.modalidade)],
                   ["Tipo de operação", report.extracted.contrato?.tipo_operacao],
+                  ["Via declarada da cédula/contrato", report.extracted.contrato?.via_declarada],
                   ["Operação portada", report.extracted.contrato?.operacao_portada === true ? "Sim" : report.extracted.contrato?.operacao_portada === false ? "Não" : null],
                   ["Empregador declarado", report.extracted.contrato?.empregador ? `${report.extracted.contrato.empregador.literal}${report.extracted.contrato.empregador.identificado ? "" : " (sem razão social e sem CNPJ)"}` : null],
                   ["Credor original / cedente", report.extracted.contrato?.credor_original],
@@ -1004,6 +1006,57 @@ export default function LaudoForense({ report }) {
                             </div>
                           </div>
                           {b.achado && <div className="note" style={{ borderLeftColor: "var(--crit)" }}>{b.achado.texto}</div>}
+                          {b.ela && (
+                            <div className="ip-block" style={{ marginTop: 12, border: b.ela.classificacao === "REGIÃO INCONSISTENTE" ? "1px solid rgba(240,99,99,0.4)" : "1px solid rgba(61,220,151,0.3)", background: b.ela.classificacao === "REGIÃO INCONSISTENTE" ? "rgba(240,99,99,0.05)" : "rgba(61,220,151,0.05)" }}>
+                              <div className="ip-head">
+                                <div className="ip-id" style={{ color: b.ela.classificacao === "REGIÃO INCONSISTENTE" ? "#f06363" : "#3ddc97" }}>
+                                  Análise de Nível de Erro (ELA)
+                                </div>
+                                <Badge
+                                  label={b.ela.disponivel ? b.ela.classificacao : "NÃO APLICÁVEL"}
+                                  color={!b.ela.disponivel ? "#8892b0" : b.ela.classificacao === "UNIFORME" ? "#3ddc97" : "#f06363"}
+                                />
+                              </div>
+                              {b.ela.disponivel ? (
+                                <>
+                                  <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-start", marginTop: 8 }}>
+                                    {b.ela.mapa_calor && (
+                                      <div>
+                                        <img
+                                          src={b.ela.mapa_calor}
+                                          alt="Mapa de calor ELA"
+                                          style={{ width: 120, height: "auto", borderRadius: 6, border: "1px solid #52616c" }}
+                                        />
+                                        <div style={{ fontSize: 10, color: "var(--muted)", textAlign: "center", marginTop: 2 }}>Mapa ELA (95%)</div>
+                                      </div>
+                                    )}
+                                    <div style={{ flex: 1, minWidth: 220 }}>
+                                      <Row label="Classificação" value={b.ela.classificacao} />
+                                      <Row label="Média de resíduos" value={b.ela.media_diferenca != null ? String(b.ela.media_diferenca) : null} />
+                                      <Row label="Desvio padrão" value={b.ela.desvio_padrao != null ? String(b.ela.desvio_padrao) : null} />
+                                      <Row label="Pixels anômalos (outliers)" value={b.ela.percentual_outliers != null ? `${b.ela.percentual_outliers}%` : null} />
+                                      {b.ela.dispersao_regional != null && <Row label="Dispersão regional" value={String(b.ela.dispersao_regional)} />}
+                                      <Row label="Ferramenta" value={b.ela.ferramenta} />
+                                    </div>
+                                  </div>
+                                  {b.ela.conclusao && (
+                                    <div className="note" style={{ marginTop: 8, borderLeftColor: b.ela.classificacao === "REGIÃO INCONSISTENTE" ? "var(--crit)" : "#3ddc97" }}>
+                                      {b.ela.conclusao}
+                                    </div>
+                                  )}
+                                  {b.ela.achado && b.ela.achado.codigo === "ELA2" && (
+                                    <div className="note" style={{ marginTop: 8, borderLeftColor: "var(--crit)" }}>
+                                      {b.ela.achado.texto}
+                                    </div>
+                                  )}
+                                </>
+                              ) : (
+                                <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 6 }}>
+                                  {b.ela.motivo || "Análise ELA não disponível para este formato ou dimensão."}
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
                       );
                     })()}
@@ -1425,41 +1478,82 @@ export default function LaudoForense({ report }) {
                 <Section title="§ 8 · Achados técnicos e diligências" danger={reportIssues(report.extracted, report.sumarioIrregularidades?.projecao).some((issue) => issue.gravidade === "ALTA")}>
                   {(() => {
                     const issues = reportIssues(report.extracted, report.sumarioIrregularidades?.projecao);
+                    const contagem = contarPorGrau(issues);
                     const groups = [
                       ["instrumento", "Inconsistências do instrumento"],
                       ["lacunas", "Lacunas probatórias a suprir pelo banco"],
                       ["contexto", "Contexto econômico"],
                     ];
-                    return groups.map(([key, title]) => {
-                      const items = issues.filter((issue) => issueBucket(issue) === key);
-                      if (!items.length) return null;
-                      return (
-                        <div key={key} className="issue-group">
-                          <div className="sub-head">{title}</div>
-                          {items.map((issue, i) => (
-                            <div key={`${issue.codigo}-${i}`} className="flag">
-                              <b>▸</b>
-                              <span>
-                                <strong>{issue.titulo}.</strong> {issue.texto}
-                                {issue.gravidade && <span className="inline-badge-wrap"><Badge label={issue.gravidade} color={severityColor(issue.gravidade)} /></span>}
-                              </span>
-                            </div>
-                          ))}
+                    return (
+                      <>
+                        <div className="note" style={{ marginBottom: "1rem" }}>
+                          <strong>Triagem Forense Processual (CPC art. 429, II · Tema 1.061/STJ):</strong>{" "}
+                          {contagem.constatados} Constatado(s) · {contagem.naoVerificaveis} Não Verificável(is) · {contagem.indicios} Indício(s).
                         </div>
-                      );
-                    });
+                        {groups.map(([key, title]) => {
+                          const items = issues.filter((issue) => issueBucket(issue) === key);
+                          if (!items.length) return null;
+                          return (
+                            <div key={key} className="issue-group">
+                              <div className="sub-head">{title}</div>
+                              {items.map((issue, i) => (
+                                <div key={`${issue.codigo}-${i}`} className="flag">
+                                  <b>▸</b>
+                                  <span>
+                                    <strong>{issue.titulo}.</strong> {issue.texto}
+                                    {issue.grau && (
+                                      <span className="inline-badge-wrap">
+                                        <Badge
+                                          label={issue.grau}
+                                          color={
+                                            issue.grau === "CONSTATADO"
+                                              ? "#ef4444"
+                                              : issue.grau === "NÃO VERIFICÁVEL"
+                                              ? "#f59e0b"
+                                              : "#0284c7"
+                                          }
+                                        />
+                                      </span>
+                                    )}
+                                    {issue.gravidade && (
+                                      <span className="inline-badge-wrap">
+                                        <Badge label={issue.gravidade} color={severityColor(issue.gravidade)} />
+                                      </span>
+                                    )}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        })}
+                      </>
+                    );
                   })()}
                 </Section>
               )}
 
               {/* §9 */}
-              {report.extracted.observacoes_periciais && (
-                <Section title="§ 9 · Observações periciais complementares">
-                  <div className="note">
-                    Este laudo foi produzido por extração automatizada de texto, metadados e objetos gráficos do arquivo original, com verificação criptográfica local. Os campos extraídos devem ser conferidos contra o instrumento antes do uso em peça processual. As conclusões técnicas dos §§ 1 a 8 decorrem de exame direto do arquivo e independem de valoração jurídica, que compete ao juízo.
-                  </div>
-                </Section>
-              )}
+              <Section title="§ 9 · Observações periciais complementares">
+                {report.extracted.observacoes_periciais && (
+                  <p style={{ marginBottom: "0.75rem" }}>{report.extracted.observacoes_periciais}</p>
+                )}
+                <div className="sub-head" style={{ marginTop: "0.5rem", marginBottom: "0.25rem" }}>
+                  Instrumental técnico e ferramental forense (ABNT NBR ISO/IEC 27037:2013)
+                </div>
+                <div className="note" style={{ marginBottom: "0.5rem" }}>
+                  Em observância aos padrões de repetibilidade, rastreabilidade e preservação de evidências digitais (ABNT NBR ISO/IEC 27037:2013 e CPP art. 158-A), o exame pericial utilizou as seguintes ferramentas e métodos computacionais:
+                  <ul style={{ marginTop: "0.35rem", paddingLeft: "1.2rem", listStyleType: "disc" }}>
+                    <li><strong>Criptografia e Integridade:</strong> SHA-256 e MD5 (NIST FIPS 180-4);</li>
+                    <li><strong>Análise Estrutural PDF:</strong> QPDF v11 / Poppler pdfinfo e pdfsig para integridade e catálogo;</li>
+                    <li><strong>Auditoria de Metadados:</strong> ExifTool v12 / PDF-Lib para histórico incremental e timestamps;</li>
+                    <li><strong>Exame Gráfico e ELA:</strong> Sharp Forensics / Engine ELA (Error Level Analysis - ressalto 10-20×) para detecção de fotomontagem;</li>
+                    <li><strong>Georreferenciamento:</strong> MaxMind GeoIP2 / OpenStreetMap Nominatim e cálculo geodésico Haversine.</li>
+                  </ul>
+                </div>
+                <div className="note">
+                  Este laudo foi produzido por extração automatizada de texto, metadados e objetos gráficos do arquivo original, com verificação criptográfica local. Os campos extraídos devem ser conferidos contra o instrumento antes do uso em peça processual. As conclusões técnicas dos §§ 1 a 8 decorrem de exame direto do arquivo e independem de valoração jurídica, que compete ao juízo.
+                </div>
+              </Section>
 
               {/* §10 Fundamentação normativa */}
               <Section title="§ 10 · Fundamentação normativa aplicável">

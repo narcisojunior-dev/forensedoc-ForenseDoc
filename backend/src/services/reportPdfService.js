@@ -745,6 +745,7 @@ function sectionContract(ctx, extracted) {
   field(ctx, "Produto", c.produto);
   field(ctx, "Modalidade", labelModalidade(c.modalidade));
   field(ctx, "Tipo de operação", c.tipo_operacao);
+  if (c.via_declarada) field(ctx, "Via declarada da cédula/contrato", c.via_declarada);
   field(ctx, "Operação portada", c.operacao_portada === true ? "Sim" : c.operacao_portada === false ? "Não" : null);
   if (c.empregador) field(ctx, "Empregador declarado", `${c.empregador.literal}${c.empregador.identificado ? "" : " (sem razão social e sem CNPJ)"}`);
   field(ctx, "Credor original / cedente", c.credor_original);
@@ -1702,6 +1703,51 @@ function sectionImages(ctx, extracted) {
     field(ctx, "Imagens faciais no arquivo", b.contagem_faciais);
     if (b.dados_do_processo_ausentes?.length) field(ctx, "Não apresentado pelo dossiê", b.dados_do_processo_ausentes.join(", "));
     if (b.achado) paragraph(ctx, b.achado.texto, { color: DANGER, size: 9 });
+    if (b.ela) {
+      subheading(ctx, "Análise de nível de erro (ELA)");
+      if (b.ela.disponivel) {
+        paragraph(
+          ctx,
+          `Recompressão JPEG a ${b.ela.qualidade_referencia || 95}% e medição de resíduos pixel a pixel. Regiões manipuladas ou inseridas apresentam taxa de erro divergente do padrão de compressão global da imagem.`,
+          { color: MUTED, size: 8.5 }
+        );
+        if (b.ela.mapa_calor && /^data:image\/(jpeg|png);base64,/.test(b.ela.mapa_calor)) {
+          let elaBuffer = null;
+          try {
+            elaBuffer = Buffer.from(b.ela.mapa_calor.split(",")[1], "base64");
+            ctx.doc.openImage(elaBuffer);
+          } catch {
+            elaBuffer = null;
+          }
+          if (elaBuffer) {
+            reserve(ctx, 130);
+            const y = ctx.doc.y;
+            ctx.doc.image(elaBuffer, MARGIN, y, { fit: [120, 120] });
+            ctx.doc.y = y + 126;
+          }
+        }
+        field(ctx, "Classificação ELA", b.ela.classificacao);
+        field(ctx, "Média de resíduos", b.ela.media_diferenca != null ? String(b.ela.media_diferenca).replace(".", ",") : "—");
+        field(ctx, "Desvio padrão", b.ela.desvio_padrao != null ? String(b.ela.desvio_padrao).replace(".", ",") : "—");
+        field(ctx, "Pixels com erro anômalo (outliers)", b.ela.percentual_outliers != null ? `${String(b.ela.percentual_outliers).replace(".", ",")}%` : "—");
+        if (b.ela.dispersao_regional != null) field(ctx, "Dispersão regional", String(b.ela.dispersao_regional).replace(".", ","));
+        field(ctx, "Ferramenta", b.ela.ferramenta || "sharp (libvips)");
+        if (b.ela.conclusao) {
+          paragraph(ctx, b.ela.conclusao, {
+            color: b.ela.classificacao === "REGIÃO INCONSISTENTE" ? DANGER : MUTED,
+            size: 8.5,
+          });
+        }
+        if (b.ela.achado && b.ela.achado.codigo === "ELA2") {
+          paragraph(ctx, b.ela.achado.texto, { color: DANGER, size: 9 });
+        }
+      } else {
+        field(ctx, "Análise ELA", b.ela.motivo || "Não aplicável");
+        if (b.ela.achado?.texto) {
+          paragraph(ctx, b.ela.achado.texto, { color: MUTED, size: 8.5 });
+        }
+      }
+    }
   }
 
   if (achados.length) {
@@ -2114,13 +2160,20 @@ function sectionExecutiveSummary(ctx, sumario, reportId) {
     );
   }
 
-  subheading(ctx, "Placar de gravidade");
+  subheading(ctx, "Placar de gravidade e graus processuais");
+  if (sumario.graus && sumario.graus.total > 0) {
+    paragraph(
+      ctx,
+      `Triagem Forense (CPC art. 429, II · STJ Tema 1.061): ${sumario.graus.constatados} Constatado(s) (sustentam vício material) · ${sumario.graus.naoVerificaveis} Não Verificável(is) (ônus do credor não suprido) · ${sumario.graus.indicios} Indício(s) (requerem convergência).`,
+      { size: 8.2, color: MUTED }
+    );
+  }
   if (sumario.semAchados) {
     paragraph(ctx, "Sem irregularidade crítica automática conclusiva. Os dados disponíveis não produziram alerta grave, sem prejuízo da revisão humana do contrato e dos logs originais.", { size: 9 });
   }
   for (const f of sumario.findings || []) {
     if (ctx.tema === "modelo") {
-      temaModelo.achadoPlacar(ctx, { severidade: f.severity, titulo: f.title, texto: f.text });
+      temaModelo.achadoPlacar(ctx, { severidade: f.severity, grau: f.grau, titulo: f.title, texto: f.text });
       continue;
     }
     reserve(ctx, 52);
@@ -2129,7 +2182,7 @@ function sectionExecutiveSummary(ctx, sumario, reportId) {
       .fontSize(9)
       .font("Helvetica-Bold")
       .fillColor(f.severity === "ALTA" ? DANGER : f.severity === "FAVORÁVEL" ? ACCENT : INK)
-      .text(`${f.severity} · `, MARGIN, doc.y, { width: contentWidth, continued: true })
+      .text(`${f.severity}${f.grau ? ` · [${f.grau}]` : ""} · `, MARGIN, doc.y, { width: contentWidth, continued: true })
       .fillColor(INK)
       .text(`${f.title} `, { continued: true })
       .font("Helvetica")
@@ -2226,9 +2279,25 @@ function sectionRemarks(ctx, extracted) {
     extracted.observacoes_periciais ||
       "Não há observação complementar além do que já consta das seções anteriores."
   );
+  subheading(ctx, "Instrumental técnico e ferramental forense (ABNT NBR ISO/IEC 27037:2013)");
   paragraph(
     ctx,
-    "Este laudo foi produzido por extração automatizada de texto, metadados e objetos gráficos do arquivo original, com verificação criptográfica local. Os campos extraídos devem ser conferidos contra o instrumento antes do uso em peça processual. As conclusões técnicas das seções anteriores decorrem de exame direto do arquivo e independem de valoração jurídica, que compete ao juízo.",
+    "Em observância aos padrões de repetibilidade, rastreabilidade e preservação de evidências digitais (ABNT NBR ISO/IEC 27037:2013 e CPP art. 158-A), o exame pericial utilizou as seguintes ferramentas forenses e métodos computacionais especializados:",
+    { size: 8.5 }
+  );
+  const ferramentas = [
+    "• Criptografia e Integridade: Funções de dispersão criptográfica SHA-256 e MD5 (NIST FIPS 180-4);",
+    "• Análise Estrutural e Sintaxe PDF: QPDF v11 / Poppler pdfinfo e pdfsig para validação de catálogo e assinaturas;",
+    "• Auditoria de Metadados e XMP: ExifTool v12 / PDF-Lib com inspeção de histórico incremental e datas de modificação;",
+    "• Exame de Artefatos Gráficos e ELA: Sharp Forensics / Engine ELA (Error Level Analysis - ressalto de compressão JPEG em escala 10-20×) para detecção de fotomontagem em biometria e CNH;",
+    "• Georreferenciamento e Topologia IP: Bases MaxMind GeoIP2 / OpenStreetMap Nominatim para geocodificação e cálculo geodésico de distâncias pela fórmula de Haversine."
+  ];
+  for (const f of ferramentas) {
+    paragraph(ctx, f, { size: 8, color: MUTED });
+  }
+  paragraph(
+    ctx,
+    "Este laudo foi produzido por extração automatizada e inspeção pericial de texto, metadados e objetos gráficos do arquivo original, com verificação criptográfica local. Os campos extraídos devem ser conferidos contra o instrumento antes do uso em peça processual. As conclusões técnicas das seções anteriores decorrem de exame direto do arquivo e independem de valoração jurídica, que compete ao juízo.",
     { color: MUTED, size: 8.5 }
   );
 }

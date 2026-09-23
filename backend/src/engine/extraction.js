@@ -1008,6 +1008,10 @@ export function heuristicExtractionFromText(rawText) {
     cartao: isCartaoConsignado ? layout.cartao : null,
     conta_beneficio: layout.contaBeneficio || null,
     correspondente: layout.correspondente || null,
+    via_declarada: firstMatch(flat, [
+      /\b(?:via\s+n[ãa]o\s+negoci[áa]vel|via\s+do\s+emitente|via\s+negoci[áa]vel|via\s+do\s+credor|via\s+do\s+banco)\b/i,
+      /\b(?:1[ªa]\s*via\s*[-–]\s*(?:negoci[áa]vel|n[ãa]o\s+negoci[áa]vel|do\s+credor|do\s+emitente))\b/i,
+    ]),
     // D3: o município de emissão é ponto próprio do confronto geográfico e não
     // se confunde com o endereço cadastral do contratante.
     local_emissao: extrairLocalEmissao(text),

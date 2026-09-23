@@ -1,4 +1,5 @@
 import { ordenarAchados } from "./eixosAchado.js";
+import { classificarGrauProcessual } from "./grausConclusao.js";
 
 // Utilitários de apresentação do laudo técnico pericial. Portados do motor de
 // geração (frontend/src/ForenseDoc.jsx) sem alteração de regra.
@@ -88,16 +89,25 @@ export function cleanIssueText(value) {
 
 export function normalizeIssue(issue, index = 0) {
   if (issue && typeof issue === "object") {
+    const codigo = issue.codigo || `AUTO${index}`;
     return {
-      codigo: issue.codigo || `AUTO${index}`,
+      codigo,
       gravidade: issue.gravidade || issue.severidade || "MÉDIA",
+      grau: issue.grau || classificarGrauProcessual(codigo),
       titulo: cleanIssueText(issue.titulo || "Achado técnico").replace(/\.+$/, ""),
       texto: cleanIssueText(issue.texto || issue.detalhe || ""),
     };
   }
   const text = cleanIssueText(issue);
   const [title, ...rest] = text.split(/\. +/);
-  return { codigo: `LEGADO${index}`, gravidade: "MÉDIA", titulo: (title || "Achado técnico").replace(/\.+$/, ""), texto: rest.join(". ") };
+  const codigo = `LEGADO${index}`;
+  return {
+    codigo,
+    gravidade: "MÉDIA",
+    grau: classificarGrauProcessual(codigo),
+    titulo: (title || "Achado técnico").replace(/\.+$/, ""),
+    texto: rest.join(". "),
+  };
 }
 
 /*
@@ -170,6 +180,7 @@ export function reportIssues(extracted = {}, projecao = null) {
     return ordenarAchados(projecao.filter((f) => !achadoFinanceiro(f.key)).map((f) => ({
       codigo: f.key,
       gravidade: f.severity,
+      grau: f.grau || classificarGrauProcessual(f.key),
       titulo: cleanIssueText(f.title || "Achado técnico").replace(/\.+$/, ""),
       texto: cleanIssueText(f.text || ""),
     })));
