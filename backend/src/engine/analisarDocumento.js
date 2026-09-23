@@ -3,6 +3,7 @@ import { inspectPdfImages } from "./pdfForensics.js";
 import { applySourceProvenance, inspectDocumentEligibility } from "./documentEligibility.js";
 import { separarCarimboProcessual } from "./carimboProcessual.js";
 import { analisarBiometria } from "./biometria.js";
+import { analisarClausulasAdesao } from "./clausulasAdesao.js";
 import {
   humanYearsMonthsFromDays, parseFormattedPdfDate, parsePtDate, parsePtDateTime, plural, stripDiacritics,
 } from "./format.js";
@@ -81,6 +82,9 @@ export async function analisarDocumento({
   if (biometria?.achado && !fallback.achados_irregularidade.some((issue) => issue.codigo === biometria.achado.codigo)) {
     fallback.achados_irregularidade.push(biometria.achado);
   }
+  if (biometria?.achado_ela && (biometria.achado_ela.gravidade === "MÉDIA" || biometria.achado_ela.gravidade === "ALTA") && !fallback.achados_irregularidade.some((issue) => issue.codigo === biometria.achado_ela.codigo)) {
+    fallback.achados_irregularidade.push(biometria.achado_ela);
+  }
 
   // Achados de imagem com peso probatório entram no placar de irregularidades.
   for (const finding of imageAnalysis.achados || []) {
@@ -97,6 +101,35 @@ export async function analisarDocumento({
   }
 
   fallback.assinatura = fallback.assinatura || {};
+
+  // ADE1: Cláusulas de adesão que "fabricam prova" (CDC art. 51, VI)
+  const clausulaAdesao = analisarClausulasAdesao(textoDoProcesso);
+  if (clausulaAdesao.detectada && clausulaAdesao.achado) {
+    if (!fallback.achados_irregularidade.some((issue) => issue.codigo === "ADE1")) {
+      fallback.achados_irregularidade.push(clausulaAdesao.achado);
+    }
+  }
+
+  // AUT1: Segundo fator de autenticação (SMS/Token) afirmado mas não demonstrado
+  const metodosDescritos = fallback.assinatura?.metodos_descritos_no_fluxo || [];
+  const alegaSegundoFator = metodosDescritos.some((m) => /sms|token|whatsapp|c[oó]digo/i.test(m)) ||
+    /\b(?:token|sms\s+token|c[oó]digo\s+(?:enviado|de\s+seguran[çc]a|via\s+sms)|autentica[cç][ãa]o\s+por\s+sms)\b/i.test(textoDoProcesso);
+
+  if (alegaSegundoFator) {
+    const temTelefoneDestino = Boolean(fallback.assinatura?.telefone_aceite);
+    const temEventoNaTrilha = (fallback.trilha_acesso?.events || []).some((e) => /token|sms|c[oó]digo|whatsapp/i.test(e.action || ""));
+    if (!temTelefoneDestino || !temEventoNaTrilha) {
+      if (!fallback.achados_irregularidade.some((issue) => issue.codigo === "AUT1")) {
+        fallback.achados_irregularidade.push({
+          codigo: "AUT1",
+          gravidade: "ALTA",
+          titulo: "Segundo fator de autenticação (SMS/Token) não demonstrado",
+          texto: "O instrumento faz referência a autenticação secundária por envio de código de segurança (SMS/token), porém o dossiê não apresenta os registros comprobatórios de envio (linha telefônica de destino, operadora e confirmação de resposta pelo consumidor), impedindo demonstrar que o canal de validação pertencia ao titular do CPF.",
+        });
+      }
+    }
+  }
+
   const signatureAlerts = metadata.digitalSignature?.alerts || [];
 
   // S5: assinatura do emissor anterior ao aceite do contratante.

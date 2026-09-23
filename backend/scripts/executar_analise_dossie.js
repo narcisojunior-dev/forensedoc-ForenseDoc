@@ -242,7 +242,7 @@ function gerarMarkdownRelatorio({
    * *Quesito:* Diante da expressa impugnação de autenticidade (CPC, art. 429, II c/c Tema 1.061 do STJ), queira informar se a assinatura possui certificado ICP-Brasil ou se depende de meios eletrônicos simples/avançados, especificando se o hash SHA-256 do contrato original permaneceu inalterado.
 
 ---
-*Laudo pericial emitido pelo motor ForenseDoc v3.0 com blindagem pericial e conformidade ISO/IEC 27037.*
+*Laudo pericial emitido pelo motor ForenseDoc com blindagem pericial e conformidade ABNT NBR ISO/IEC 27037:2013.*
 `;
 }
 

@@ -1,5 +1,6 @@
 import React from "react";
 import { Badge, Flag, Note } from "../UiComponents.jsx";
+import { classificarGrauProcessual } from "../../laudo/grausConclusao.js";
 
 /**
  * § 6 — achados de irregularidade do motor pericial.
@@ -15,6 +16,14 @@ export function tomDaGravidade(gravidade) {
   if (/CR[IÍ]TIC|ALTA|ALTO/.test(g)) return "danger";
   if (/M[ÉE]DI|ATEN/.test(g)) return "warn";
   if (/FAVOR/.test(g)) return "ok";
+  return "neutral";
+}
+
+export function tomDoGrau(grau) {
+  const g = String(grau || "").toUpperCase();
+  if (g === "CONSTATADO") return "danger";
+  if (g === "NÃO VERIFICÁVEL") return "warn";
+  if (g === "INDÍCIO") return "info";
   return "neutral";
 }
 
@@ -44,6 +53,7 @@ export default function AchadosIrregularidade({ extracted }) {
     <div className="space-y-2.5">
       {achados.map((achado, i) => {
         const tom = tomDaGravidade(achado.gravidade);
+        const grau = achado.grau || classificarGrauProcessual(achado.codigo);
         return (
           <div
             key={`${achado.codigo}-${i}`}
@@ -55,7 +65,10 @@ export default function AchadosIrregularidade({ extracted }) {
                 <span className="font-mono text-[11px] font-bold text-zinc-500">{achado.codigo}</span>
                 <span className="text-[13px] font-bold text-foreground">{achado.titulo}</span>
               </div>
-              <Badge label={achado.gravidade || "—"} tone={tom} />
+              <div className="flex items-center gap-1.5">
+                {grau && <Badge label={grau} tone={tomDoGrau(grau)} />}
+                <Badge label={achado.gravidade || "—"} tone={tom} />
+              </div>
             </div>
             {achado.texto && (
               <p className="mt-1.5 text-[12.5px] leading-relaxed text-zinc-300">{achado.texto}</p>

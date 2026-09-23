@@ -237,6 +237,14 @@ const REGRAS = [
       return temAchado && !extracted.imagem_biometrica ? "BIO2 sem imagem_biometrica" : null;
     },
   },
+  {
+    id: "ela-achado-x-bloco",
+    descricao: "Achado de inconsistência ELA sem o resultado da análise que o fundamenta",
+    verificar(_result, extracted) {
+      const temAchado = (extracted.achados_irregularidade || []).some((a) => a.codigo === "ELA2");
+      return temAchado && !extracted.imagem_biometrica?.ela?.disponivel ? "ELA2 sem imagem_biometrica.ela disponível" : null;
+    },
+  },
 ];
 
 // Regras anteriores à rodada 2 que também produzem afirmação falsa em juízo.

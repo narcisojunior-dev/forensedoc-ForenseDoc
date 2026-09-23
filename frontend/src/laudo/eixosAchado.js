@@ -9,15 +9,15 @@
  */
 
 const EIXOS = [
-  { eixo: "assinatura", regex: /^(ASS\d|signature-absent|simple-signature|sig-)/ },
+  { eixo: "assinatura", regex: /^(ASS\d|AUT\d|signature-absent|simple-signature|sig-)/ },
   { eixo: "credito", regex: /^LIB\d/ },
-  { eixo: "biometria", regex: /^(BIO\d|IMG3|IMG2)/ },
+  { eixo: "biometria", regex: /^(BIO\d|ELA\d|IMG3|IMG2)/ },
   { eixo: "consentimento", regex: /^(TRL\d|TZ\d|TML\d|chronology|device-gap)/ },
   { eixo: "custodia", regex: /^(INT\d|CUS\d|hash-|integrity-|chain-)/ },
   { eixo: "financeiro", regex: /^(CET\d|FIN\d|PRZ\d|TRB\d|TET\d|RMC\d|TAR\d|economics|DAT\d)/ },
   { eixo: "seguro", regex: /^SEG\d/ },
   { eixo: "geografia", regex: /^(gps-|ip-|geo)/ },
-  { eixo: "cadastro", regex: /^(CAD\d|EMP\d|AUT\d|IDA\d|FAT\d|client-|dates-)/ },
+  { eixo: "cadastro", regex: /^(CAD\d|EMP\d|ADE\d|IDA\d|FAT\d|client-|dates-)/ },
   { eixo: "metadados", regex: /^(metadata-|IMG\d|OCR\d|LOG\d|INT2)/ },
 ];
 

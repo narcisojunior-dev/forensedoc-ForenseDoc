@@ -13,6 +13,7 @@
  */
 
 import { ordenarAchados } from "../engine/eixosAchado.js";
+import { classificarGrauProcessual, GRAUS, ROTULOS_GRAU, DESCRICAO_GRAU } from "../engine/grausConclusao.js";
 import { distanciaKm, distanciaSuspeita } from "../utils/distancia.js";
 
 export function classifyHashString(s) {
@@ -230,6 +231,7 @@ export function reportIssues(extracted = {}, projecao = null) {
     return ordenarAchados(projecao.filter((f) => !achadoFinanceiro(f.key)).map((f) => ({
       codigo: f.key,
       gravidade: f.severity,
+      grau: f.grau || classificarGrauProcessual(f.key, f.severity),
       titulo: cleanIssueText(f.title || "Achado técnico").replace(/\.+$/, ""),
       texto: cleanIssueText(f.text || ""),
     })));
@@ -243,7 +245,10 @@ export function reportIssues(extracted = {}, projecao = null) {
     if (seen.has(issue.codigo)) return false;
     seen.add(issue.codigo);
     return true;
-  });
+  }).map((issue) => ({
+    ...issue,
+    grau: issue.grau || classificarGrauProcessual(issue.codigo, issue.gravidade),
+  }));
   return ordenarAchados(issues);
 }
 

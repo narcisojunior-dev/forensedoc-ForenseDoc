@@ -1,5 +1,6 @@
 import { buildCustodyChain } from "../reports/custodyChain.js";
 import { ordenarAchados } from "./eixosAchado.js";
+import { classificarGrauProcessual, contarPorGrau } from "./grausConclusao.js";
 import { distanciaKm, distanciaSuspeita, formatarDistancia, montarConfrontoGeografico, STATUS_CONFRONTO } from "../utils/distancia.js";
 import { descreverIndisponibilidade } from "../utils/confrontoEnderecos.js";
 // Sumário executivo de irregularidades (placar de gravidade, confronto GPS x IP,
@@ -182,9 +183,12 @@ function evidenceSeverity(text) {
 
 function normalizeIssue(issue, index = 0) {
   if (issue && typeof issue === "object") {
+    const codigo = issue.codigo || `AUTO${index}`;
+    const gravidade = issue.gravidade || issue.severidade || "MÉDIA";
     return {
-      codigo: issue.codigo || `AUTO${index}`,
-      gravidade: issue.gravidade || issue.severidade || "MÉDIA",
+      codigo,
+      gravidade,
+      grau: issue.grau || classificarGrauProcessual(codigo, gravidade),
       titulo: compact(String(issue.titulo || "Achado técnico").replace(/\.+$/, ""), 120),
       // D5: sem corte aqui. O texto integral é o que o corpo do laudo publica;
       // a compactação é da apresentação resumida, aplicada só no sumário.
@@ -197,7 +201,15 @@ function normalizeIssue(issue, index = 0) {
     .replace(/\s+/g, " ")
     .trim();
   const [title, ...rest] = clean.split(/\. +/);
-  return { codigo: `LEGADO${index}`, gravidade: evidenceSeverity(clean), titulo: (title || "Achado técnico").replace(/\.+$/, ""), texto: rest.join(". ") };
+  const codigo = `LEGADO${index}`;
+  const gravidade = evidenceSeverity(clean);
+  return {
+    codigo,
+    gravidade,
+    grau: classificarGrauProcessual(codigo, gravidade),
+    titulo: (title || "Achado técnico").replace(/\.+$/, ""),
+    texto: rest.join(". "),
+  };
 }
 
 export function buildIrregularitySummary(report = {}) {
@@ -218,13 +230,19 @@ export function buildIrregularitySummary(report = {}) {
   const diligenceKeys = new Set();
 
   const addCheck = (domain, key, status, detail = "") => checks.push({ domain, key, status, detail });
-  const addFinding = (severity, key, title, text) => {
+  const addFinding = (severity, key, title, text, grau = null) => {
     const identidade = JSON.stringify([key, title, String(text || "").replace(/\s+/g, " ").trim()]);
     if (issueKeys.has(identidade)) return;
     issueKeys.add(identidade);
     // O texto entra integral. Quem resume é a página do sumário, em
     // `displayFindings`, e o corpo do laudo publica o texto completo.
-    const entry = { severity, key, title, text: String(text || "").replace(/\s+/g, " ").trim() };
+    const entry = {
+      severity,
+      key,
+      title,
+      text: String(text || "").replace(/\s+/g, " ").trim(),
+      grau: grau || classificarGrauProcessual(key, severity),
+    };
     if (severity === "FAVORÁVEL") favorable.push(entry); else findings.push(entry);
   };
   const addDiligence = (key, title, text) => {
@@ -537,6 +555,9 @@ export function buildIrregularitySummary(report = {}) {
   if (audit.deviceIdentifiable === false && audit.eventCount > 0) {
     addDiligence("device", "Identificação técnica do dispositivo", "Solicitar fabricante, modelo, identificador disponível e método de vinculação da biometria/selfie ao aparelho utilizado.");
   }
+  if (issueCodes.has("ELA2")) {
+    addDiligence("biometric-original", "Arquivo original da captura biométrica", "Solicitar o arquivo original não comprimido da imagem biométrica com metadados EXIF íntegros, logs de transmissão do dispositivo capturador e prova técnica do teste de vivacidade (liveness test).");
+  }
   if (findings.length || issueCodes.has("CUS1")) {
     addDiligence("expert", "Perícia na cadeia de custódia", "Confrontar o instrumento, os logs, os hashes e os carimbos de tempo antes do uso como prova técnica definitiva.");
   }
@@ -748,6 +769,7 @@ export function buildIrregularitySummary(report = {}) {
     // Projeção canônica: a lista única que o corpo e o sumário renderizam. O
     // corte é nulo quando tudo coube.
     projecao: orderedFindings,
+    graus: contarPorGrau(orderedFindings),
     corte,
     favorable,
     geo: {

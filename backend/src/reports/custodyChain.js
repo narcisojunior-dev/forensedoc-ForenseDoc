@@ -20,7 +20,7 @@
 
 /** Definição legal, citada no início da seção. */
 export const DEFINICAO_CADEIA_CUSTODIA =
-  "O CPP, art. 158-A (Lei 13.964/2019), define cadeia de custódia como “o conjunto de todos os procedimentos utilizados para manter e documentar a história cronológica do vestígio”, com o objetivo de rastrear sua posse e manuseio desde o reconhecimento até o descarte. A norma é de processo penal e não incide diretamente nesta matéria cível; é referida como parâmetro doutrinário do grau de rastreabilidade exigível de uma prova digital. No plano técnico, a ISO/IEC 27037:2012 estabelece as diretrizes de identificação, coleta, aquisição e preservação de evidência digital, e é a referência internacional para a mesma finalidade.";
+  "O CPP, art. 158-A (Lei 13.964/2019), define cadeia de custódia como “o conjunto de todos os procedimentos utilizados para manter e documentar a história cronológica do vestígio”, com o objetivo de rastrear sua posse e manuseio desde o reconhecimento até o descarte. A norma é de processo penal e não incide diretamente nesta matéria cível; é referida como parâmetro doutrinário do grau de rastreabilidade exigível de uma prova digital. No plano técnico, a ABNT NBR ISO/IEC 27037:2013 estabelece as diretrizes de identificação, coleta, aquisição e preservação de evidência digital, e é o padrão pericial aplicável para a mesma finalidade.";
 
 /** Por que a completude importa, em termos de ônus da prova. */
 export const EFEITO_PROCESSUAL_CADEIA =
@@ -92,7 +92,7 @@ export const ELEMENTOS_CADEIA = [
     nome: "Trilha de auditoria",
     comprova:
       "Registra a sequência declarada de eventos do fluxo. Eventos de aceite não demonstram, por si, exibição ou leitura do documento.",
-    norma: "CPP, art. 158-A, por analogia, quanto à história cronológica do vestígio; ISO/IEC 27037:2012",
+    norma: "CPP, art. 158-A, por analogia, quanto à história cronológica do vestígio; ABNT NBR ISO/IEC 27037:2013",
     ausencia:
       "Sem trilha, cada registro isolado passa a depender da palavra da instituição, sem meio de conferir consistência entre eles.",
   },

@@ -49,6 +49,7 @@ export function analisarBiometria({ imagens, flat, alegaBiometria }) {
     contagem_faciais: faciais.length,
     documento_identidade_localizado: documento,
     dados_do_processo_ausentes: ausentes,
+    ela: principal.ela || null,
   };
 
   const falhas = [];
@@ -57,12 +58,15 @@ export function analisarBiometria({ imagens, flat, alegaBiometria }) {
   if (bloco.exif === false) falhas.push("sem metadados de captura (EXIF) identificados no artefato extraído");
   if (!documento) ausentes.push("documento de identidade de referência");
 
-  if (!falhas.length && !ausentes.length) return { ...bloco, achado: null };
+  const achadoELA = principal.ela?.achado || null;
+
+  if (!falhas.length && !ausentes.length) return { ...bloco, achado: null, achado_ela: achadoELA };
   const fotografia = faciais.length === 1 ? "uma única fotografia" : `${faciais.length} fotografias`;
   const qualidades = [bloco.megapixels < 0.5 ? `de ${String(bloco.megapixels).replace(".", ",")} megapixel` : null, bloco.exif === false ? "sem EXIF identificado no artefato extraído" : null].filter(Boolean).join(" e ");
   const texto_achado = `${alegaBiometria ? "A instituição afirma ter colhido biometria facial e exibe" : "O arquivo exibe"} ${fotografia}${qualidades ? ` ${qualidades}` : ""} (pág. ${bloco.pagina}, ${bloco.largura} x ${bloco.altura} pixels${bloco.bytes ? `, ${bloco.bytes.toLocaleString("pt-BR")} bytes` : ""})${ausentes.length ? `, e a extração disponível não localizou ${ausentes.join(", ").replace(/, ([^,]*)$/, " nem $1")}` : ""}. ${faciais.length === 1 && alegaBiometria ? "Uma imagem estática isolada não demonstra o resultado individual de vivacidade ou a vinculação ao titular do CPF. Ausência de EXIF nesta cópia não prova remoção nem ausência de metadados na captura original." : ""}`.trim();
   return {
     ...bloco,
     achado: { codigo: "BIO2", gravidade: "ALTA", titulo: "Lastro biométrico frágil", texto: texto_achado },
+    achado_ela: achadoELA,
   };
 }
