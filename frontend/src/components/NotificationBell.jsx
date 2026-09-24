@@ -142,7 +142,8 @@ export default function NotificationBell() {
   };
 
   return (
-    <div className="relative" ref={containerRef}>
+    // Sem `relative` de propósito: o painel se posiciona contra o header (ver abaixo).
+    <div ref={containerRef}>
       <button
         onClick={toggle}
         aria-label={unread > 0 ? `Notificações (${unread} não lidas)` : "Notificações"}
@@ -157,7 +158,14 @@ export default function NotificationBell() {
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-2 w-[calc(100vw-2rem)] sm:w-96 max-w-sm bg-surface border border-surface-border rounded-xl shadow-2xl overflow-hidden z-50">
+        /* O painel se ancora no HEADER, não no sino. O sino não fica colado na
+           borda (avatar e nome vêm depois) e, ancorado nele, o painel vazava pela
+           esquerda da tela no celular e, no tablet, passava por baixo da sidebar,
+           cortado pelo overflow-hidden da área principal.
+           Abaixo de `sm`: largura cheia com 16px de margem (o `fixed` resolve
+           contra o header, que tem backdrop-filter). Acima: alinhado à borda
+           direita do header, que é sticky e por isso também é a referência. */
+        <div className="fixed inset-x-4 top-16 mt-2 sm:absolute sm:inset-x-auto sm:top-full sm:right-6 lg:right-8 sm:w-96 max-w-sm mx-auto sm:mx-0 bg-surface border border-surface-border rounded-xl shadow-2xl overflow-hidden z-50">
           <div className="flex items-center justify-between px-4 py-3 border-b border-surface-border">
             <span className="text-sm font-bold text-foreground">Notificações</span>
             {unread > 0 && (

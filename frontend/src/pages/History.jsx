@@ -313,19 +313,19 @@ export default function History() {
             {analyses.map((item) => {
               const status = STATUS_LABELS[item.status] || { label: item.status, color: TONES.neutral.hex };
               return (
-                <div key={item.id} className="flex items-center justify-between px-6 py-4">
-                  <div>
+                <div key={item.id} className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+                  <div className="min-w-0">
                     <div className="text-sm font-medium text-zinc-200">
                       Análise {item.id.slice(0, 8)}
                     </div>
                     <div className="text-xs text-zinc-500">{new Date(item.createdAt).toLocaleString("pt-BR")}</div>
                   </div>
-                  <div className="flex items-center gap-4">
+                  <div className="flex items-center justify-between gap-4 sm:justify-end">
                     <Badge label={status.label} color={status.color} />
                     {item.status === "COMPLETED" && (
                       <button
                         onClick={() => setSelectedId(item.id)}
-                        className="text-primary hover:text-blue-400 text-sm font-medium flex items-center gap-1"
+                        className="text-primary hover:text-blue-400 text-sm font-medium flex items-center gap-1 whitespace-nowrap py-1"
                       >
                         <Eye className="w-4 h-4" />
                         Ver detalhes
@@ -343,7 +343,7 @@ export default function History() {
             <button
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={page <= 1}
-              className="text-zinc-400 hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
+              className="p-2 -m-2 rounded-lg text-zinc-400 hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
             >
               <ChevronLeft className="w-5 h-5" />
             </button>
@@ -351,7 +351,7 @@ export default function History() {
             <button
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               disabled={page >= totalPages}
-              className="text-zinc-400 hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
+              className="p-2 -m-2 rounded-lg text-zinc-400 hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
             >
               <ChevronRight className="w-5 h-5" />
             </button>

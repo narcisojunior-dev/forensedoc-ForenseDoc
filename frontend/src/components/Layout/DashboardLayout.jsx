@@ -42,9 +42,23 @@ const CHAVE_COLAPSO = "forensedoc:sidebar-colapsada";
 // mas pode lançar na leitura.
 function lerColapso() {
   try {
-    return localStorage.getItem(CHAVE_COLAPSO) === "1";
+    const salvo = localStorage.getItem(CHAVE_COLAPSO);
+    if (salvo !== null) return salvo === "1";
   } catch {
-    return false;
+    // Sem acesso ao storage: cai no padrão por largura abaixo.
+  }
+  // Sem preferência salva, o tablet começa com o trilho recolhido. Entre 768 e
+  // 1023px a sidebar aberta toma 256px e deixa ~460px de conteúdo: as grades de
+  // três colunas espremem os números e o laudo perde um terço da largura.
+  return window.matchMedia?.("(min-width: 768px) and (max-width: 1023px)").matches ?? false;
+}
+
+function salvarColapso(colapsada) {
+  try {
+    localStorage.setItem(CHAVE_COLAPSO, colapsada ? "1" : "0");
+  } catch {
+    // Storage bloqueado: o colapso vale só para esta aba, o que é melhor que
+    // derrubar a tela inteira por causa de uma preferência visual.
   }
 }
 
@@ -104,14 +118,13 @@ export default function DashboardLayout() {
     return () => document.removeEventListener("keydown", onKey);
   }, [sidebarOpen]);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(CHAVE_COLAPSO, colapsada ? "1" : "0");
-    } catch {
-      // Storage bloqueado: o colapso vale só para esta aba, o que é melhor que
-      // derrubar a tela inteira por causa de uma preferência visual.
-    }
-  }, [colapsada]);
+  // Grava só quando a pessoa alterna. Gravar na montagem transformaria o padrão
+  // automático do tablet em preferência, e o desktop abriria recolhido depois.
+  const alternarColapso = () => {
+    const nova = !colapsada;
+    setColapsada(nova);
+    salvarColapso(nova);
+  };
 
   /*
    * A navegação é agrupada, não uma lista corrida.
@@ -257,7 +270,7 @@ export default function DashboardLayout() {
         {/* Recolher é ação de desktop: no mobile a sidebar é gaveta e quem fecha
             é o X do topo ou o toque fora. */}
         <button
-          onClick={() => setColapsada((v) => !v)}
+          onClick={alternarColapso}
           aria-expanded={!colapsada}
           aria-label={colapsada ? "Expandir menu" : "Recolher menu"}
           className={cn(
@@ -272,8 +285,11 @@ export default function DashboardLayout() {
         </button>
       </aside>
 
-      {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
+      {/* Main Content Area
+          `dvh` e não só `vh`: no Safari do iPhone e no Chrome do Android 100vh
+          inclui a área coberta pela barra de endereço, e o fim da página
+          (rodapé, último botão) ficava escondido atrás dela. */}
+      <div className="flex-1 flex flex-col min-w-0 h-screen supports-[height:100dvh]:h-dvh overflow-hidden">
         {/* Topbar */}
         <header className="h-16 flex items-center justify-between px-4 sm:px-6 lg:px-8 border-b border-surface-border bg-background/80 backdrop-blur-md z-30 sticky top-0">
           <button

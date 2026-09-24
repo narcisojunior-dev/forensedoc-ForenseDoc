@@ -387,7 +387,7 @@ body.fd-exporting #fd-report svg text[fill="#aeb9c7"] { fill: #5d6875; }
   .row-value { text-align: left; }
   .grid-2 { grid-template-columns: 1fr; }
   .features { grid-template-columns: 1fr 1fr; }
-  .wordmark { font-size: 28px; }
+  .wordmark { font-size: clamp(20px, 6.5vw, 28px); }
   .dist-banner { flex-direction: column; align-items: flex-start; gap: 8px; }
 }
 

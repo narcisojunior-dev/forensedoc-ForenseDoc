@@ -15,8 +15,11 @@ import toast from "react-hot-toast";
 function StatCard({ icon: Icon, iconClass, label, value, suffix, hint }) {
   return (
     <div className="glass p-6 rounded-2xl border-surface-border">
-      <div className="flex items-center gap-4">
-        <div className={`w-12 h-12 rounded-full flex items-center justify-center ${iconClass}`}>
+      {/* Entre md e xl os três cartões dividem a linha com a sidebar e ficam com
+          ~200px: o ícone ao lado quebrava o rótulo em duas linhas, então nessa
+          faixa ele sobe para cima do texto. */}
+      <div className="flex items-center gap-4 md:flex-col md:items-start md:gap-3 xl:flex-row xl:items-center xl:gap-4">
+        <div className={`w-12 h-12 shrink-0 rounded-full flex items-center justify-center ${iconClass}`}>
           <Icon className="w-6 h-6" />
         </div>
         <div>

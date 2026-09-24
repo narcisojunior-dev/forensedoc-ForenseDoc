@@ -30,6 +30,10 @@
   }
 
   .fd-root {
+    /* O laudo responde à PRÓPRIA largura, não à da tela: no tablet em retrato a
+       sidebar do painel deixa o documento com ~420px numa tela de 768px, e uma
+       media query de viewport não percebe isso. */
+    container: fd-laudo / inline-size;
     min-height: 100vh;
     background:
       radial-gradient(1200px 600px at 18% -8%, #122236 0%, transparent 55%),
@@ -571,13 +575,13 @@
   body.fd-exporting #fd-report .summary-page + .summary-page { margin-top: 0; }
   body.fd-exporting #fd-report .summary-page-two { min-height: 900px; }
 
-  @media (max-width: 640px) {
+  @container fd-laudo (max-width: 640px) {
     .fd-root .row { flex-direction: column; gap: 4px; }
     .fd-root .row-label { min-width: 0; }
     .fd-root .row-value { text-align: left; }
     .fd-root .grid-2 { grid-template-columns: 1fr; }
     .fd-root .features { grid-template-columns: 1fr 1fr; }
-    .fd-root .wordmark { font-size: 28px; }
+    .fd-root .wordmark { font-size: clamp(20px, 6.5vw, 28px); }
     .fd-root .dist-banner { flex-direction: column; align-items: flex-start; gap: 8px; }
     .fd-root .cover-meta { grid-template-columns: 1fr 1fr; }
     .fd-root .audit-metrics { grid-template-columns: 1fr 1fr; }
@@ -596,4 +600,16 @@
 
 /* Laudo embutido no painel do SaaS: sem ocupar a altura da tela inteira. */
 .fd-root.fd-embutido { min-height: 0; padding: 28px 22px 40px; border-radius: 16px; }
+
+/* No celular as três molduras (área do painel, documento e cartão) comiam um
+   terço da largura e deixavam o texto do laudo com ~230px. */
+@container fd-laudo (max-width: 480px) {
+  .fd-root .card { padding: 18px 14px; }
+}
+@media (max-width: 640px) {
+  .fd-root.fd-embutido { padding: 18px 10px 28px; border-radius: 12px; }
+}
 body.fd-exporting .fd-root.fd-embutido { border-radius: 0; }
+/* Na exportação o documento é fixado em 794px: sem contêiner, as regras de
+   largura estreita acima não disparam e o PDF sai igual em qualquer aparelho. */
+body.fd-exporting .fd-root { container-type: normal; }

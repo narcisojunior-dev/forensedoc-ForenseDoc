@@ -173,13 +173,13 @@ export default function Settings() {
 
       <SectionCard icon={User} title="Conta">
         <div className="space-y-4 mb-6 text-sm">
-          <div className="flex justify-between border-b border-surface-border/50 pb-2">
-            <span className="text-zinc-500">E-mail</span>
-            <span className="text-foreground font-medium">{user?.email}</span>
+          <div className="flex justify-between gap-4 border-b border-surface-border/50 pb-2">
+            <span className="text-zinc-500 shrink-0">E-mail</span>
+            <span className="text-foreground font-medium text-right min-w-0 break-words [overflow-wrap:anywhere]">{user?.email}</span>
           </div>
-          <div className="flex justify-between border-b border-surface-border/50 pb-2">
-            <span className="text-zinc-500">Escritório</span>
-            <span className="text-foreground font-medium">{user?.tenant?.name}</span>
+          <div className="flex justify-between gap-4 border-b border-surface-border/50 pb-2">
+            <span className="text-zinc-500 shrink-0">Escritório</span>
+            <span className="text-foreground font-medium text-right min-w-0 break-words [overflow-wrap:anywhere]">{user?.tenant?.name}</span>
           </div>
         </div>
 
@@ -248,16 +248,16 @@ export default function Settings() {
             {/* Remoção é soft-delete (`active: false`): sem este filtro, o
                 ex-membro continuaria listado como se ainda tivesse acesso. */}
             {members.filter((m) => m.active !== false).map((member) => (
-              <div key={member.id} className="flex items-center justify-between py-2.5 border-b border-surface-border/50 last:border-0">
-                <div>
+              <div key={member.id} className="flex items-center justify-between gap-3 py-2.5 border-b border-surface-border/50 last:border-0">
+                <div className="min-w-0">
                   <div className="text-sm font-medium text-zinc-200">{member.name} {member.id === user?.id && <span className="text-xs text-zinc-500">(você)</span>}</div>
-                  <div className="text-xs text-zinc-500">{member.email} · {member.role === "OWNER" ? "Proprietário" : "Membro"}</div>
+                  <div className="text-xs text-zinc-500 [overflow-wrap:anywhere]">{member.email} · {member.role === "OWNER" ? "Proprietário" : "Membro"}</div>
                 </div>
                 {isOwner && member.id !== user?.id && (
                   <button
                     onClick={() => setMemberToRemove(member)}
                     disabled={removingId === member.id}
-                    className="text-red-400 hover:bg-red-400/10 p-2 rounded-lg transition-colors disabled:opacity-50"
+                    className="shrink-0 text-red-400 hover:bg-red-400/10 p-2 rounded-lg transition-colors disabled:opacity-50"
                     title="Remover membro"
                   >
                     {removingId === member.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
