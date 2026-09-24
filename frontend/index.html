@@ -4,11 +4,53 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/png" href="/favicon.png" />
+    <meta name="theme-color" content="#09090b" />
+    <title>ForenseDoc | Perícia digital de contratos de consignado</title>
     <meta
       name="description"
-      content="Envie o PDF do contrato de consignado e receba um laudo com o hash do arquivo, o GPS e os IPs da assinatura, a trilha de eventos e as contas refeitas. Cada achado cita a página. 3 laudos grátis."
+      content="Envie o PDF do contrato de consignado e receba um laudo com o hash do arquivo, o GPS e os IPs da assinatura e a trilha de eventos. Cada achado cita a página. 3 laudos grátis."
     />
-    <title>ForenseDoc</title>
+
+    <!--
+      Prévia do link em redes sociais e mensageiros (Open Graph e X/Twitter).
+
+      Fica no HTML estático, e não num componente React, porque os robôs que
+      montam a prévia (WhatsApp, LinkedIn, Facebook, X) não executam JavaScript:
+      leem só o que o servidor devolve. Como o nginx devolve este mesmo arquivo
+      para qualquer rota, toda URL do site compartilha esta prévia.
+
+      Imagem e URL são absolutas porque os robôs não resolvem caminho relativo.
+      O modelo da imagem está em scripts/og-image.html.
+    -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="ForenseDoc" />
+    <meta property="og:locale" content="pt_BR" />
+    <meta property="og:url" content="https://forensedoc.com.br/" />
+    <meta property="og:title" content="ForenseDoc | Perícia digital de contratos de consignado" />
+    <meta
+      property="og:description"
+      content="Mostre ao juiz onde, quando e como o consignado foi assinado. Laudo com hash do arquivo, GPS e IPs da assinatura e trilha de eventos, cada achado com a página citada."
+    />
+    <meta property="og:image" content="https://forensedoc.com.br/og-image.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="ForenseDoc: mostre ao juiz onde, quando e como o consignado foi assinado. SHA-256, GPS x IP, trilha de eventos e página citada."
+    />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="ForenseDoc | Perícia digital de contratos de consignado" />
+    <meta
+      name="twitter:description"
+      content="Mostre ao juiz onde, quando e como o consignado foi assinado. Laudo com hash do arquivo, GPS e IPs da assinatura e trilha de eventos, cada achado com a página citada."
+    />
+    <meta name="twitter:image" content="https://forensedoc.com.br/og-image.png" />
+    <meta
+      name="twitter:image:alt"
+      content="ForenseDoc: mostre ao juiz onde, quando e como o consignado foi assinado. SHA-256, GPS x IP, trilha de eventos e página citada."
+    />
   </head>
   <body style="margin:0">
     <div id="root"></div>

@@ -1,0 +1,74 @@
+<!doctype html>
+<!--
+  Modelo da imagem de compartilhamento (public/og-image.png), a prévia que
+  WhatsApp, LinkedIn, Facebook e X mostram quando alguém cola o link do site.
+
+  Para regenerar: abra este arquivo no Chrome com a janela em 1200x630 (ou no
+  modo dispositivo do DevTools) e capture a tela inteira, ou use o Playwright:
+    page.setViewportSize({ width: 1200, height: 630 }); page.screenshot(...)
+  Mantenha 1200x630 e o arquivo abaixo de ~300 KB: acima disso o WhatsApp
+  costuma cair para a miniatura pequena. As dimensões estão declaradas no
+  index.html e conferidas por src/tests/metadados.test.js.
+-->
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1200px; height: 630px; }
+  body {
+    position: relative; overflow: hidden;
+    background: #09090b; color: #fafafa;
+    font-family: "Inter", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  /* brilho azul do hero da landing */
+  .glow { position: absolute; width: 900px; height: 560px; left: 420px; top: 120px;
+    background: radial-gradient(closest-side, rgba(59,130,246,0.28), rgba(59,130,246,0) 100%); }
+  .glow2 { position: absolute; width: 520px; height: 420px; left: -160px; top: -200px;
+    background: radial-gradient(closest-side, rgba(245,158,11,0.10), rgba(245,158,11,0) 100%); }
+  /* grade sutil */
+  .grid { position: absolute; inset: 0;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: radial-gradient(ellipse 80% 90% at 60% 50%, #000 30%, transparent 85%); }
+  .wrap { position: absolute; inset: 0; padding: 60px 72px 56px; display: flex; flex-direction: column; }
+  .logo { width: 330px; height: 80px; overflow: hidden; position: relative; }
+  .logo img { position: absolute; width: 403px; left: -36px; top: -74px; }
+  .pill { margin-top: 58px; align-self: flex-start; display: inline-flex; align-items: center; gap: 10px;
+    padding: 8px 16px; border-radius: 999px; background: #18181b; border: 1px solid #27272a;
+    font-size: 19px; font-weight: 500; color: #d4d4d8; }
+  .pill i { width: 9px; height: 9px; border-radius: 50%; background: #3b82f6; box-shadow: 0 0 12px #3b82f6; }
+  h1 { margin-top: 28px; font-size: 70px; line-height: 1.08; font-weight: 800; letter-spacing: -0.025em; max-width: 1060px; }
+  h1 span { background: linear-gradient(90deg, #3b82f6, #93c5fd); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .foot { margin-top: auto; display: flex; align-items: center; justify-content: space-between; }
+  .chips { display: flex; gap: 10px; }
+  .chip { padding: 9px 14px; border-radius: 10px; border: 1px solid #27272a; background: rgba(24,24,27,0.85);
+    font-family: "JetBrains Mono", monospace; font-size: 16px; font-weight: 500; color: #a1a1aa; letter-spacing: 0.01em; }
+  .chip b { color: #f59e0b; font-weight: 500; }
+  .url { font-size: 22px; font-weight: 600; color: #e4e4e7; }
+</style>
+</head>
+<body>
+  <div class="glow2"></div>
+  <div class="glow"></div>
+  <div class="grid"></div>
+  <div class="wrap">
+    <div class="logo"><img src="../public/fd1.png" alt=""></div>
+    <div class="pill"><i></i>Cadastro com 3 laudos grátis</div>
+    <h1>Mostre ao juiz onde, quando e como <span>o consignado foi assinado.</span></h1>
+    <div class="foot">
+      <div class="chips">
+        <div class="chip"><b>#</b> SHA-256</div>
+        <div class="chip"><b>◎</b> GPS × IP</div>
+        <div class="chip"><b>≡</b> Trilha de eventos</div>
+        <div class="chip"><b>¶</b> Página citada</div>
+      </div>
+      <div class="url">forensedoc.com.br</div>
+    </div>
+  </div>
+</body>
+</html>
