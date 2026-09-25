@@ -412,6 +412,27 @@ function viaMarcada(flat) {
   return m ? m[1].toUpperCase().replace(/\s+/g, " ") : null;
 }
 
+/** Endereço do Quadro 10 (canal de vendas) da CCB Credcesta, linha a linha. */
+function enderecoDoQuadroCorrespondente(texto) {
+  const t = String(texto || "");
+  const i = t.search(/QUADRO\s+10\s*[-–]\s*CANAL\s+DE\s+VENDAS/i);
+  if (i < 0) return null;
+  const linhas = t.slice(i, i + 1500).split(/\r?\n/);
+  const li = linhas.findIndex((l) => /Endere[çc]o\s*:/i.test(l));
+  if (li < 0) return null;
+  const semColunaAoLado = (l) => l.replace(/\s{2,}(?:Telefone|CNPJ|CPF|Agente)\b.*$/i, "").trim();
+  let valor = semColunaAoLado(linhas[li].replace(/^.*?Endere[çc]o\s*:\s*/i, ""));
+  for (let j = li + 1; j < Math.min(linhas.length, li + 4); j += 1) {
+    const proxima = linhas[j].trim();
+    if (!proxima) continue;
+    if (/^(?:Telefone|Agente|CNPJ|CPF|Empresa|Condi[çc])/i.test(proxima) || /:/.test(semColunaAoLado(proxima))) break;
+    valor = `${valor} ${semColunaAoLado(proxima)}`;
+    break;
+  }
+  valor = valor.replace(/\s+/g, " ").trim();
+  return valor.length >= 8 ? valor : null;
+}
+
 function cepLooksInstitutional(flat, cep) {
   if (!cep) return false;
   const index = flat.indexOf(cep);
@@ -866,7 +887,9 @@ export function heuristicExtractionFromText(rawText) {
   // Quadro 10 da CCB Credcesta: "Empresa: 000483- SEUCREDITO CNPJ: ... Endereço: ...
   // Telefone: ... Agente Certificado: NOME CPF: ...". É quem operou a venda.
   const corrEmpresa = correspondentBlock.match(/Empresa\s*:\s*(?:(\d{3,8})\s*-?\s*)?([A-ZÀ-Ü][A-ZÀ-Ü0-9 .&-]{2,80}?)\s+CNPJ\s*:\s*(\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2})/i);
-  const corrEndereco = correspondentBlock.match(/Endere[çc]o\s*:\s*(.{8,160}?)\s+Telefone\s*:/i)?.[1]?.trim() || null;
+  // No texto em colunas o "Telefone:" fica na mesma linha do "Endereço:" e a
+  // cidade cai na linha seguinte; lendo por linhas a cidade volta ao endereço.
+  const corrEndereco = enderecoDoQuadroCorrespondente(text) || correspondentBlock.match(/Endere[çc]o\s*:\s*(.{8,160}?)\s+Telefone\s*:/i)?.[1]?.trim() || null;
   const corrTelefone = correspondentBlock.match(/Telefone\s*:\s*(\(?\d{2}\)?\s*9?\d{4}-?\d{4})/i)?.[1] || null;
   const corrAgente = correspondentBlock.match(/Agente\s+Certificado\s*:\s*([A-ZÀ-Ü][A-ZÀ-Ü ]{4,80}?)\s+CPF\s*:\s*(\d{3}\.?\d{3}\.?\d{3}-?\d{2})/i);
   const corrCidade = correspondenteCidade || (corrEndereco && /-\s*([A-ZÀ-Ü][A-ZÀ-Ü ]{3,40})$/.test(corrEndereco) ? corrEndereco.match(/-\s*([A-ZÀ-Ü][A-ZÀ-Ü ]{3,40})$/)[1].trim() : null);

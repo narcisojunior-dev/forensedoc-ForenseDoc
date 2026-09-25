@@ -145,6 +145,22 @@ function lerUf(texto) {
   return null;
 }
 
+/**
+ * Rótulo digitado sem valor na referência manual ("Rua X, 50, Bairro, Residencial
+ * Y, Amparo/SP"): o operador copia o esqueleto do formulário e o laudo repetia
+ * "Bairro," como se fosse parte do endereço. Sai o rótulo, fica o resto.
+ */
+export function normalizarReferenciaManual(endereco) {
+  const texto = String(endereco || "").trim();
+  if (!texto) return texto;
+  return texto
+    .replace(/(?:^|,\s*)(?:Bairro|Cidade|Munic[íi]pio|Estado|UF|CEP|Complemento|N[úu]mero|Nº|Logradouro|Endere[çc]o)\s*:?\s*(?=,|$)/gi, (m) => (m.startsWith(",") ? "," : ""))
+    .replace(/\s*,\s*,+/g, ",")
+    .replace(/^\s*,\s*|\s*,\s*$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 /** Só interpreta UF/CEP em posição de campo, nunca palavras do logradouro. */
 export function camposDaReferencia(endereco) {
   // ", Brasil" no fim não é campo de estado e esconderia a UF antes dele.

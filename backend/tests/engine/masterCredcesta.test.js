@@ -436,3 +436,27 @@ describe("quesito do endereço cadastral igual ao do credor", () => {
     expect(q.quesito).toMatch(/BANCO MASTER S\.A/);
   });
 });
+
+import { normalizarReferenciaManual } from "../../src/utils/referenciaResidencial.js";
+describe("rótulo solto digitado na referência manual", () => {
+  it("'Bairro,' sem valor sai; rótulo com valor fica", () => {
+    expect(normalizarReferenciaManual("Rua José Gilberto Tambellini, 50, Bairro, Residencial Portal das Águas, Amparo-SP, 13906-881"))
+      .toBe("Rua José Gilberto Tambellini, 50, Residencial Portal das Águas, Amparo-SP, 13906-881");
+    expect(normalizarReferenciaManual("Rua A, 10, Bairro Centro, Amparo/SP, CEP: 13905-390")).toBe("Rua A, 10, Bairro Centro, Amparo/SP, CEP: 13905-390");
+    expect(normalizarReferenciaManual("Bairro, Cidade, Estado")).toBe("");
+    expect(normalizarReferenciaManual("")).toBe("");
+  });
+});
+
+describe("endereço do correspondente com o telefone na mesma linha e a cidade na linha seguinte", () => {
+  it("a cidade volta ao endereço e vira cidade do correspondente", () => {
+    const texto = LAYOUT_2023.replace(
+      "Endereço: RUA DAS PALMEIRAS, 126 - ANEXO D - JARDIM MORUMBI -\nPRESIDENTE PRUDENTE\nTelefone: (18) 3344-0000\n",
+      "Endereço: RUA DAS PALMEIRAS, 126 - ANEXO D - JARDIM MORUMBI -          Telefone: (18) 3344-0000\nPRESIDENTE PRUDENTE\n",
+    );
+    const e = heuristicExtractionFromText(texto);
+    expect(e.correspondente.endereco).toBe("RUA DAS PALMEIRAS, 126 - ANEXO D - JARDIM MORUMBI - PRESIDENTE PRUDENTE");
+    expect(e.correspondente.cidade).toBe("PRESIDENTE PRUDENTE");
+    expect(e.correspondente.telefone).toBe("(18) 3344-0000");
+  });
+});

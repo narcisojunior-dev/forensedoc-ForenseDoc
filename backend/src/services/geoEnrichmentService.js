@@ -6,7 +6,7 @@ import { isIP } from "node:net";
 import { describeIpDivergence, classifyDeclaredDivergence, aplicarHistoricoDoIp } from "../utils/geoDivergence.js";
 import { lookupRdapIp } from "./rdapService.js";
 import { parseUserAgentForensic } from "../utils/userAgentParser.js";
-import { ESTADO_CONFRONTO, avaliarConflitoReferencia, descreverEstadoConfronto } from "../utils/referenciaResidencial.js";
+import { ESTADO_CONFRONTO, avaliarConflitoReferencia, descreverEstadoConfronto, normalizarReferenciaManual } from "../utils/referenciaResidencial.js";
 import { montarConfrontoEnderecos } from "../utils/confrontoEnderecos.js";
 import { classificarFaixaIp } from "../utils/ipFaixa.js";
 import { mesmoMunicipio, referenciaMunicipal } from "../utils/distancia.js";
@@ -30,7 +30,9 @@ import { naoAferidoMesmoMunicipio } from "../utils/geoDivergence.js";
  *   operador — quando presente, é usada direto (precisão máxima), sem
  *   geocodificar. É o padrão-ouro forense: ponto confirmado por humano.
  */
-export async function enrichGeography(extracted, homeAddress, homeCoord = null, contestacao = null) {
+export async function enrichGeography(extracted, homeAddressBruto, homeCoord = null, contestacao = null) {
+  // Rótulo solto digitado pelo operador ("..., Bairro, ...") não é endereço.
+  const homeAddress = normalizarReferenciaManual(homeAddressBruto);
   const cliente = extracted.cliente || {};
   // Data do ato para o histórico do IP: a do próprio registro, senão a da
   // assinatura, senão a do contrato.
