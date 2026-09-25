@@ -113,6 +113,10 @@ const LOCAL_EMISSAO = [
   /LOCAL\s+E\s+DATA\s+DE\s+EMISS[ÃA]O\s*:?\s*([A-Za-zÀ-ÿ'´`^~.\- ]{2,60}?)\s*[-–/]\s*([A-Z]{2})\b/i,
   /LOCAL\s+DE\s+EMISS[ÃA]O\s*:?\s*([A-Za-zÀ-ÿ'´`^~.\- ]{2,60}?)\s*[-–/]\s*([A-Z]{2})\b/i,
   /Emitid[ao]\s+em\s+([A-Za-zÀ-ÿ'´`^~.\- ]{2,60}?)\s*[-–/]\s*([A-Z]{2})\b/i,
+  // Bloco de assinatura eletrônica da CCB do Banco Master/Credcesta:
+  // "DOCUMENTO ASSINADO ELETRONICAMENTE / Local: Amparo - SP". É o local do
+  // ato declarado pelo próprio instrumento, na mesma página da coordenada.
+  /^[ \t]*Local(?:\s+d[ae]\s+assinatura)?\s*:\s*([A-Za-zÀ-ÿ'´`^~.\- ]{2,60}?)\s*[-–/]\s*([A-Z]{2})\b(?=[ \t]*(?:$|[,.;]|\d{2}\/\d{2}\/\d{4}))/im,
 ];
 
 /**

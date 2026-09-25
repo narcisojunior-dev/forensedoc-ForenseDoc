@@ -262,10 +262,10 @@ export function descreverEstadoConfronto(home) {
     }
     case ESTADO_CONFRONTO.DIVERGENCIA_CADASTRAL: {
       const distTexto = home.distancia_divergencia_cadastral != null
-        ? ` distantes em aproximadamente ${home.distancia_divergencia_cadastral.toFixed(1).replace(".", ",")} km`
+        ? ` Os dois endereços ficam a aproximadamente ${home.distancia_divergencia_cadastral.toFixed(1).replace(".", ",")} km um do outro.`
         : "";
       const justTexto = home.justificativa ? ` Justificativa registrada: "${home.justificativa}".` : "";
-      return `DIVERGÊNCIA CADASTRAL: ${home.conflito?.descricao || "o endereço informado diverge da qualificação extraída do instrumento"}.${distTexto}. Endereço informado: ${home.conflito?.manual?.texto || home.query || "coordenada informada"}. Cidade, UF e CEP do instrumento: ${instrumentoTexto}. O laudo apresenta o confronto geográfico e as distâncias calculadas em relação a ambas as referências.${justTexto}`;
+      return `DIVERGÊNCIA CADASTRAL: ${home.conflito?.descricao || "o endereço informado diverge da qualificação extraída do instrumento"}.${distTexto} Endereço informado: ${home.conflito?.manual?.texto || home.query || "coordenada informada"}. Cidade, UF e CEP do instrumento: ${instrumentoTexto}. O laudo apresenta o confronto geográfico e as distâncias calculadas em relação a ambas as referências.${justTexto}`;
     }
     case ESTADO_CONFRONTO.LIBERADO_PELO_OPERADOR:
       return `REFERÊNCIA LIBERADA PELO OPERADOR: ${home.conflito?.descricao || "conflito entre o endereço informado e o do instrumento"}. O operador declarou contestado o endereço do instrumento, com a seguinte justificativa: "${home.justificativa}". As distâncias abaixo usam o endereço informado e devem ser lidas com essa ressalva.`;

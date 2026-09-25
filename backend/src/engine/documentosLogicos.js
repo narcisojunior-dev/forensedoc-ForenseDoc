@@ -24,7 +24,10 @@ const TIPOS = [
   // ("CONDIÇÕES GERAIS DA CÉDULA DE CRÉDITO BANCÁRIO").
   { tipo: "CONDICOES_GERAIS", titulo: "Condições gerais", regex: /^\s*CONDI[ÇC][ÕO]ES\s+GERAIS\b/im },
   { tipo: "INSTRUMENTO_PRINCIPAL", titulo: "Cédula de Crédito Bancário (condições específicas)", regex: /^\s*C[ÉE]DULA\s+DE\s+CR[ÉE]DITO\s+BANC[ÁA]RIO|^\s*CONTRATO\s+DE\s+(?:EMPR[ÉE]STIMO|CART[ÃA]O|CR[ÉE]DITO)/im },
-  { tipo: "SEGURO", titulo: "Proposta de adesão ao seguro", regex: /Proposta\s+de\s+Ades[ãa]o|Seguro\s+Prestamista|Certificado\s+(?:Individual\s+)?de\s+Seguro/i },
+  // Título no início da linha e sem dois-pontos: "4.8. Seguro Prestamista:" é
+  // campo do quadro da CCB, e fazia as págs. 2 a 10 da cédula do Banco Master
+  // virarem "proposta de adesão ao seguro".
+  { tipo: "SEGURO", titulo: "Proposta de adesão ao seguro", regex: /^\s*(?:Proposta\s+de\s+Ades[ãa]o|Seguro\s+Prestamista|Certificado\s+(?:Individual\s+)?de\s+Seguro)\b(?!\s*:)/im },
   { tipo: "TERMOS", titulo: "Termos de uso e política de privacidade", regex: /TERMOS\s+DE\s+USO|POL[ÍI]TICA\s+DE\s+PRIVACIDADE/i },
   { tipo: "COMPROVANTE", titulo: "Comprovante de transferência", regex: /COMPROVANTE\s+DE\s+(?:TRANSFER[ÊE]NCIA|TED|PIX|TRANSA[ÇC][ÃA]O)/i },
 ];
@@ -38,6 +41,9 @@ const BLOCO_ASSINATURA = [
   /Documento\s+assinado\s+eletronicamente\s+por\s*:?\s*([A-ZÁÀÂÃÉÊÍÓÔÕÚÇ][A-ZÁÀÂÃÉÊÍÓÔÕÚÇ ]{3,80}(?:\n\s*[A-ZÁÀÂÃÉÊÍÓÔÕÚÇ ]{2,40})?)/,
   /ASSINADO\s+ELETRONICAMENTE\s+POR\s*:?\s*\n?\s*([A-ZÁÀÂÃÉÊÍÓÔÕÚÇ][A-ZÁÀÂÃÉÊÍÓÔÕÚÇ ]{3,80})/,
   /Assinatura\s+do\s+(?:Emitente|Proponente|Contratante|Cliente|Tomador|Devedor)/i,
+  // CCB do Banco Master/Credcesta: "DOCUMENTO ASSINADO ELETRONICAMENTE" com
+  // foto, geolocalização, data e hora, e o nome no campo "Nome do Cliente".
+  /(?:DOCUMENTO|Documento)\s+(?:ASSINADO|assinado)\s+(?:ELETRONICAMENTE|eletronicamente)[\s\S]{0,600}?Nome\s+do\s+Cliente\s*:?\s*\n?\s*([A-ZÁÀÂÃÉÊÍÓÔÕÚÇ][A-ZÁÀÂÃÉÊÍÓÔÕÚÇ ]{3,80})/,
 ];
 
 function topoDaPagina(pagina, linhas = 4) {
@@ -168,7 +174,7 @@ export function documentoDaPagina(segmentacao, pagina) {
  * erro de segmentação produziria afirmação falsa.
  */
 export function avaliarAssinaturaPorDocumento(segmentacao) {
-  if (!segmentacao?.confiavel) return { achado: null, resumo: null };
+  if (!segmentacao?.documentos?.length) return { achado: null, resumo: null };
   const principal = segmentacao.documentos.find((d) => d.tipo === "INSTRUMENTO_PRINCIPAL" && d.tituloDetectado);
   const acessoriosAssinados = segmentacao.documentos.filter((d) => d !== principal && d.tipo !== "DOSSIE" && d.blocosAssinatura.length);
   const faixa = (d) => (d.paginaInicial === d.paginaFinal ? `pág. ${d.paginaInicial}` : `págs. ${d.paginaInicial} a ${d.paginaFinal}`);
@@ -183,6 +189,9 @@ export function avaliarAssinaturaPorDocumento(segmentacao) {
   const resumo = segmentacao.documentos.map((d) => `${d.titulo} (${faixa(d)}): ${descrever(d)}`).join("; ");
   // Só blocos apostos a documento negocial contam como assinatura.
   const totalBlocos = segmentacao.documentos.reduce((n, d) => n + d.blocosAssinatura.filter((b) => (b.tipo || "BLOCO_ASSINATURA") === "BLOCO_ASSINATURA").length, 0);
+  // O resumo descreve o que foi lido, documento a documento, mesmo com um só
+  // título; o achado ASS1 continua exigindo segmentação confiável.
+  if (!segmentacao.confiavel) return { achado: null, resumo, totalBlocos };
 
   // Fragmentos não contíguos e aditivos impedem imputar ausência ao contrato
   // inteiro a partir apenas do primeiro segmento com o mesmo título.

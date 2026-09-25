@@ -242,9 +242,11 @@ const MODELOS = {
   },
   INT1(e) {
     const protocolo = e.assinatura?.codigo_autenticacao_declarado;
+    // Sem URL de verificação no dossiê, o laudo não afirma que existe sítio.
+    const urlVerificacao = e.assinatura?.codigo_autenticacao_url_verificacao;
     return {
       titulo: "Integridade Criptográfica e Ônus Probatório (Tema 1.061 STJ e MP 2.200-2/2001)",
-      quesito: `Caso haja impugnação da autenticidade pelo consumidor, observada a hipótese do Tema 1.061 do STJ (CPC, art. 429, II), e considerando que o dossiê não apresenta resumo criptográfico (hash) do documento assinado${protocolo ? `, mas apenas o protocolo interno ${protocolo}, verificável somente no sítio da própria instituição` : ""}, queira informar se a assinatura possui certificado ICP-Brasil e apresentar o hash do arquivo original, calculado no momento da assinatura, com indicação do algoritmo e do meio de conferência por terceiro.`,
+      quesito: `Caso haja impugnação da autenticidade pelo consumidor, observada a hipótese do Tema 1.061 do STJ (CPC, art. 429, II), e considerando que o dossiê não apresenta resumo criptográfico (hash) do documento assinado${protocolo ? `, mas apenas o protocolo interno ${protocolo}, ${urlVerificacao ? `verificável somente no sítio da própria instituição (${urlVerificacao})` : "conferível apenas pela própria instituição, que detém os registros"}` : ""}, queira informar se a assinatura possui certificado ICP-Brasil e apresentar o hash do arquivo original, calculado no momento da assinatura, com indicação do algoritmo e do meio de conferência por terceiro.`,
       finalidade: "Fixar a incumbência probatória sobre a instituição financeira e afastar a autoverificação.",
     };
   },

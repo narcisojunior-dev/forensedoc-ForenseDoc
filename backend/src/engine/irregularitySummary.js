@@ -482,6 +482,23 @@ export function buildIrregularitySummary(report = {}) {
     addCheck("F", "gps-municipio", "PRÓ-BANCO", "Mesmo município do domicílio.");
   }
 
+  // O instrumento declara o local do ato ("Local: Amparo - SP") e registra, no
+  // mesmo bloco, a coordenada do ato. Quando ela cai em outro município, o
+  // documento se contradiz sozinho, sem depender da residência informada.
+  const localDeclarado = report.home?.local_emissao;
+  const municipioDeclarado = normalizeText(localDeclarado?.municipio);
+  const ufDeclaradaDiverge = Boolean(localDeclarado?.uf && report.contractGeo?.uf && normalizeText(localDeclarado.uf) !== normalizeText(report.contractGeo.uf));
+  if (gpsMunicipio && municipioDeclarado && (gpsMunicipio !== municipioDeclarado || ufDeclaradaDiverge)) {
+    const parEmissao = (report.confronto_enderecos?.pares || []).find((p) => p.id === "gps-x-emissao");
+    const kmEmissao = parEmissao?.km ?? null;
+    const gpsRotulo = `${report.contractGeo.municipio}${report.contractGeo.uf ? `/${report.contractGeo.uf}` : ""}`;
+    const declaradoRotulo = `${localDeclarado.municipio}${localDeclarado.uf ? `/${localDeclarado.uf}` : ""}`;
+    addFinding("MÉDIA", "gps-local-declarado", "Coordenada do ato em município diverso do local declarado no instrumento.", `O instrumento declara como local do ato ${declaradoRotulo} e registra, no mesmo bloco, a coordenada do ato, que cai em ${gpsRotulo}${kmEmissao !== null && !distanciaSuspeita(kmEmissao) ? `, a ${formatKm(kmEmissao)} da sede do município declarado` : ""}. As duas informações constam do próprio arquivo e não se conciliam: o local declarado e a coordenada registrada apontam municípios diferentes.`);
+    addCheck("F", "gps-local-declarado", "ALERTA", `${gpsRotulo} ≠ ${declaradoRotulo}`);
+  } else if (gpsMunicipio && municipioDeclarado) {
+    addCheck("F", "gps-local-declarado", "PRÓ-BANCO", "Coordenada do ato no município declarado como local do ato.");
+  }
+
   if (report.home?.estado_confronto === "DIVERGENCIA_CADASTRAL" || (report.home?.conflito && report.home?.estado_confronto !== "RECUSADO_CONFLITO")) {
     const conflito = report.home.conflito;
     const kmCadastral = report.home.distancia_divergencia_cadastral != null
@@ -750,16 +767,18 @@ export function buildIrregularitySummary(report = {}) {
         ? "o documento não declara coordenada do ato para confrontar com a rede"
         : "os elementos disponíveis não formaram par comparável";
 
-  const inventario = [
+  const itensInventario = [
     eventosComIp ? `${eventosComIp} ${eventosComIp === 1 ? "evento com IP" : "eventos com IP"}` : null,
     eventosComCoordenada ? `${eventosComCoordenada} ${eventosComCoordenada === 1 ? "evento com coordenada" : "eventos com coordenada"}` : null,
     !eventosComIp && ipsInventariados ? `${ipsInventariados} ${ipsInventariados === 1 ? "endereço IP inventariado" : "endereços IP inventariados"}` : null,
     !eventosComCoordenada && coordenadaDeclarada ? "coordenada declarada no documento" : null,
-  ].filter(Boolean).join(", ");
+  ].filter(Boolean);
+  const inventario = itensInventario.join(", ");
+  const verboInventario = itensInventario.length > 1 ? "constam" : "consta";
 
   let synthesis = semInsumoGeografico
     ? "Não foram localizados elementos geográficos suficientes na extração disponível para confronto entre GPS e IP de acesso. A limitação da extração não comprova ausência desses elementos no original."
-    : `O confronto entre GPS e IP de acesso não foi concluído porque ${motivoDoConfronto}. O arquivo NÃO é omisso quanto a rastros geográficos: ${inventario} constam do dossiê e estão detalhados nas seções anteriores. Confronto não realizado e insumo ausente são estados distintos, e este é o primeiro.`;
+    : `O confronto entre GPS e IP de acesso não foi concluído porque ${motivoDoConfronto}. O arquivo NÃO é omisso quanto a rastros geográficos: ${inventario} ${verboInventario} do dossiê, com detalhe nas seções anteriores. Confronto não realizado e insumo ausente são estados distintos, e este é o primeiro.`;
   if (gpsIpDistance !== null && gpsIpDistance >= 50) {
     synthesis = `A tese técnica se concentra na divergência de ${formatKm(gpsIpDistance)} entre o GPS da assinatura e o IP de acesso provável. IPs classificados como servidor, CDN ou infraestrutura não devem ser usados para localizar o consumidor.`;
   } else if (gpsIpDistance !== null) {

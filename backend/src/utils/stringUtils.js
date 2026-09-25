@@ -43,7 +43,10 @@ export function titleCaseName(value) {
     .replace(/\bRG\b.*$/i, "")
     .replace(/\bCELULAR\b.*$/i, "")
     .toLowerCase()
-    .replace(/\b([a-záàâãéêíóôõúç])/g, (m) => m.toUpperCase())
+    // "\b" é ASCII: em "são paulo" a fronteira caía dentro da palavra e o
+    // resultado era "SÃO Paulo". Letra inicial é a que vem depois de algo que
+    // não é letra.
+    .replace(/(^|[^\p{L}])(\p{L})/gu, (m, antes, letra) => antes + letra.toUpperCase())
     .replace(/\s+/g, " ")
     .trim();
 }

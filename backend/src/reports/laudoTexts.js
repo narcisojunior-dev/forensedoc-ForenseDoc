@@ -54,6 +54,19 @@ const GRUPOS_CONSIGNADO = {
       ["Lei 10.820/2003", "Disciplina a autorização para desconto de prestações de empréstimos em folha de pagamento dos empregados regidos pela CLT, os limites da consignação e as obrigações do empregador na retenção e no repasse."],
     ],
   },
+  // Servidor público: nem a Lei 10.820/2003 (CLT e INSS) nem a Lei 8.213/1991
+  // regem a folha do servidor. A CCB Credcesta de servidora do GOV SP saía com
+  // o bloco do INSS.
+  // TODO(jurídico): conferir no DOU a redação do art. 45 da Lei 8.112/1990
+  // vigente na data do contrato (parágrafos da Lei 13.172/2015) antes de citar
+  // parágrafo.
+  CONSIGNADO_SERVIDOR: {
+    grupo: "Crédito consignado de servidor público",
+    itens: [
+      ["Lei 8.112/1990, art. 45", "Para o servidor público federal, admite consignação em folha de pagamento a favor de terceiros mediante autorização do servidor, na forma do regulamento."],
+      ["Estatuto e regulamento do ente pagador", "Para servidor estadual ou municipal, a consignação em folha segue o estatuto e o regulamento do ente indicado como fonte pagadora no instrumento, a conferir na redação vigente na data do contrato."],
+    ],
+  },
 };
 
 // Produto não classificado mantém o grupo anterior, para não retirar

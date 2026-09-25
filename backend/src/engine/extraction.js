@@ -386,6 +386,16 @@ function isInstitutionalAddress(value) {
   return /cidade\s+de\s+deus|vila\s+yara|osasco|alameda\s+rio\s+negro|av\.?\s+paulista|sede\s+social|cnpj|banco\s+/i.test(value || "");
 }
 
+/**
+ * Via da cédula: a opção marcada, não a primeira impressa. O rodapé da CCB do
+ * Banco Master traz "VIA DO BANCO NEGOCIÁVEL / X VIA DO EMITENTE NÃO
+ * NEGOCIÁVEL", e o laudo afirmava "VIA DO BANCO" com o X na outra opção.
+ */
+function viaMarcada(flat) {
+  const m = String(flat || "").match(/(?:^|[\s/])(?:X|☒|■|✓|✔)\s+(VIA\s+DO\s+(?:BANCO|CREDOR|EMITENTE|CLIENTE)(?:\s+N[ÃA]O)?(?:\s+NEGOCI[ÁA]VEL)?)\b/i);
+  return m ? m[1].toUpperCase().replace(/\s+/g, " ") : null;
+}
+
 function cepLooksInstitutional(flat, cep) {
   if (!cep) return false;
   const index = flat.indexOf(cep);
@@ -723,7 +733,7 @@ export function heuristicExtractionFromText(rawText) {
     /\b([a-f0-9]{64})\b/i,
   ]);
   const codigoRotulado = text.match(
-    /(?:N[uú]mero\s+[uú]nico|C[oó]digo\s+de\s+(?:verifica[cç][aã]o|autentica[cç][aã]o|autenticidade)|Chave\s+de\s+valida[cç][aã]o|Protocolo\s+de\s+autenticidade(?:\s+n[ºo°.]*)?)\s*:?[ \t]*([A-Za-z0-9][A-Za-z0-9-]{7,79})\b/i
+    /(?:N[uú]mero\s+[uú]nico|C[oó]digo\s+de\s+(?:verifica[cç][aã]o|autentica[cç][aã]o|autenticidade)|Chave\s+de\s+valida[cç][aã]o|Protocolo\s+de\s+autenticidade(?:\s+n[ºo°.]*)?|ID\s+da\s+sess[ãa]o(?:\s+(?:do\s+)?usu[áa]rio)?|Identificador\s+d[ae]\s+sess[ãa]o)\s*:?[ \t]*([A-Za-z0-9][A-Za-z0-9-]{7,79})\b/i
   );
   const codigoAutenticacaoRotulado = codigoRotulado && !/^\d{1,7}$/.test(codigoRotulado[1]) ? codigoRotulado[1] : null;
   const urlVerificacao = firstMatch(flat, [/Verifique\s+a\s+autenticidade\s+em\s*:?\s*(https?:\/\/\S+?)[.,;]?(?:\s|$)/i]);
@@ -757,7 +767,7 @@ export function heuristicExtractionFromText(rawText) {
   const codigoAutenticacaoOrigem = layout.codigoAutenticacao
     ? "bloco de autenticação do rodapé"
     : codigoRotulado
-      ? `rótulo "${codigoRotulado[0].split(/\s*:|\s{2,}/)[0].replace(/\s+/g, " ").trim()}"${paginaDoIndice(text, codigoRotulado.index) ? `, pág. ${paginaDoIndice(text, codigoRotulado.index)}` : ""}`
+      ? `rótulo "${codigoRotulado[0].split(/\s*:|\s{2,}|\n/)[0].replace(/\s+/g, " ").trim()}"${paginaDoIndice(text, codigoRotulado.index) ? `, pág. ${paginaDoIndice(text, codigoRotulado.index)}` : ""}`
       : null;
   const declaredAuthHashState = hash ? classifyDeclaredHash(hash) : "AUSENTE";
   const codigoAutenticacaoEstado = codigoAutenticacao ? classifyDeclaredHash(codigoAutenticacao) : "AUSENTE";
@@ -813,9 +823,11 @@ export function heuristicExtractionFromText(rawText) {
   ]);
   const extractedClienteCep = layout.clienteCep || agiCep || clienteCep || cep;
   const finalClienteCep = cepLooksInstitutional(flat, extractedClienteCep) ? null : extractedClienteCep;
+  // Entre espaço e "(" não há fronteira de palavra, e o "\b" deixava o DDD sem
+  // o parêntese de abertura: o laudo saía com "19) 99904-2614".
   const rawClienteTelefone = layout.clienteTelefone || firstMatch(issuerBlock || flat, [
-    /Telefone\(s\)\s*[:\-]?\s*\/?\s*(\(?\d{2}\)?\s*9?\d{4}-?\d{4})/i,
-    /\b(\(?\d{2}\)?\s*9?\d{4}-?\d{4})\b/,
+    /Telefone(?:\(s\)|s|\/Celular)?\s*[:\-]?\s*\/?\s*(\(?\d{2}\)?\s*9?\d{4}-?\d{4})/i,
+    /(?:^|[^\d(])(\(?\d{2}\)?\s*9?\d{4}-?\d{4})\b/,
   ]);
   const clienteTelefone = validPhone(rawClienteTelefone, contratoNumero, cpf);
   const originalCreditor = firstMatch(flowBlock || operationBlock || flat, [
@@ -896,7 +908,7 @@ export function heuristicExtractionFromText(rawText) {
       "INT1",
       "ALTA",
       "Ausência de resumo criptográfico do documento assinado",
-      `O dossiê não apresenta nenhum resumo criptográfico (hash) do documento assinado. Apresenta apenas número de protocolo interno (${codigoAutenticacaoRotulado}), verificável exclusivamente no sítio da própria instituição${urlVerificacao ? ` (${urlVerificacao})` : ""}. Isso configura autoverificação, e não cadeia de custódia: o protocolo não permite a terceiro conferir, de forma independente, que o arquivo apresentado é o mesmo que foi assinado.`
+      `O dossiê não apresenta nenhum resumo criptográfico (hash) do documento assinado. Apresenta apenas protocolo interno (${codigoAutenticacaoRotulado}), ${urlVerificacao ? `verificável exclusivamente no sítio da própria instituição (${urlVerificacao})` : "conferível apenas pela própria instituição, que detém os registros"}. Isso configura autoverificação, e não cadeia de custódia: o protocolo não permite a terceiro conferir, de forma independente, que o arquivo apresentado é o mesmo que foi assinado.`
     );
   } else if (!hash && !codigoAutenticacao) {
     addIssue("INT1", "MÉDIA", "Hash conferível ausente", "Não há hash de integridade declarado pelo emissor no documento.");
@@ -1050,7 +1062,7 @@ export function heuristicExtractionFromText(rawText) {
     cartao: isCartaoConsignado ? layout.cartao : null,
     conta_beneficio: layout.contaBeneficio || null,
     correspondente: layout.correspondente || null,
-    via_declarada: firstMatch(flat, [
+    via_declarada: viaMarcada(flat) || firstMatch(flat, [
       /\b(?:via\s+n[ãa]o\s+negoci[áa]vel|via\s+do\s+emitente|via\s+negoci[áa]vel|via\s+do\s+credor|via\s+do\s+banco)\b/i,
       /\b(?:1[ªa]\s*via\s*[-–]\s*(?:negoci[áa]vel|n[ãa]o\s+negoci[áa]vel|do\s+credor|do\s+emitente))\b/i,
     ]),
@@ -1144,7 +1156,10 @@ export function heuristicExtractionFromText(rawText) {
   if (mathAudit.prazo_confere === false && mathAudit.prazo_declarado_meses) {
     addIssue("PRZ1", "MÉDIA", "Prazo efetivo diverge do prazo total declarado", `O instrumento declara prazo total de ${mathAudit.prazo_declarado_meses} meses, mas da emissão (${contratoExtraido.data_contrato}) ao último vencimento (${contratoExtraido.data_ultimo_vencimento}) decorrem ${plural(mathAudit.prazo_calculado_dias, "dia", "dias")}, cerca de ${String(mathAudit.prazo_efetivo_meses).replace(".", ",")} meses. A diferença decorre da carência até o primeiro vencimento, durante a qual correm juros, e não está refletida no prazo informado ao consumidor.`);
   }
-  if (contratoExtraido.agencia && !contratoExtraido.nome_agencia) {
+  // O achado só cabe quando o formulário tem o campo "Nome da Agência" e o
+  // deixou vazio. A CCB do Banco Master traz agência e conta de débito sem esse
+  // campo, e o laudo apontava a falta de um dado que o modelo não pede.
+  if (contratoExtraido.agencia && !contratoExtraido.nome_agencia && /Nome\s+da\s+Ag[êe]ncia/i.test(flat)) {
     addIssue("CAD1", "MÉDIA", "Qualificação incompleta do contratante", "O instrumento informa agência e conta, mas deixa o nome da agência em branco. O dado deve ser conferido com o cadastro bancário e com a modalidade de desconto aplicável.");
   }
   const beneficioMatricula = layout.matriculaInss
