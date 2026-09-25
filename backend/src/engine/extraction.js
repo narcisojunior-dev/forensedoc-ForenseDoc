@@ -358,6 +358,8 @@ function valorDeCidadePlausivel(value) {
   const v = String(value || "").trim();
   if (v.length < 3) return false;
   if (comecaPorPreposicao(v)) return false;
+  // Nome de cidade começa com maiúscula. "periodicidade mensal" quebrado em
+  // "periodi-" e "cidade mensal" no texto em colunas dava cidade "mensal".
   if (!/^[A-ZÀ-Ý]/.test(v)) return false;
   if (valorEhRotulo(v)) return false;
   if (isInstitutionalAddress(v)) return false;

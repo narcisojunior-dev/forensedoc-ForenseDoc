@@ -83,6 +83,11 @@ Telefone/Celular:
     expect(e.cliente.estado).toBe("SP");
     expect(e.cliente.bairro).toBe("Jardim Juliana");
   });
+  it("'periodicidade mensal' quebrado em duas linhas não vira cidade 'mensal'", () => {
+    const quebrado = texto.replace("Cidade:\nAmparo\n", "") + "\ncom taxa de juros e periodi\ncidade mensal, com contagem de dias corridos 365 dias/ano\n";
+    const e = heuristicExtractionFromText(quebrado);
+    expect(e.cliente.cidade).not.toBe("mensal");
+  });
   it("com os rótulos em colunas, nenhum rótulo vira valor", () => {
     const colunas = texto.replace("Bairro:\nJardim Juliana\nCidade:\nAmparo\nEstado:\nSP\nCEP:\n13905-390", "Bairro:            Cidade:        Estado:   CEP:\nJardim Juliana     Amparo         SP        13905-390");
     const e = heuristicExtractionFromText(colunas);
