@@ -420,7 +420,9 @@ function enderecoDoQuadroCorrespondente(texto) {
   const linhas = t.slice(i, i + 1500).split(/\r?\n/);
   const li = linhas.findIndex((l) => /Endere[çc]o\s*:/i.test(l));
   if (li < 0) return null;
-  const semColunaAoLado = (l) => l.replace(/\s{2,}(?:Telefone|CNPJ|CPF|Agente)\b.*$/i, "").trim();
+  // "Telefone: (37) 98806-3249" na mesma linha do endereço, com um espaço só,
+  // entrava no endereço do correspondente da CCB 65126985.
+  const semColunaAoLado = (l) => l.replace(/\s*(?:Telefone|CNPJ|CPF|Agente\s+Certificado)\s*:[^\n]*?(?=\s+-\s+[A-ZÀ-Ü]|$)/i, " ").replace(/\s+/g, " ").trim();
   let valor = semColunaAoLado(linhas[li].replace(/^.*?Endere[çc]o\s*:\s*/i, ""));
   for (let j = li + 1; j < Math.min(linhas.length, li + 4); j += 1) {
     const proxima = linhas[j].trim();
