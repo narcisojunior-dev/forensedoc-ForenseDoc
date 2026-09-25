@@ -1583,6 +1583,12 @@ export function heuristicExtractionFromText(rawText) {
         `O quadro de dados pessoais do contratante registra como residência ${coincidencias}${cidadeUf ? `, em ${cidadeUf}` : ""}, e o quadro do credor atribui o mesmo endereço à sede ou filial da instituição. O instrumento afirma que o contratante reside no endereço do banco. A coincidência consta do próprio arquivo e deve ser confrontada com o comprovante de residência apresentado na contratação e com a residência informada na geração do laudo.`
       );
       extracted.cliente.origens = { ...(extracted.cliente.origens || {}), endereco_coincide_credor: coincidencias };
+      // O logradouro tinha sido descartado como "contexto institucional"; no
+      // quadro do cliente ele é dado do instrumento e o § 3 precisa mostrá-lo.
+      if (!extracted.cliente.endereco && logradouroRepetido) {
+        extracted.cliente.endereco = logradouroRepetido;
+        extracted.cliente.origens.endereco = "EXTRAÍDO do quadro do cliente; coincide com o endereço do credor (ver CAD6)";
+      }
     }
   }
 

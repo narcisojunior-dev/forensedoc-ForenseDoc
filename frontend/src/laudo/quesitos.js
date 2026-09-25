@@ -210,6 +210,17 @@ const MODELOS = {
       finalidade: "Esclarecer as limitações cadastrais e os documentos utilizados na identificação.",
     };
   },
+  // CAD6: o instrumento registra como residência do contratante o endereço do
+  // próprio credor (CCB Credcesta de 2024, Faria Lima/Itaim Bibi).
+  CAD6(e, { bancoRef }) {
+    const coincidencias = e.cliente?.origens?.endereco_coincide_credor || null;
+    const local = [e.cliente?.cidade, e.cliente?.estado].filter(Boolean).join("/");
+    return {
+      titulo: "Origem do Endereço Cadastral do Contratante",
+      quesito: `Considerando que o instrumento registra como residência do contratante ${coincidencias || "o mesmo endereço atribuído ao credor"}${local ? `, em ${local}` : ""}, endereço que o próprio documento atribui à sede ou filial da instituição, queira ${bancoRef} apresentar o comprovante de residência aceito na contratação, informar a origem do dado cadastral (cadastro prévio, documento apresentado ou preenchimento pelo correspondente) e esclarecer a conferência feita antes da formalização.`,
+      finalidade: "Verificar a origem do endereço cadastral e a diligência da instituição na identificação da residência do contratante.",
+    };
+  },
   SEG1(e, { nomeRef }) {
     const sg = e.seguro_prestamista || {};
     const cobertura = [...(sg.coberturas || [])]

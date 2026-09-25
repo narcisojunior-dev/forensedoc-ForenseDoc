@@ -395,6 +395,7 @@ describe("CCB Credcesta de 2024: residência da contratante igual ao endereço d
     expect(cad6.texto).toMatch(/bairro Itaim Bibi/);
     expect(cad6.texto).toMatch(/São Paulo\/SP/);
     expect(classificarGrauProcessual("CAD6", "ALTA")).toBe(GRAUS.CONSTATADO);
+    expect(e.cliente.endereco).toBe("Avenida Brigadeiro Faria Lima");
     expect(heuristicExtractionFromText(LAYOUT_2023).achados_irregularidade.map((a) => a.codigo)).not.toContain("CAD6");
   });
 
@@ -416,5 +417,22 @@ Assinatura digital: 0f0f0f0f-aaaa-4bbb-8ccc-0123456789ab`;
     const e = heuristicExtractionFromText(texto);
     expect(e.assinatura.codigo_autenticacao_declarado).toBe("0f0f0f0f-aaaa-4bbb-8ccc-0123456789ab");
     expect(e.assinatura.codigo_autenticacao_origem).toMatch(/Assinatura digital|ID da sessão/);
+  });
+});
+
+import { generateJudicialQuesitos } from "../../src/reports/quesitosTemplate.js";
+describe("quesito do endereço cadastral igual ao do credor", () => {
+  it("CAD6 gera quesito citando o logradouro e o bairro do credor", () => {
+    const texto = LAYOUT_2023
+      .replace("Rua das Flores                     20\n", "Avenida Brigadeiro Faria Lima      228\n")
+      .replace("Jardim Juliana       Amparo            SP              13905-390\n", "Itaim Bibi           São Paulo         SP\n");
+    const e = heuristicExtractionFromText(texto);
+    const saida = generateJudicialQuesitos({ banco: "BANCO MASTER S.A", achados: e.achados_irregularidade, extracted: e });
+    const lista = Array.isArray(saida) ? saida : (saida.quesitos || saida.itens || Object.values(saida).find(Array.isArray) || []);
+    const q = lista.find((x) => /Origem do Endereço Cadastral/.test(x.titulo || ""));
+    expect(q).toBeTruthy();
+    expect(q.quesito).toMatch(/Avenida Brigadeiro Faria Lima/);
+    expect(q.quesito).toMatch(/bairro Itaim Bibi/);
+    expect(q.quesito).toMatch(/BANCO MASTER S\.A/);
   });
 });
