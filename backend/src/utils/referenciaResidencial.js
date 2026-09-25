@@ -42,22 +42,121 @@ export function ufDoTexto(texto) {
   return UFS.includes(ufCandidata) ? ufCandidata : null;
 }
 
+/*
+ * ─── Leitura do endereço livre ───────────────────────────────────────────────
+ *
+ * Cada operador escreve o endereço de um jeito, e um falso positivo aqui custa
+ * caro: UF ou CEP "inválido" recusa o envio, e UF ou CEP lido errado imprime no
+ * laudo uma divergência cadastral que não existe. Por isso o leitor só afirma
+ * UF e CEP em posição inequívoca de campo e, na dúvida, não afirma nada: a
+ * geocodificação decide depois, em `avaliarConflitoReferencia`.
+ */
+
+/** Nome por extenso, sem acento, só aceito depois de rótulo ("Estado: Piauí"). */
+const NOMES_DE_UF = {
+  acre: "AC", alagoas: "AL", amapa: "AP", amazonas: "AM", bahia: "BA", ceara: "CE",
+  "distrito federal": "DF", "espirito santo": "ES", goias: "GO", maranhao: "MA",
+  "mato grosso do sul": "MS", "mato grosso": "MT", "minas gerais": "MG", paraiba: "PB",
+  parana: "PR", para: "PA", pernambuco: "PE", piaui: "PI", "rio de janeiro": "RJ",
+  "rio grande do norte": "RN", "rio grande do sul": "RS", rondonia: "RO", roraima: "RR",
+  "santa catarina": "SC", "sao paulo": "SP", sergipe: "SE", tocantins: "TO",
+};
+// Mais longo primeiro: "mato grosso do sul" antes de "mato grosso", "paraiba" antes de "para".
+const NOMES_POR_TAMANHO = Object.keys(NOMES_DE_UF).sort((a, b) => b.length - a.length);
+
+/**
+ * Duas letras que, no fim do endereço, são parte dele: sem número, quadra,
+ * lote, bloco, casa, fundos, km, abreviações de logradouro e de bairro, e
+ * preposições. Nenhuma é UF, e nenhuma pode recusar o envio como "UF inválida".
+ */
+const SIGLAS_DE_ENDERECO = new Set([
+  "SN", "QD", "QU", "LT", "BL", "CS", "FD", "CJ", "LJ", "SL", "ED", "CH", "KM", "NR", "NO",
+  "TV", "AV", "BR", "CX", "JD", "VL", "PQ", "ST", "SR", "CD", "CT", "AD", "AT", "TR", "RD",
+  "PC", "LG", "DE", "DA", "DO", "EM", "NA", "AO", "AS", "OS", "UM", "OU",
+]);
+
+/** Palavra de complemento logo antes da sigla: "Bloco MA", "Casa PA" são complemento. */
+const COMPLEMENTO_ANTES = /(?:^|[\s,;.])(?:bloco|bl|casa|cs|apto|apt|ap|apartamento|quadra|qd|lote|lt|sala|sl|loja|lj|conjunto|cj|torre|edif[ií]cio|ed|galp[aã]o|box|n[º°o]|n[uú]mero)\.?\s*$/i;
+
+const semAcento = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "");
+
+/** "Estado: Mato Grosso do Sul" → MS; "UF: PI" → PI; valor desconhecido volta como está. */
+function ufDoRotulo(valor) {
+  const texto = String(valor || "").trim();
+  const sigla = texto.match(/^([A-Za-z]{2})\b(?![À-ÿ])/);
+  if (sigla) return sigla[1].toUpperCase();
+  const normalizado = semAcento(texto).toLowerCase();
+  const nome = NOMES_POR_TAMANHO.find((n) => normalizado === n || normalizado.startsWith(`${n} `));
+  if (nome) return NOMES_DE_UF[nome];
+  return texto.split(/\s+/)[0]?.toUpperCase() || null;
+}
+
+// "CEP", "C.E.P.", seguido opcionalmente de "nº" e de ":" "=" "-".
+const ROTULO_CEP = /\bC\.?E\.?P\b\.?\s*(?:n[º°o]\.?\s*)?[:=\-]?\s*/i;
+// Valor rotulado: "64000 000" (com espaço) ou qualquer sequência de dígitos, pontos e hífens.
+const VALOR_CEP_ROTULADO = /^(\d{5}\s\d{3}(?!\d)|\d[\d.\-]*\d|\d)/;
+// Sem rótulo, em qualquer posição, só o formato completo: 00000-000 ou 00.000-000.
+const CEP_FORMATADO = /(?<![\d.\-\/])(\d{5}-\d{3}|\d{2}\.\d{3}-\d{3})(?![\d\-]|\.\d)/;
+// Sem rótulo, malformado, só no fim: 69000-00, 694350. Telefone (10 ou 11 dígitos) fica de fora.
+const CEP_FINAL = /(?:^|[,;\s])((?:\d{5}|\d{2}\.\d{3})-\d+|\d{6,9})\s*$/;
+
+function lerCep(texto) {
+  const rotulo = texto.match(ROTULO_CEP);
+  if (rotulo) {
+    const depois = texto.slice(rotulo.index + rotulo[0].length);
+    const valor = depois.match(VALOR_CEP_ROTULADO);
+    // "sem CEP", "CEP: não possui": rótulo sem número não é CEP malformado.
+    if (valor) return { candidato: valor[1], trecho: rotulo[0] + valor[1], rotulado: true };
+  }
+  const formatado = texto.match(CEP_FORMATADO);
+  if (formatado) return { candidato: formatado[1], trecho: formatado[1], rotulado: false };
+  const final = texto.match(CEP_FINAL);
+  if (final) return { candidato: final[1], trecho: final[1], rotulado: false };
+  return { candidato: null, trecho: null, rotulado: false };
+}
+
+function lerUf(texto) {
+  // Rótulo explícito. "\bUF\b" não casa com "UFPI" nem "UFJF"; "Estado" exige
+  // dois-pontos, porque "Av. Estado de Israel" é logradouro.
+  const rotulada = texto.match(/\bUF\b\s*[:=\-]?\s*([^,;\/|()\d]+)/i) || texto.match(/\bEstado\s*[:=]\s*([^,;\/|()\d]+)/i);
+  if (rotulada) return ufDoRotulo(rotulada[1]);
+
+  const entreParenteses = texto.match(/\(\s*([A-Za-z]{2})\s*\)\.?$/);
+  if (entreParenteses) return entreParenteses[1].toUpperCase();
+
+  // Depois de separador: ", PI", " - PI", "/PI". Sigla desconhecida aqui é
+  // tratada como UF digitada errado, salvo se for abreviação de endereço.
+  const aposSeparador = texto.match(/([,;\/–—-])\s*([A-Za-z]{2})\.?$/);
+  if (aposSeparador) {
+    const sigla = aposSeparador[2].toUpperCase();
+    const antes = texto.slice(0, aposSeparador.index);
+    if (SIGLAS_DE_ENDERECO.has(sigla) || COMPLEMENTO_ANTES.test(antes)) return null;
+    return sigla;
+  }
+
+  // Só com espaço ("Teresina PI"): aceita apenas UF conhecida, sem presumir que
+  // "II" em "Pedro II" seja um campo de estado inválido.
+  const aposEspaco = texto.match(/\s([A-Za-z]{2})\.?$/);
+  if (aposEspaco) {
+    const sigla = aposEspaco[1].toUpperCase();
+    const antes = texto.slice(0, aposEspaco.index + 1);
+    if (UFS.includes(sigla) && !SIGLAS_DE_ENDERECO.has(sigla) && !COMPLEMENTO_ANTES.test(antes)) return sigla;
+  }
+  return null;
+}
+
 /** Só interpreta UF/CEP em posição de campo, nunca palavras do logradouro. */
 export function camposDaReferencia(endereco) {
-  const texto = String(endereco || "").trim();
-  const cepRotulado = texto.match(/\bCEP\s*[:=]?\s*([\d.\-]+)\b/i);
-  const cepFinal = texto.match(/(?:^|[,;\s])((?:\d{5}|\d{2}\.\d{3})-\d+|\d{6,})\s*$/);
-  const cepCandidato = cepRotulado?.[1] || cepFinal?.[1] || null;
-  const semCep = texto.replace(/\bCEP\s*[:=]?\s*[\d.\-]*\s*$/i, "")
-    .replace(/(?:[,;\s])(?:\d{5}|\d{2}\.\d{3})-\d+\s*$/, "")
-    .replace(/(?:[,;\s])\d{6,}\s*$/, "").replace(/[,;\s–-]+$/, "");
-  const ufRotulada = texto.match(/\bUF\s*[:=]?\s*([A-Za-z]{2})\b/i);
-  const ufFinal = semCep.match(/(?:[,;\/–-]\s*)([A-Za-z]{2})\.?$/);
-  // Formato sem vírgula: só aceita uma UF conhecida, sem presumir que "II"
-  // em "Pedro II" ou "Av" no logradouro seja um campo de estado inválido.
-  const ufConhecida = semCep.match(/\s+([A-Za-z]{2})\.?$/)?.[1]?.toUpperCase();
-  const ufCandidata = (ufRotulada?.[1] || ufFinal?.[1] || (UFS.includes(ufConhecida) ? ufConhecida : "")).toUpperCase() || null;
-  return { ufCandidata, cepCandidato, temRotuloCep: /\bCEP\b/i.test(texto), cep: cepCandidato?.replace(/\D/g, "") || null };
+  // ", Brasil" no fim não é campo de estado e esconderia a UF antes dele.
+  const texto = String(endereco || "").trim().replace(/\s*[,;–—-]\s*(?:Brasil|Brazil)\.?\s*$/i, "");
+  const cep = lerCep(texto);
+  const semCep = (cep.trecho ? texto.replace(cep.trecho, " ") : texto).replace(/[\s,;–—-]+$/, "");
+  return {
+    ufCandidata: lerUf(semCep),
+    cepCandidato: cep.candidato,
+    temRotuloCep: cep.rotulado,
+    cep: cep.candidato?.replace(/\D/g, "") || null,
+  };
 }
 
 /** Comparação local, antes de perícia, consultas externas e débito de crédito. */
@@ -69,7 +168,10 @@ export function compararReferenciaComInstrumento(cliente = {}, enderecoManual) {
     return { motivo: "UF", manual, instrumento, km: null, descricao: `conflito entre endereço informado (${manual.uf}) e endereço extraído do instrumento (${instrumento.uf})` };
   }
   const cepInstrumento = String(instrumento.cep || "").replace(/\D/g, "");
-  if (campos.cep?.length === 8 && cepInstrumento.length === 8 && campos.cep !== cepInstrumento) {
+  // Os cinco primeiros dígitos são o setor do CEP. No mesmo setor, a diferença é
+  // de logradouro (ou um dos dois é o CEP geral do município, 00000-000), e a
+  // residência é a mesma localidade: quem mede o resto é a distância.
+  if (campos.cep?.length === 8 && cepInstrumento.length === 8 && campos.cep.slice(0, 5) !== cepInstrumento.slice(0, 5)) {
     return { motivo: "CEP", manual, instrumento, km: null, descricao: `CEP informado (${campos.cep}) diferente do CEP extraído do instrumento (${cepInstrumento}); confira qual referência deve ser usada` };
   }
   return null;
