@@ -316,3 +316,92 @@ describe("quadro de dados pessoais em branco (CCB Credcesta de 2024)", () => {
     expect(classificarGrauProcessual("CAD5", "ALTA")).toBe(GRAUS.CONSTATADO);
   });
 });
+
+describe("texto corrido (pdftotext sem -layout): rótulos em linha própria", () => {
+  const CORRIDO_EM_BRANCO = `QUADRO 2 - DADOS PESSOAIS DO(A) CLIENTE (EMITENTE/ADERENTE)
+Nome do Cliente:
+MARIA DA SILVA TESTE
+CPF:
+123.456.789-09
+Endereço Residencial:
+Nº
+Complemento:
+Bairro:
+Cidade:
+Estado:
+CEP:
+Telefone/Celular:
+E-mail:
+Nome do Representante Legal: CPF:
+QUADRO 3 - DADOS FUNCIONAIS
+Fonte Pagadora:
+Matrícula/Nº Benefício:
+Cargo/Função: Salário/Renda
+R$:`;
+  const CORRIDO_PREENCHIDO = CORRIDO_EM_BRANCO
+    .replace("Bairro:\nCidade:\nEstado:\nCEP:\nTelefone/Celular:\nE-mail:\n", "Bairro:\nJardim Juliana\nCidade:\nAmparo\nEstado:\nSP\nCEP:\n13905-390\nTelefone/Celular:\n(19) 99999-0001\nE-mail:\nMARIA@EXEMPLO.COM\n")
+    .replace("Fonte Pagadora:\nMatrícula/Nº Benefício:\n", "Fonte Pagadora:\nCREDCESTA GOV SP SECRETARIA\nMatrícula/Nº Benefício:\n7000001\n");
+
+  it("rótulo seguido de rótulo é vazio; rótulo seguido de valor não", () => {
+    expect(quadroClienteEmBranco(CORRIDO_EM_BRANCO)).toEqual(["bairro", "cidade", "estado", "cep", "telefone", "fonte_pagadora"]);
+    expect(quadroClienteEmBranco(CORRIDO_PREENCHIDO)).toEqual([]);
+  });
+});
+
+describe("condições gerais assinadas no fim são a assinatura da própria cédula", () => {
+  it("não gera ASS1 quando o bloco está na última página das condições gerais", () => {
+    const texto = [
+      "CÉDULA DE CRÉDITO BANCÁRIO (\"CCB\") CONTRATAÇÃO DE SAQUE\nCCB nº: 11223344\nQUADRO 1 - CREDOR",
+      "CONDIÇÕES GERAIS DA CÉDULA DE CRÉDITO BANCÁRIO\n1. Por minha solicitação.",
+      "DOCUMENTO ASSINADO ELETRONICAMENTE\nLocal: Amparo - SP\nNome do Cliente\nMARIA DA SILVA TESTE\nCPF\n123.456.789-09",
+    ].join("\f");
+    const seg = segmentarDocumentos(texto);
+    expect(seg.documentos.map((d) => d.tipo)).toEqual(["INSTRUMENTO_PRINCIPAL", "CONDICOES_GERAIS"]);
+    const avaliacao = avaliarAssinaturaPorDocumento(seg);
+    expect(avaliacao.achado).toBeNull();
+    expect(avaliacao.resumo).toMatch(/Condições gerais \(págs\. 2 a 3\): bloco de assinatura na pág\. 3/);
+  });
+
+  it("continua acusando ASS1 quando só a proposta de seguro tem bloco", () => {
+    const texto = [
+      "CÉDULA DE CRÉDITO BANCÁRIO\nCCB nº: 1",
+      "PROPOSTA DE ADESÃO AO SEGURO PRESTAMISTA\nAssinatura do Proponente",
+    ].join("\f");
+    const avaliacao = avaliarAssinaturaPorDocumento(segmentarDocumentos(texto));
+    expect(avaliacao.achado?.codigo).toBe("ASS1");
+  });
+});
+
+describe("CCB Credcesta de 2024: residência da contratante igual ao endereço do credor", () => {
+  const LAYOUT_2024_REAL = LAYOUT_2023
+    .replace("Rua das Flores                     20\n", "Avenida Brigadeiro Faria Lima      228\n")
+    .replace("Jardim Juliana       Amparo            SP              13905-390\n", "Itaim Bibi           São Paulo         SP\n")
+    .replace("(19) 99999-0001                                    MARIA@EXEMPLO.COM\n", "(37) 99999-0002                                    MARIA@EXEMPLO.COM\n");
+  const e = heuristicExtractionFromText(LAYOUT_2024_REAL);
+
+  it("bairro e cidade vêm do quadro do cliente, o CEP fica vazio e o CEP do credor não entra", () => {
+    expect(e.cliente.bairro).toBe("Itaim Bibi");
+    expect(e.cliente.cidade).toBe("São Paulo");
+    expect(e.cliente.estado).toBe("SP");
+    expect(e.cliente.cep).toBeNull();
+    expect(e.cliente.telefone).toBe("(37) 99999-0002");
+    expect(e.achados_irregularidade.map((a) => a.codigo)).not.toContain("CAD5");
+  });
+
+  it("aponta CAD6 constatado: logradouro e bairro do quadro do cliente são os do quadro do credor", () => {
+    const cad6 = e.achados_irregularidade.find((a) => a.codigo === "CAD6");
+    expect(cad6).toBeTruthy();
+    expect(cad6.texto).toMatch(/Avenida Brigadeiro Faria Lima/);
+    expect(cad6.texto).toMatch(/bairro Itaim Bibi/);
+    expect(cad6.texto).toMatch(/São Paulo\/SP/);
+    expect(classificarGrauProcessual("CAD6", "ALTA")).toBe(GRAUS.CONSTATADO);
+    expect(heuristicExtractionFromText(LAYOUT_2023).achados_irregularidade.map((a) => a.codigo)).not.toContain("CAD6");
+  });
+
+  it("DDD 37 (MG) num cadastro em SP vira TEL1; DDD 19 em SP não", () => {
+    const tel1 = e.achados_irregularidade.find((a) => a.codigo === "TEL1");
+    expect(tel1).toBeTruthy();
+    expect(tel1.texto).toMatch(/DDD 37, atribuído pela Anatel a MG/);
+    expect(heuristicExtractionFromText(LAYOUT_2023).achados_irregularidade.map((a) => a.codigo)).not.toContain("TEL1");
+  });
+});

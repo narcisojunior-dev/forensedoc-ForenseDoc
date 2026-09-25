@@ -13,6 +13,14 @@ import { taxaImplicita, valorPresente, vencimentosMensais, conferirAnualizacao, 
 import { classificarProduto, extrairEmpregador } from "./produto.js";
 import { avaliarQualificacao, ESTADO as ESTADO_CAMPO } from "./camposSuspeitos.js";
 import { quadroClienteEmBranco } from "./salvaguardas.js";
+
+/** Plano de numeração da Anatel: código de área (DDD) por unidade da federação. */
+const UF_POR_DDD = Object.fromEntries(Object.entries({
+  SP: [11, 12, 13, 14, 15, 16, 17, 18, 19], RJ: [21, 22, 24], ES: [27, 28], MG: [31, 32, 33, 34, 35, 37, 38],
+  PR: [41, 42, 43, 44, 45, 46], SC: [47, 48, 49], RS: [51, 53, 54, 55], DF: [61], GO: [62, 64], TO: [63],
+  MT: [65, 66], MS: [67], AC: [68], RO: [69], BA: [71, 73, 74, 75, 77], SE: [79], PE: [81, 87], AL: [82],
+  PB: [83], RN: [84], CE: [85, 88], PI: [86, 89], PA: [91, 93, 94], AM: [92, 97], RR: [95], AP: [96], MA: [98, 99],
+}).flatMap(([uf, ddds]) => ddds.map((d) => [String(d), uf])));
 import { segmentarDocumentos, avaliarAssinaturaPorDocumento, documentoDaPagina, detectarAnomaliaPaginacao } from "./documentosLogicos.js";
 import { avaliarComprovanteCredito } from "./comprovanteCredito.js";
 import { extrairSeguroPrestamista } from "./seguroPrestamista.js";
@@ -1550,6 +1558,42 @@ export function heuristicExtractionFromText(rawText) {
     extracted.cliente.origens = { ...(extracted.cliente.origens || {}), nome: "DESCARTADO: possível contaminação por rodapé do PJe" };
   }
 
+  // CCB Credcesta de 2024: o quadro de dados pessoais registra como residência
+  // da contratante "Avenida Brigadeiro Faria Lima, Itaim Bibi, São Paulo", que
+  // é o endereço que o quadro 1 atribui ao próprio credor. O extrator descartava
+  // a rua como "contexto institucional" e o laudo ficava mudo sobre isso.
+  if (extracted.cliente && creditorBlock && issuerBlock) {
+    const normalizar = (v) => stripDiacritics(String(v || "")).toLowerCase().replace(/\s+/g, " ").trim();
+    const credorNorm = normalizar(creditorBlock);
+    const clienteNorm = normalizar(issuerBlock);
+    const logradourosDoCredor = Array.from(creditorBlock.matchAll(/\b(?:Rua|Avenida|Av\.|Alameda|Pra[çc]a|Praia|Travessa|Rodovia|Estrada)\s+(?:d[aeo]s?\s+)?[A-ZÀ-Ü][\wÀ-ÿ.]*(?:\s+(?:d[aeo]s?\s+)?[A-ZÀ-Ü][\wÀ-ÿ.]*){0,4}/g), (m) => m[0].replace(/[.,;]+$/, ""));
+    const logradouroRepetido = logradourosDoCredor.find((l) => normalizar(l).length >= 10 && clienteNorm.includes(normalizar(l))) || null;
+    const bairroRepetido = extracted.cliente.bairro && normalizar(extracted.cliente.bairro).length >= 5 && credorNorm.includes(normalizar(extracted.cliente.bairro)) ? extracted.cliente.bairro : null;
+    if (logradouroRepetido || bairroRepetido) {
+      const coincidencias = [logradouroRepetido ? `o logradouro "${logradouroRepetido}"` : null, bairroRepetido ? `o bairro ${bairroRepetido}` : null].filter(Boolean).join(" e ");
+      const cidadeUf = [extracted.cliente.cidade, extracted.cliente.estado].filter(Boolean).join("/");
+      addIssue(
+        "CAD6",
+        "ALTA",
+        "Endereço do contratante coincide com o endereço do credor",
+        `O quadro de dados pessoais do contratante registra como residência ${coincidencias}${cidadeUf ? `, em ${cidadeUf}` : ""}, e o quadro do credor atribui o mesmo endereço à sede ou filial da instituição. O instrumento afirma que o contratante reside no endereço do banco. A coincidência consta do próprio arquivo e deve ser confrontada com o comprovante de residência apresentado na contratação e com a residência informada na geração do laudo.`
+      );
+      extracted.cliente.origens = { ...(extracted.cliente.origens || {}), endereco_coincide_credor: coincidencias };
+    }
+  }
+
+  // DDD do telefone do contratante fora da UF do endereço cadastral: o telefone
+  // é o segundo fator de boa parte das contratações, e um DDD de outro estado
+  // pede explicação (linha de terceiro, cadastro antigo ou golpe).
+  if (extracted.cliente?.telefone && extracted.cliente?.estado) {
+    const ddd = String(extracted.cliente.telefone).replace(/\D/g, "").slice(0, 2);
+    const ufDoDdd = UF_POR_DDD[ddd] || null;
+    const ufCadastro = String(extracted.cliente.estado).toUpperCase();
+    if (ufDoDdd && ufDoDdd !== ufCadastro) {
+      addIssue("TEL1", "MÉDIA", "Telefone do contratante com DDD de outra unidade da federação", `O telefone registrado para o contratante (${extracted.cliente.telefone}) tem DDD ${ddd}, atribuído pela Anatel a ${ufDoDdd}, enquanto o endereço cadastral do instrumento está em ${ufCadastro}. Isso não invalida o cadastro, mas o telefone costuma ser o canal do segundo fator, e a linha de outro estado deve ser explicada pela instituição, com a titularidade e a operadora na data do ato.`);
+    }
+  }
+
   // Estado de cada campo de qualificação: não localizado, vazio no documento ou
   // suspeito. Os dois últimos são achados sobre o instrumento, não limites da
   // extração, e o laudo precisa dizer isso.
@@ -1558,7 +1602,10 @@ export function heuristicExtractionFromText(rawText) {
     extracted.cliente.estados_campos = estados;
     // Rótulos impressos sem valor: o campo fica vazio no laudo e vira achado,
     // em vez de ser preenchido por um CEP lido fora do quadro do cliente.
-    const camposEmBranco = quadroClienteEmBranco(text);
+    // A confirmação pelo valor extraído protege formulários em duas colunas,
+    // onde os rótulos vêm primeiro e os valores depois.
+    const camposEmBranco = quadroClienteEmBranco(text)
+      .filter((campo) => campo === "fonte_pagadora" || !extracted.cliente[campo] || valorEhRotulo(extracted.cliente[campo]));
     if (camposEmBranco.length >= 3) {
       const nomes = { bairro: "bairro", cidade: "cidade", estado: "estado", cep: "CEP", telefone: "telefone", fonte_pagadora: "fonte pagadora" };
       for (const campo of camposEmBranco) {

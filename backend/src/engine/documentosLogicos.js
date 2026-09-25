@@ -176,7 +176,11 @@ export function documentoDaPagina(segmentacao, pagina) {
 export function avaliarAssinaturaPorDocumento(segmentacao) {
   if (!segmentacao?.documentos?.length) return { achado: null, resumo: null };
   const principal = segmentacao.documentos.find((d) => d.tipo === "INSTRUMENTO_PRINCIPAL" && d.tituloDetectado);
-  const acessoriosAssinados = segmentacao.documentos.filter((d) => d !== principal && d.tipo !== "DOSSIE" && d.blocosAssinatura.length);
+  // As condições gerais são o mesmo instrumento que a cédula: o bloco no fim
+  // delas assina a cédula inteira (CCB Credcesta de 2024, assinatura na pág.
+  // 11 depois das condições gerais que começam na pág. 3), e não é acessório.
+  const condicoesGeraisAssinadas = segmentacao.documentos.some((d) => d.tipo === "CONDICOES_GERAIS" && d.blocosAssinatura.length);
+  const acessoriosAssinados = segmentacao.documentos.filter((d) => d !== principal && !["DOSSIE", "CONDICOES_GERAIS"].includes(d.tipo) && d.blocosAssinatura.length);
   const faixa = (d) => (d.paginaInicial === d.paginaFinal ? `pág. ${d.paginaInicial}` : `págs. ${d.paginaInicial} a ${d.paginaFinal}`);
   const descrever = (d) => {
     if (!d.blocosAssinatura.length) return "sem bloco de assinatura";
@@ -196,7 +200,7 @@ export function avaliarAssinaturaPorDocumento(segmentacao) {
   // Fragmentos não contíguos e aditivos impedem imputar ausência ao contrato
   // inteiro a partir apenas do primeiro segmento com o mesmo título.
   const principais = segmentacao.documentos.filter((d) => d.tipo === "INSTRUMENTO_PRINCIPAL");
-  if (principais.length > 1 || !principal || principal.blocosAssinatura.length || !acessoriosAssinados.length) return { achado: null, resumo, totalBlocos };
+  if (principais.length > 1 || !principal || principal.blocosAssinatura.length || condicoesGeraisAssinadas || !acessoriosAssinados.length) return { achado: null, resumo, totalBlocos };
   return {
     resumo,
     totalBlocos,

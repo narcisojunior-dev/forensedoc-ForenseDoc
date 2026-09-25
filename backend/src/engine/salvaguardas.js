@@ -245,7 +245,10 @@ const ROTULOS_DE_ENDERECO = {
 export function valorEhRotulo(valor) {
   const t = String(valor || "").trim();
   if (!t) return false;
-  return /^(?:(?:bairro|cidade|munic[íi]pio|estado|uf|cep|endere[çc]o(?:\s+residencial)?)\s*:?\s*)+$/i.test(t);
+  if (/^(?:(?:bairro|cidade|munic[íi]pio|estado|uf|cep|endere[çc]o(?:\s+residencial)?)\s*:?\s*)+$/i.test(t)) return true;
+  // "Telefone/Celular:", "E-mail:", "Nome do Representante Legal: CPF:": a linha
+  // de rótulos do quadro seguinte lida como valor da tabela em colunas.
+  return /^(?:[A-Za-zÀ-ÿ\/º°ª .()-]+\s*:\s*)+$/.test(t) && /:/.test(t);
 }
 
 /**
@@ -299,26 +302,35 @@ export function enderecoPorColunas(texto) {
  *
  * @returns {string[]} campos em branco (bairro, cidade, estado, cep, telefone, fonte_pagadora)
  */
-const LINHAS_DE_ROTULOS_DO_CLIENTE = [
-  { campos: ["bairro", "cidade", "estado", "cep"], regex: /Bairro\s*:[^\n]*Cidade\s*:[^\n]*(?:Estado|UF)\s*:[^\n]*CEP\s*:/i },
-  { campos: ["telefone"], regex: /Telefone(?:\/Celular)?\s*:/i },
-  { campos: ["fonte_pagadora"], regex: /Fonte\s+Pagadora\s*:/i },
+const ROTULOS_DO_CLIENTE = [
+  ["bairro", /\bBairro\s*:/i],
+  ["cidade", /\bCidade\s*:/i],
+  ["estado", /\b(?:Estado|UF)\s*:/i],
+  ["cep", /\bCEP\s*:/i],
+  ["telefone", /Telefone(?:\/Celular)?\s*:/i],
+  ["fonte_pagadora", /Fonte\s+Pagadora\s*:/i],
 ];
 const PROXIMA_LINHA_DE_ROTULOS = /^\s*(?:QUADRO\s+\d|Cargo\/Fun[çc][ãa]o|Nome\s+do\s+Representante|Telefone|E-?mail|Matr[íi]cula)/i;
 
+/**
+ * Vale para os dois textos que o motor recebe: o do `pdftotext -layout`, com
+ * os quatro rótulos numa linha e os valores na seguinte, e o texto corrido, com
+ * cada rótulo em linha própria. Nos dois, rótulo seguido de rótulo é vazio.
+ */
 export function quadroClienteEmBranco(texto) {
   const linhas = String(texto || "").split(/\r?\n/);
   const soRotulos = (l) => Boolean(l.trim()) && !l.replace(/[A-Za-zÀ-ÿ\/º°ª .()-]+\s*:/g, "").trim();
-  const vazios = [];
-  for (const { campos, regex } of LINHAS_DE_ROTULOS_DO_CLIENTE) {
-    const i = linhas.findIndex((l) => regex.test(l));
-    if (i < 0 || !soRotulos(linhas[i])) continue;
+  const vazios = new Set();
+  for (let i = 0; i < linhas.length; i += 1) {
+    if (!soRotulos(linhas[i])) continue;
+    const campos = ROTULOS_DO_CLIENTE.filter(([, regex]) => regex.test(linhas[i])).map(([campo]) => campo);
+    if (!campos.length) continue;
     let j = i + 1;
     while (j < linhas.length && !linhas[j].trim()) j += 1;
     const proxima = linhas[j] ?? "";
-    if (j - i > 2 || !proxima.trim() || soRotulos(proxima) || PROXIMA_LINHA_DE_ROTULOS.test(proxima)) vazios.push(...campos);
+    if (j - i > 2 || !proxima.trim() || soRotulos(proxima) || PROXIMA_LINHA_DE_ROTULOS.test(proxima)) campos.forEach((c) => vazios.add(c));
   }
-  return vazios;
+  return [...vazios];
 }
 
 // ─── Endereço do contratante ────────────────────────────────────────────────
