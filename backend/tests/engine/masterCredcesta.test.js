@@ -214,3 +214,105 @@ describe("coordenada do ato contra o local declarado no instrumento", () => {
     expect((summary.allFindings || summary.findings).some((f) => f.key === "gps-local-declarado")).toBe(false);
   });
 });
+
+// ─── Rodada 6: texto em colunas (pdftotext -layout), quadro em branco e correspondente ───
+import { quadroClienteEmBranco } from "../../src/engine/salvaguardas.js";
+
+const LAYOUT_2023 = `CÉDULA DE CRÉDITO BANCÁRIO ("CCB") CONTRATAÇÃO DE SAQUE MEDIANTE TRANSFERÊNCIA
+DE RECURSOS DO CARTÃO CONSIGNADO DE BENEFÍCIO CREDCESTA EMITIDO PELO BANCO MASTER S.A.
+CCB nº: 11223344
+Tipo de Operação: X  Saque Fácil  Saque Complementar  Saque Refinanciamento
+ FORÇAS ARMADAS  SERVIDOR PÚBLICO  INSS X  OUTROS
+QUADRO 1 - CREDOR
+BANCO MASTER S.A., com sede na cidade do Rio de Janeiro, Estado do Rio de Janeiro, na Praia de
+Botafogo, n.º 228, 17º andar, sala 1.702, Botafogo, CEP: 22250-906, inscrito no CNPJ/ME sob o n.º
+33.923.798/0001-00 por meio de sua filial situada na Capital do Estado de São Paulo, na Avenida
+Brigadeiro Faria Lima, n.º 3.477, 5º andar, Torre B, Itaim Bibi, CEP 04538-133 ("CREDOR").
+QUADRO 2 - DADOS PESSOAIS DO(A) CLIENTE (EMITENTE/ADERENTE)
+Nome do Cliente:                                   CPF:
+MARIA DA SILVA TESTE                               123.456.789-09
+RG:                                                Data de Nascimento:
+21202001                                           02/04/1962
+Endereço Residencial:              Nº              Complemento:
+Rua das Flores                     20
+Bairro:              Cidade:           Estado:         CEP:
+Jardim Juliana       Amparo            SP              13905-390
+Telefone/Celular:                                  E-mail:
+(19) 99999-0001                                    MARIA@EXEMPLO.COM
+Nome do Representante Legal:                       CPF:
+QUADRO 3 - DADOS FUNCIONAIS
+Fonte Pagadora:                      Matrícula/Nº Benefício:
+CREDCESTA GOV SP SECRETARIA          7000001
+QUADRO 4 - CARACTERÍSTICA DA OPERAÇÃO DE SAQUE DO CARTÃO DE BENEFÍCIO CONSIGNADO CREDCESTA
+4.1.1. Valor do Saque:               4.2.1. Saldo Devedor Atualizado e Consolidado:
+R$ 12.000,00                         R$
+QUADRO 9 - AUTORIZAÇÃO DE DÉBITO EM CONTA CORRENTE
+Banco: SANTANDER Nº Banco: 033 Agência: 0029 Conta Corrente: 01005148
+QUADRO 10 - CANAL DE VENDAS/CORRESPONDENTE NO PAÍS/SUBSTABELECIDO:
+Empresa: 000483- CREDITO EXEMPLO                        CNPJ: 12.345.678/0001-90
+Endereço: RUA DAS PALMEIRAS, 126 - ANEXO D - JARDIM MORUMBI -
+PRESIDENTE PRUDENTE
+Telefone: (18) 3344-0000
+Agente Certificado: ANA MARIA EXEMPLO                    CPF: 11122233344
+Condições Gerais da Cédula de Crédito Bancário ("CCB") aplicáveis ao Cartão Consignado de Benefício -
+1. Por minha solicitação, o BANCO MASTER emite o cartão.
+Assinatura digital: 0f0f0f0f-aaaa-4bbb-8ccc-0123456789ab
+Página 1 de 3. Versão: 10 - 05.2023 VIA DO BANCO NEGOCIÁVEL / X VIA DO EMITENTE NÃO NEGOCIÁVEL`;
+
+const LAYOUT_2024_EM_BRANCO = LAYOUT_2023
+  .replace("Jardim Juliana       Amparo            SP              13905-390\n", "")
+  .replace("(19) 99999-0001                                    MARIA@EXEMPLO.COM\n", "")
+  .replace("CREDCESTA GOV SP SECRETARIA          7000001\n", "Cargo/Função:                        Salário/Renda\n")
+  .replace("Rua das Flores                     20\n", "");
+
+describe("texto em colunas do pdftotext -layout: cliente, credor e correspondente em quadros separados", () => {
+  const e = heuristicExtractionFromText(LAYOUT_2023);
+
+  it("o telefone e o e-mail são os do quadro do cliente, não os do correspondente", () => {
+    expect(e.cliente.telefone).toBe("(19) 99999-0001");
+    expect(e.cliente.email).toBe("MARIA@EXEMPLO.COM");
+  });
+
+  it("o CEP é o do cliente, e o CEP do credor nunca entra na qualificação", () => {
+    expect(e.cliente.cep).toBe("13905-390");
+    expect(e.cliente.cidade).toBe("Amparo");
+    expect(e.cliente.bairro).toBe("Jardim Juliana");
+    expect(e.cliente.cpf).toBe("123.456.789-09");
+  });
+
+  it("o correspondente do Quadro 10 é lido por inteiro", () => {
+    expect(e.correspondente).toMatchObject({
+      nome: "CREDITO EXEMPLO",
+      codigo: "000483",
+      cnpj: "12.345.678/0001-90",
+      telefone: "(18) 3344-0000",
+      agente_nome: "ANA MARIA EXEMPLO",
+      cidade: "PRESIDENTE PRUDENTE",
+    });
+    expect(e.correspondente.endereco).toMatch(/^RUA DAS PALMEIRAS, 126/);
+    expect(e.contrato.correspondente).toMatchObject({ nome: "CREDITO EXEMPLO", codigo: "000483" });
+    expect(e.achados_irregularidade.map((a) => a.codigo)).not.toContain("CAD5");
+  });
+});
+
+describe("quadro de dados pessoais em branco (CCB Credcesta de 2024)", () => {
+  it("o helper lista os campos com rótulo e sem valor", () => {
+    expect(quadroClienteEmBranco(LAYOUT_2024_EM_BRANCO)).toEqual(["bairro", "cidade", "estado", "cep", "telefone", "fonte_pagadora"]);
+    expect(quadroClienteEmBranco(LAYOUT_2023)).toEqual([]);
+  });
+
+  it("nenhum campo é preenchido com o endereço da filial do credor e o vazio vira achado constatado", () => {
+    const e = heuristicExtractionFromText(LAYOUT_2024_EM_BRANCO);
+    expect(e.cliente.cidade).toBeNull();
+    expect(e.cliente.bairro).toBeNull();
+    expect(e.cliente.cep).toBeNull();
+    expect(e.cliente.telefone).toBeNull();
+    expect(e.cliente.estados_campos.cidade).toMatchObject({ estado: "LOCALIZADO_VAZIO" });
+    expect(e.cliente.estados_campos.telefone).toMatchObject({ estado: "LOCALIZADO_VAZIO" });
+    const cad5 = e.achados_irregularidade.find((a) => a.codigo === "CAD5");
+    expect(cad5).toBeTruthy();
+    expect(cad5.texto).toMatch(/bairro, cidade, estado, CEP, telefone, fonte pagadora/);
+    expect(cad5.texto).not.toMatch(/assinatura|código/);
+    expect(classificarGrauProcessual("CAD5", "ALTA")).toBe(GRAUS.CONSTATADO);
+  });
+});

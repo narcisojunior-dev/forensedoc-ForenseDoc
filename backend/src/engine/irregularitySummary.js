@@ -372,7 +372,8 @@ export function buildIrregularitySummary(report = {}) {
   if (emailDomain && bankTokens(bank).some((token) => emailDomain.includes(token))) qualificationProblems.push("e-mail do contratante vinculado ao domínio da própria instituição");
   const secondaryClientFields = [client.rg, client.data_nascimento, client.endereco, client.bairro, client.estado, client.telefone, client.numero_beneficio];
   const missingClientFields = secondaryClientFields.filter((value) => !hasValue(value)).length;
-  if (missingClientFields >= 5) qualificationProblems.push("demais campos cadastrais majoritariamente ausentes");
+  const quadroEmBranco = (extracted.achados_irregularidade || []).some((a) => a.codigo === "CAD5");
+  if (missingClientFields >= 5 && !quadroEmBranco) qualificationProblems.push("demais campos cadastrais majoritariamente ausentes");
   if (qualificationProblems.length >= 2) {
     addFinding("ALTA", "client-qualification", "Contratante mal qualificado.", `${qualificationProblems.join("; ")}. Esses defeitos devem ser confrontados com os dados cadastrais e os fatores de autenticação efetivamente utilizados.`);
     addCheck("D", "qualificacao", "ALERTA", qualificationProblems.join("; "));

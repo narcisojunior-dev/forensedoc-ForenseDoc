@@ -761,6 +761,16 @@ function sectionContract(ctx, extracted) {
   field(ctx, "Primeiro vencimento", c.data_primeiro_vencimento);
   field(ctx, "Último vencimento", c.data_ultimo_vencimento);
   field(ctx, "Modalidade de desconto provável", c.modalidade_desconto_provavel);
+  // Quem operou a venda: o correspondente é ponto de diligência (loja, agente,
+  // dispositivo) e ficava fora do laudo.
+  const corr = extracted.correspondente || {};
+  if (corr.nome || corr.cnpj) {
+    const mascarar = (cpf) => { const d = String(cpf || "").replace(/\D/g, ""); return d.length === 11 ? `***.***.${d.slice(6, 9)}-${d.slice(9)}` : null; };
+    field(ctx, "Canal de vendas / correspondente", [corr.codigo ? `código ${corr.codigo}` : null, corr.nome, corr.cnpj ? `CNPJ ${formatCnpj(corr.cnpj)}` : null].filter(Boolean).join(" · "));
+    field(ctx, "   Endereço do correspondente", corr.endereco);
+    field(ctx, "   Telefone do correspondente", corr.telefone);
+    if (corr.agente_nome) field(ctx, "   Agente certificado", `${corr.agente_nome}${mascarar(corr.agente_cpf) ? ` (CPF ${mascarar(corr.agente_cpf)})` : ""}`);
+  }
   // A nota das datas vinha do § de dados econômicos, que saiu do laudo.
   if (c.datas_nota) paragraph(ctx, c.datas_nota, { color: DANGER, size: 8.5 });
 }
@@ -784,11 +794,11 @@ function sectionClient(ctx, extracted, result = {}) {
   field(ctx, "RG", comEstado("rg", c.rg));
   field(ctx, "Data de nascimento", c.data_nascimento);
   field(ctx, "Endereço (extraído do contrato)", comEstado("endereco", c.endereco));
-  field(ctx, "Bairro", c.bairro);
-  field(ctx, "Cidade", inferido("cidade", c.cidade));
-  field(ctx, "Estado", inferido("estado", c.estado));
-  field(ctx, "CEP", c.cep);
-  field(ctx, "Telefone", c.telefone);
+  field(ctx, "Bairro", comEstado("bairro", c.bairro));
+  field(ctx, "Cidade", comEstado("cidade", inferido("cidade", c.cidade)));
+  field(ctx, "Estado", comEstado("estado", inferido("estado", c.estado)));
+  field(ctx, "CEP", comEstado("cep", c.cep));
+  field(ctx, "Telefone", comEstado("telefone", c.telefone));
   field(ctx, "E-mail", comEstado("email", c.email));
   if (estados.ocupacao?.estado === "LOCALIZADO_VAZIO") field(ctx, "Ocupação", comEstado("ocupacao", null));
   // D7: campo de benefício previdenciário não se imprime em modalidade que não

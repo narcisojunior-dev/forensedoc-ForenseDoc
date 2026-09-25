@@ -518,6 +518,12 @@ export default function LaudoForense({ report }) {
                   ["Data do contrato", report.extracted.contrato?.data_contrato ? `${report.extracted.contrato.data_contrato}${report.extracted.contrato.data_contrato_origem ? ` (${report.extracted.contrato.data_contrato_origem}${report.extracted.contrato.data_contrato_confianca === "BAIXA" ? ", confiança baixa" : ""})` : ""}` : null],
                   ["Primeiro vencimento", report.extracted.contrato?.data_primeiro_vencimento],
                   ["Último vencimento", report.extracted.contrato?.data_ultimo_vencimento],
+                  ...(report.extracted.correspondente?.nome || report.extracted.correspondente?.cnpj ? [
+                    ["Canal de vendas / correspondente", [report.extracted.correspondente.codigo ? `código ${report.extracted.correspondente.codigo}` : null, report.extracted.correspondente.nome, report.extracted.correspondente.cnpj ? `CNPJ ${formatCnpj(report.extracted.correspondente.cnpj)}` : null].filter(Boolean).join(" · ")],
+                    ["Endereço do correspondente", report.extracted.correspondente.endereco],
+                    ["Telefone do correspondente", report.extracted.correspondente.telefone],
+                    ["Agente certificado", report.extracted.correspondente.agente_nome],
+                  ].filter(([, val]) => val) : []),
                 ].map(([lbl, val]) => <Row key={lbl} label={lbl} value={val} />)}
                 {/* A nota das datas é cronologia do instrumento, não preço. */}
                 {report.extracted.contrato?.datas_nota && <div className="note">{report.extracted.contrato.datas_nota}</div>}
@@ -611,11 +617,11 @@ export default function LaudoForense({ report }) {
                   ["RG", comEstado("rg", report.extracted.cliente?.rg)],
                   ["Data de nascimento", report.extracted.cliente?.data_nascimento],
                   ["Endereço (extraído do contrato)", comEstado("endereco", report.extracted.cliente?.endereco)],
-                  ["Bairro", report.extracted.cliente?.bairro],
-                  ["Cidade", val("cidade", report.extracted.cliente?.cidade)],
-                  ["Estado", val("estado", report.extracted.cliente?.estado)],
-                  ["CEP", report.extracted.cliente?.cep],
-                  ["Telefone", report.extracted.cliente?.telefone],
+                  ["Bairro", comEstado("bairro", report.extracted.cliente?.bairro)],
+                  ["Cidade", comEstado("cidade", val("cidade", report.extracted.cliente?.cidade))],
+                  ["Estado", comEstado("estado", val("estado", report.extracted.cliente?.estado))],
+                  ["CEP", comEstado("cep", report.extracted.cliente?.cep)],
+                  ["Telefone", comEstado("telefone", report.extracted.cliente?.telefone)],
                   ["E-mail", comEstado("email", report.extracted.cliente?.email)],
                   ["Ocupação", estados.ocupacao?.estado === "LOCALIZADO_VAZIO" ? comEstado("ocupacao", null) : null],
                   /* D7: campos de benefício previdenciário não se imprimem em

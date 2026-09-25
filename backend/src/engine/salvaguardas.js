@@ -289,6 +289,38 @@ export function enderecoPorColunas(texto) {
   return null;
 }
 
+/**
+ * Quadro de dados pessoais com os rótulos impressos e nada embaixo.
+ *
+ * A CCB Credcesta de 2024 traz "Bairro: Cidade: Estado: CEP:" e, na linha
+ * seguinte, "Telefone/Celular: E-mail:", sem um valor sequer. O extrator, sem
+ * valor no quadro, caía no CEP da filial do credor e o laudo domiciliava a
+ * cliente na sede do banco. Rótulo sem valor é achado sobre o instrumento.
+ *
+ * @returns {string[]} campos em branco (bairro, cidade, estado, cep, telefone, fonte_pagadora)
+ */
+const LINHAS_DE_ROTULOS_DO_CLIENTE = [
+  { campos: ["bairro", "cidade", "estado", "cep"], regex: /Bairro\s*:[^\n]*Cidade\s*:[^\n]*(?:Estado|UF)\s*:[^\n]*CEP\s*:/i },
+  { campos: ["telefone"], regex: /Telefone(?:\/Celular)?\s*:/i },
+  { campos: ["fonte_pagadora"], regex: /Fonte\s+Pagadora\s*:/i },
+];
+const PROXIMA_LINHA_DE_ROTULOS = /^\s*(?:QUADRO\s+\d|Cargo\/Fun[çc][ãa]o|Nome\s+do\s+Representante|Telefone|E-?mail|Matr[íi]cula)/i;
+
+export function quadroClienteEmBranco(texto) {
+  const linhas = String(texto || "").split(/\r?\n/);
+  const soRotulos = (l) => Boolean(l.trim()) && !l.replace(/[A-Za-zÀ-ÿ\/º°ª .()-]+\s*:/g, "").trim();
+  const vazios = [];
+  for (const { campos, regex } of LINHAS_DE_ROTULOS_DO_CLIENTE) {
+    const i = linhas.findIndex((l) => regex.test(l));
+    if (i < 0 || !soRotulos(linhas[i])) continue;
+    let j = i + 1;
+    while (j < linhas.length && !linhas[j].trim()) j += 1;
+    const proxima = linhas[j] ?? "";
+    if (j - i > 2 || !proxima.trim() || soRotulos(proxima) || PROXIMA_LINHA_DE_ROTULOS.test(proxima)) vazios.push(...campos);
+  }
+  return vazios;
+}
+
 // ─── Endereço do contratante ────────────────────────────────────────────────
 
 const CONTEXTO_INSTITUCIONAL =

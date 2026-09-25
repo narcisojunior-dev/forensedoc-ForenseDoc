@@ -12,6 +12,7 @@ import { redigirConclusaoAfericao } from "./conclusaoAfericao.js";
 import { taxaImplicita, valorPresente, vencimentosMensais, conferirAnualizacao, diasEntre } from "./matematicaFinanceira.js";
 import { classificarProduto, extrairEmpregador } from "./produto.js";
 import { avaliarQualificacao, ESTADO as ESTADO_CAMPO } from "./camposSuspeitos.js";
+import { quadroClienteEmBranco } from "./salvaguardas.js";
 import { segmentarDocumentos, avaliarAssinaturaPorDocumento, documentoDaPagina, detectarAnomaliaPaginacao } from "./documentosLogicos.js";
 import { avaliarComprovanteCredito } from "./comprovanteCredito.js";
 import { extrairSeguroPrestamista } from "./seguroPrestamista.js";
@@ -44,6 +45,13 @@ function extractBlocks(flat) {
     ["V", /\bV\s*[-–]\s*FLUXO\s+DA\s+OPERA[ÇC][ÃA]O/i],
     ["VI", /\bVI\s*[-–]\s*FORMA\s+DE\s+LIBERA[ÇC][ÃA]O/i],
     ["VII", /\bVII\s*[-–]\s*CORRESPONDENTE\s+NO\s+PA[ÍI]S/i],
+    // CCB Credcesta do Banco Master: os quadros numerados fazem o papel dos
+    // blocos romanos. Sem isto o telefone do cliente vinha do quadro do
+    // correspondente e o CEP, da filial do credor.
+    ["II", /QUADRO\s+1\s*[-–]\s*CREDOR/i],
+    ["III", /QUADRO\s+2\s*[-–]\s*DADOS\s+PESSOAIS/i],
+    ["VII", /QUADRO\s+10\s*[-–]\s*CANAL\s+DE\s+VENDAS/i],
+    ["FIM", /Condi[çc][õo]es\s+Gerais\s+da\s+C[ée]dula\s+de\s+Cr[ée]dito/i],
   ];
   const found = markers
     .map(([key, pattern]) => {
@@ -822,11 +830,16 @@ export function heuristicExtractionFromText(rawText) {
     /\bCEP\s*[:\-]?\s*(\d{5}-?\d{3})/i,
   ]);
   const extractedClienteCep = layout.clienteCep || agiCep || clienteCep || cep;
-  const finalClienteCep = cepLooksInstitutional(flat, extractedClienteCep) ? null : extractedClienteCep;
+  // O CEP lido fora do quadro do cliente e presente no quadro do credor é da
+  // sede ou da filial do banco: a CCB de 2024 saía com a cliente em Itaim Bibi.
+  const cepDoCredor = (valor) => Boolean(valor && creditorBlock && creditorBlock.includes(valor) && !(issuerBlock && issuerBlock.includes(valor)));
+  const finalClienteCep = cepLooksInstitutional(flat, extractedClienteCep) || cepDoCredor(extractedClienteCep) ? null : extractedClienteCep;
   // Entre espaço e "(" não há fronteira de palavra, e o "\b" deixava o DDD sem
   // o parêntese de abertura: o laudo saía com "19) 99904-2614".
   const rawClienteTelefone = layout.clienteTelefone || firstMatch(issuerBlock || flat, [
     /Telefone(?:\(s\)|s|\/Celular)?\s*[:\-]?\s*\/?\s*(\(?\d{2}\)?\s*9?\d{4}-?\d{4})/i,
+    // Linha de rótulos seguida da linha de valores: "Telefone/Celular: E-mail: (19) 9..."
+    /Telefone(?:\/Celular)?\s*:\s*E-?mail\s*:\s*(\(?\d{2}\)?\s*9?\d{4}-?\d{4})/i,
     /(?:^|[^\d(])(\(?\d{2}\)?\s*9?\d{4}-?\d{4})\b/,
   ]);
   const clienteTelefone = validPhone(rawClienteTelefone, contratoNumero, cpf);
@@ -838,6 +851,14 @@ export function heuristicExtractionFromText(rawText) {
   const correspondenteEmail = firstMatch(correspondentBlock || "", [/\b([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})\b/i]);
   const correspondenteCidade = firstField(correspondentBlock, [/\bCidade\s*[:\-]?\s*([^.;\n]{3,60}?)(?=\s+(?:UF|Estado|CEP|Telefone|E-?mail)\b)/i]);
   const correspondenteUf = firstMatch(correspondentBlock || "", [/\b(?:UF|Estado)\s*[:\-]?\s*([A-Z]{2})\b/]);
+  // Quadro 10 da CCB Credcesta: "Empresa: 000483- SEUCREDITO CNPJ: ... Endereço: ...
+  // Telefone: ... Agente Certificado: NOME CPF: ...". É quem operou a venda.
+  const corrEmpresa = correspondentBlock.match(/Empresa\s*:\s*(?:(\d{3,8})\s*-?\s*)?([A-ZÀ-Ü][A-ZÀ-Ü0-9 .&-]{2,80}?)\s+CNPJ\s*:\s*(\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2})/i);
+  const corrEndereco = correspondentBlock.match(/Endere[çc]o\s*:\s*(.{8,160}?)\s+Telefone\s*:/i)?.[1]?.trim() || null;
+  const corrTelefone = correspondentBlock.match(/Telefone\s*:\s*(\(?\d{2}\)?\s*9?\d{4}-?\d{4})/i)?.[1] || null;
+  const corrAgente = correspondentBlock.match(/Agente\s+Certificado\s*:\s*([A-ZÀ-Ü][A-ZÀ-Ü ]{4,80}?)\s+CPF\s*:\s*(\d{3}\.?\d{3}\.?\d{3}-?\d{2})/i);
+  const corrCidade = correspondenteCidade || (corrEndereco && /-\s*([A-ZÀ-Ü][A-ZÀ-Ü ]{3,40})$/.test(corrEndereco) ? corrEndereco.match(/-\s*([A-ZÀ-Ü][A-ZÀ-Ü ]{3,40})$/)[1].trim() : null);
+  const correspondenteQuadro = corrEmpresa ? { codigo: corrEmpresa[1] || null, nome: corrEmpresa[2].replace(/\s+/g, " ").trim(), cnpj: corrEmpresa[3] } : null;
   const normalizedBank = /BB\s+SOLU|BANCO\s+DO\s+BRASIL/i.test(banco || flat) ? "Banco do Brasil S.A." : banco;
   const ptMonths = { janeiro: "01", fevereiro: "02", marco: "03", abril: "04", maio: "05", junho: "06", julho: "07", agosto: "08", setembro: "09", outubro: "10", novembro: "11", dezembro: "12" };
   const bbIssueDateFormatted = bbIssueMatch
@@ -1061,7 +1082,7 @@ export function heuristicExtractionFromText(rawText) {
     operacao_portada: contextoInstrumento.tipoOperacao === "PORTABILIDADE" ? true : layout.operacaoPortada ?? camposOperacao.operacao_portada,
     cartao: isCartaoConsignado ? layout.cartao : null,
     conta_beneficio: layout.contaBeneficio || null,
-    correspondente: layout.correspondente || null,
+    correspondente: layout.correspondente || correspondenteQuadro,
     via_declarada: viaMarcada(flat) || firstMatch(flat, [
       /\b(?:via\s+n[ãa]o\s+negoci[áa]vel|via\s+do\s+emitente|via\s+negoci[áa]vel|via\s+do\s+credor|via\s+do\s+banco)\b/i,
       /\b(?:1[ªa]\s*via\s*[-–]\s*(?:negoci[áa]vel|n[ãa]o\s+negoci[áa]vel|do\s+credor|do\s+emitente))\b/i,
@@ -1350,9 +1371,16 @@ export function heuristicExtractionFromText(rawText) {
     },
     correspondente: {
       email: correspondenteEmail,
-      cidade: correspondenteCidade,
+      cidade: corrCidade,
       uf: correspondenteUf,
-      observacoes: correspondenteEmail ? "Dado extraído do bloco de correspondente/originação; não deve ser atribuído ao contratante." : null,
+      nome: correspondenteQuadro?.nome || layout.correspondente?.nome || null,
+      codigo: correspondenteQuadro?.codigo || layout.correspondente?.codigo || null,
+      cnpj: correspondenteQuadro?.cnpj || null,
+      endereco: corrEndereco,
+      telefone: corrTelefone,
+      agente_nome: corrAgente ? corrAgente[1].replace(/\s+/g, " ").trim() : null,
+      agente_cpf: corrAgente ? corrAgente[2] : null,
+      observacoes: correspondenteEmail || correspondenteQuadro ? "Dado extraído do bloco de correspondente/originação; não deve ser atribuído ao contratante." : null,
     },
     assinatura: {
       presente: hasSignature,
@@ -1528,6 +1556,23 @@ export function heuristicExtractionFromText(rawText) {
   if (extracted.cliente) {
     const estados = avaliarQualificacao(text, extracted.cliente);
     extracted.cliente.estados_campos = estados;
+    // Rótulos impressos sem valor: o campo fica vazio no laudo e vira achado,
+    // em vez de ser preenchido por um CEP lido fora do quadro do cliente.
+    const camposEmBranco = quadroClienteEmBranco(text);
+    if (camposEmBranco.length >= 3) {
+      const nomes = { bairro: "bairro", cidade: "cidade", estado: "estado", cep: "CEP", telefone: "telefone", fonte_pagadora: "fonte pagadora" };
+      for (const campo of camposEmBranco) {
+        if (campo !== "fonte_pagadora") extracted.cliente[campo] = null;
+        estados[campo] = { estado: ESTADO_CAMPO.LOCALIZADO_VAZIO, valor: null, motivo: "campo do formulário sem preenchimento" };
+        extracted.cliente.origens = { ...(extracted.cliente.origens || {}), [campo]: "LOCALIZADO E VAZIO: rótulo impresso sem valor" };
+      }
+      addIssue(
+        "CAD5",
+        "ALTA",
+        "Quadro de dados pessoais do contratante em branco",
+        `O instrumento imprime os rótulos de ${camposEmBranco.map((c) => nomes[c]).join(", ")} no quadro de dados pessoais do contratante e não preenche nenhum deles. A instituição formalizou a operação sem registrar onde o contratante reside nem como é contatado; a lacuna é do instrumento, não da extração, e impede o confronto do endereço cadastral com a coordenada do ato e com a residência informada.`
+      );
+    }
     if (estados.endereco?.estado === ESTADO_CAMPO.LOCALIZADO_VAZIO) {
       extracted.cliente.endereco = null;
       extracted.cliente.endereco_literal = estados.endereco.valor;
