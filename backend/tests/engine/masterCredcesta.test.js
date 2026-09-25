@@ -405,3 +405,16 @@ describe("CCB Credcesta de 2024: residência da contratante igual ao endereço d
     expect(heuristicExtractionFromText(LAYOUT_2023).achados_irregularidade.map((a) => a.codigo)).not.toContain("TEL1");
   });
 });
+
+describe("identificador da sessão no texto em colunas", () => {
+  it("quando o rótulo da sessão e o valor ficam em linhas distintas, o rodapé 'Assinatura digital:' dá o código", () => {
+    const texto = `${LAYOUT_2023}\fDOCUMENTO ASSINADO ELETRONICAMENTE
+Local: Amparo - SP
+CPF                                   ID da sessão usuário
+123.456.789-09                        0f0f0f0f-aaaa-4bbb-8ccc-0123456789ab
+Assinatura digital: 0f0f0f0f-aaaa-4bbb-8ccc-0123456789ab`;
+    const e = heuristicExtractionFromText(texto);
+    expect(e.assinatura.codigo_autenticacao_declarado).toBe("0f0f0f0f-aaaa-4bbb-8ccc-0123456789ab");
+    expect(e.assinatura.codigo_autenticacao_origem).toMatch(/Assinatura digital|ID da sessão/);
+  });
+});

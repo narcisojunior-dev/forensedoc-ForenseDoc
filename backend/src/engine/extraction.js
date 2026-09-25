@@ -748,9 +748,13 @@ export function heuristicExtractionFromText(rawText) {
     /(?:\bhash\b|\bSHA-?(?:1|224|256|384|512)\b|\bMD5\b|resumo\s+criptogr[aá]fico|\bdigest\b|impress[aã]o\s+digital)[^:\n]{0,40}?[:\-]?\s*\b([a-f0-9]{32,128})\b/i,
     /\b([a-f0-9]{64})\b/i,
   ]);
+  // "Assinatura digital: <uuid>" é o rodapé de cada página da CCB Credcesta e
+  // repete o "ID da sessão usuário" da página de assinatura; no texto em
+  // colunas do pdftotext o rótulo da sessão e o valor ficam em linhas
+  // separadas, e só o rodapé casa na mesma linha.
   const codigoRotulado = text.match(
     /(?:N[uú]mero\s+[uú]nico|C[oó]digo\s+de\s+(?:verifica[cç][aã]o|autentica[cç][aã]o|autenticidade)|Chave\s+de\s+valida[cç][aã]o|Protocolo\s+de\s+autenticidade(?:\s+n[ºo°.]*)?|ID\s+da\s+sess[ãa]o(?:\s+(?:do\s+)?usu[áa]rio)?|Identificador\s+d[ae]\s+sess[ãa]o)\s*:?[ \t]*([A-Za-z0-9][A-Za-z0-9-]{7,79})\b/i
-  );
+  ) || text.match(/(?:Assinatura\s+digital)\s*:[ \t]*([A-Za-z0-9][A-Za-z0-9-]{7,79})\b/i);
   const codigoAutenticacaoRotulado = codigoRotulado && !/^\d{1,7}$/.test(codigoRotulado[1]) ? codigoRotulado[1] : null;
   const urlVerificacao = firstMatch(flat, [/Verifique\s+a\s+autenticidade\s+em\s*:?\s*(https?:\/\/\S+?)[.,;]?(?:\s|$)/i]);
   // Coordenada: rótulo combinado explícito primeiro; depois o extrator do motor
