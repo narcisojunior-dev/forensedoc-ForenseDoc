@@ -21,10 +21,31 @@ import sharp from "sharp";
 
 const DEFAULT_OPTIONS = {
   qualidadeReferencia: 95,
-  fatorAmplificacao: 15,
+  fatorAmplificacao: null,
+  percentilBrilho: 99.5,
+  fatorMaximo: 100,
   maxHeatmapDim: 400,
   blockSize: 16,
 };
+
+/**
+ * Fator de brilho do mapa, relativo à própria imagem: o resíduo no percentil
+ * `percentil` vira branco. Um fator fixo deixava preto o mapa de toda foto já
+ * salva em qualidade alta, cujo resíduo típico é de 1 ou 2 níveis. O percentil,
+ * e não o máximo, impede que um pixel isolado escureça o resto; o teto impede
+ * que um resíduo de 1 nível chegue ao branco.
+ */
+function fatorRelativo(histograma, total, percentil, fatorMaximo) {
+  const alvo = total * (percentil / 100);
+  let acumulado = 0;
+  let nivel = 0;
+  for (; nivel < histograma.length; nivel++) {
+    acumulado += histograma[nivel];
+    if (acumulado >= alvo) break;
+  }
+  if (nivel === 0) return fatorMaximo;
+  return Math.max(1, Math.min(fatorMaximo, Math.round(255 / nivel)));
+}
 
 /**
  * Executa a análise ELA sobre um buffer de imagem.
@@ -32,7 +53,9 @@ const DEFAULT_OPTIONS = {
  * @param {Buffer} imageBuffer - Buffer bruto da imagem
  * @param {object} [options]
  * @param {number} [options.qualidadeReferencia=95] - Qualidade JPEG para re-compressão
- * @param {number} [options.fatorAmplificacao=15] - Multiplicador visual para o mapa de calor
+ * @param {number} [options.fatorAmplificacao] - Multiplicador visual fixo; sem ele, o fator é relativo à imagem
+ * @param {number} [options.percentilBrilho=99.5] - Percentil do resíduo que vira branco no mapa
+ * @param {number} [options.fatorMaximo=100] - Teto do fator relativo
  * @param {number} [options.maxHeatmapDim=400] - Dimensão máxima da miniatura do mapa de calor
  * @param {number} [options.blockSize=16] - Tamanho do bloco para análise de dispersão regional
  * @returns {Promise<object>} Resultado estruturado da análise ELA
@@ -47,7 +70,9 @@ export async function analisarELA(imageBuffer, options = {}) {
 
   const {
     qualidadeReferencia,
-    fatorAmplificacao,
+    fatorAmplificacao: fatorFixo,
+    percentilBrilho,
+    fatorMaximo,
     maxHeatmapDim,
     blockSize,
   } = { ...DEFAULT_OPTIONS, ...options };
@@ -112,7 +137,8 @@ export async function analisarELA(imageBuffer, options = {}) {
       .toBuffer({ resolveWithObject: true });
 
     const totalPixels = width * height;
-    const diffMap = Buffer.alloc(totalPixels * 3);
+    const channelDiffs = new Uint8Array(totalPixels * 3);
+    const histograma = new Uint32Array(256);
     const pixelDiffs = new Float32Array(totalPixels);
 
     let sumDiff = 0;
@@ -129,10 +155,20 @@ export async function analisarELA(imageBuffer, options = {}) {
       sumDiff += pDiff;
       if (pDiff > maxDiff) maxDiff = pDiff;
 
-      // Mapa de calor visual com amplificação
-      diffMap[idx] = Math.min(255, Math.round(rDiff * fatorAmplificacao));
-      diffMap[idx + 1] = Math.min(255, Math.round(gDiff * fatorAmplificacao));
-      diffMap[idx + 2] = Math.min(255, Math.round(bDiff * fatorAmplificacao));
+      channelDiffs[idx] = rDiff;
+      channelDiffs[idx + 1] = gDiff;
+      channelDiffs[idx + 2] = bDiff;
+      histograma[rDiff]++;
+      histograma[gDiff]++;
+      histograma[bDiff]++;
+    }
+
+    // Mapa de calor visual com amplificação
+    const fatorAmplificacao =
+      fatorFixo ?? fatorRelativo(histograma, totalPixels * 3, percentilBrilho, fatorMaximo);
+    const diffMap = Buffer.alloc(totalPixels * 3);
+    for (let i = 0; i < diffMap.length; i++) {
+      diffMap[i] = Math.min(255, channelDiffs[i] * fatorAmplificacao);
     }
 
     const mediaDiferenca = sumDiff / totalPixels;
@@ -222,6 +258,7 @@ export async function analisarELA(imageBuffer, options = {}) {
       disponivel: true,
       qualidade_referencia: qualidadeReferencia,
       fator_amplificacao: fatorAmplificacao,
+      escala_mapa: fatorFixo != null ? "fixa" : "relativa",
       largura: width,
       altura: height,
       media_diferenca: Number(mediaDiferenca.toFixed(2)),

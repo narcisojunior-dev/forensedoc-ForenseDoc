@@ -1028,10 +1028,18 @@ export default function LaudoForense({ report }) {
                                           alt="Mapa de calor ELA"
                                           style={{ width: 120, height: "auto", borderRadius: 6, border: "1px solid #52616c" }}
                                         />
-                                        <div style={{ fontSize: 10, color: "var(--muted)", textAlign: "center", marginTop: 2 }}>Mapa ELA (95%)</div>
+                                        <div style={{ fontSize: 10, color: "var(--muted)", textAlign: "center", marginTop: 2 }}>
+                                          Mapa ELA ({b.ela.qualidade_referencia || 95}%){b.ela.fator_amplificacao ? ` · brilho ${b.ela.fator_amplificacao}×` : ""}
+                                        </div>
                                       </div>
                                     )}
                                     <div style={{ flex: 1, minWidth: 220 }}>
+                                      {b.ela.fator_amplificacao && (
+                                        <Row
+                                          label="Ampliação do mapa"
+                                          value={b.ela.escala_mapa === "relativa" ? `${b.ela.fator_amplificacao}×, relativa a esta imagem` : `${b.ela.fator_amplificacao}×`}
+                                        />
+                                      )}
                                       <Row label="Classificação" value={b.ela.classificacao} />
                                       <Row label="Média de resíduos" value={b.ela.media_diferenca != null ? String(b.ela.media_diferenca) : null} />
                                       <Row label="Desvio padrão" value={b.ela.desvio_padrao != null ? String(b.ela.desvio_padrao) : null} />

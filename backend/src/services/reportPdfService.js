@@ -1761,6 +1761,15 @@ function sectionImages(ctx, extracted) {
             ctx.doc.y = y + 126;
           }
         }
+        if (b.ela.fator_amplificacao) {
+          field(
+            ctx,
+            "Ampliação do mapa",
+            b.ela.escala_mapa === "relativa"
+              ? `${b.ela.fator_amplificacao}×, relativa a esta imagem (não comparável entre laudos)`
+              : `${b.ela.fator_amplificacao}×`
+          );
+        }
         field(ctx, "Classificação ELA", b.ela.classificacao);
         field(ctx, "Média de resíduos", b.ela.media_diferenca != null ? String(b.ela.media_diferenca).replace(".", ",") : "não medido");
         field(ctx, "Desvio padrão", b.ela.desvio_padrao != null ? String(b.ela.desvio_padrao).replace(".", ",") : "não medido");
