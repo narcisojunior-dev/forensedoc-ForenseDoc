@@ -422,7 +422,9 @@ function enderecoDoQuadroCorrespondente(texto) {
   if (li < 0) return null;
   // "Telefone: (37) 98806-3249" na mesma linha do endereço, com um espaço só,
   // entrava no endereço do correspondente da CCB 65126985.
-  const semColunaAoLado = (l) => l.replace(/\s*(?:Telefone|CNPJ|CPF|Agente\s+Certificado)\s*:[^\n]*?(?=\s+-\s+[A-ZÀ-Ü]|$)/i, " ").replace(/\s+/g, " ").trim();
+  // O hífen que fecha a linha ("SALA: 1106 Telefone: (37) 9... -") é o separador
+  // do bairro que vem na linha seguinte e fica.
+  const semColunaAoLado = (l) => l.replace(/\s*(?:Telefone|CNPJ|CPF|Agente\s+Certificado)\s*:[^\n]*?(?=\s+-\s+[A-ZÀ-Ü]|\s+-\s*$|$)/i, " ").replace(/\s+/g, " ").trim();
   let valor = semColunaAoLado(linhas[li].replace(/^.*?Endere[çc]o\s*:\s*/i, ""));
   for (let j = li + 1; j < Math.min(linhas.length, li + 4); j += 1) {
     const proxima = linhas[j].trim();

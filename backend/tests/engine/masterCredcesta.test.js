@@ -473,3 +473,15 @@ describe("telefone na mesma linha do endereço do correspondente, com um espaço
     expect(e.correspondente.cidade).toBe("DIVINOPOLIS");
   });
 });
+
+describe("hífen no fim da linha do endereço do correspondente", () => {
+  it("o separador do bairro sobrevive quando o telefone fecha a linha", () => {
+    const texto = LAYOUT_2023.replace(
+      "Endereço: RUA DAS PALMEIRAS, 126 - ANEXO D - JARDIM MORUMBI -\nPRESIDENTE PRUDENTE\nTelefone: (18) 3344-0000\n",
+      "Endereço: AVENIDA DAS ROSAS,545 - SALA: 1106 Telefone: (37) 98806-0000 -\nCENTRO - DIVINOPOLIS\n",
+    );
+    const e = heuristicExtractionFromText(texto);
+    expect(e.correspondente.endereco).toBe("AVENIDA DAS ROSAS,545 - SALA: 1106 - CENTRO - DIVINOPOLIS");
+    expect(e.correspondente.cidade).toBe("DIVINOPOLIS");
+  });
+});
