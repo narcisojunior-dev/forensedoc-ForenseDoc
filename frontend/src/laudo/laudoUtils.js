@@ -1,5 +1,5 @@
 import { ordenarAchados } from "./eixosAchado.js";
-import { classificarGrauProcessual } from "./grausConclusao.js";
+import { classificarGrauProcessual, GRAUS } from "./grausConclusao.js";
 
 // Utilitários de apresentação do laudo técnico pericial. Portados do motor de
 // geração (frontend/src/ForenseDoc.jsx) sem alteração de regra.
@@ -201,6 +201,7 @@ export function reportIssues(extracted = {}, projecao = null) {
 export function issueBucket(issue) {
   const code = String(issue.codigo || "");
   const text = `${issue.titulo || ""} ${issue.texto || ""}`;
+  if (/^INS\d/.test(code)) return classificarGrauProcessual(code) === GRAUS.CONSTATADO ? "instrumento" : "lacunas";
   if (/FIN3/i.test(code) || /\bcar[eê]ncia\b|contexto econ[oô]mico/i.test(text)) return "contexto";
   if (/^(LIB|BIO|ASS|TRL|TZ)/.test(code)) return "lacunas";
   if (/^SEG/.test(code)) return "instrumento";

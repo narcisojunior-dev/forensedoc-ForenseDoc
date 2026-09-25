@@ -162,6 +162,7 @@ export async function buildReportPdf(analysis, result, opcoes = {}) {
   sectionContractingTrail(ctx, extracted, result);
   sectionEventTrail(ctx, extracted);
   sectionImages(ctx, extracted);
+  sectionInssAuthorization(ctx, extracted);
   sectionGeo(ctx, result, { mapaIpResidencia, mapaResidenciaDeclarado, mapaDeclaradoIp });
   sectionIrregularities(ctx, extracted, sumario?.projecao);
   sectionProcessComparison(ctx, result.processComparison);
@@ -1692,6 +1693,7 @@ function sectionImages(ctx, extracted) {
     `Auditoria automática dos objetos de imagem do arquivo${img?.ferramenta ? ` (${img.ferramenta})` : ""}. O objetivo é verificar se o PDF contém fotos/selfies extraíveis, qual a resolução real dessas imagens e se alguma prova visual foi reutilizada byte a byte dentro do mesmo documento.`,
     { color: MUTED, size: 8.5 }
   );
+  if (b?.nota_regime) paragraph(ctx, b.nota_regime, { color: MUTED, size: 8.5 });
 
   const relevante = (item) => item.biometricaProvavel || item.classificacao === "imagem documental";
   const lista = img?.imagens || [];
@@ -1711,7 +1713,7 @@ function sectionImages(ctx, extracted) {
   }
 
   if (b) {
-    subheading(ctx, `Artefato biométrico · pág. ${b.pagina}`);
+    subheading(ctx, `Artefato biométrico${b.pagina ? ` · pág. ${b.pagina}` : ""}`);
     if (b.miniatura && /^data:image\/(jpeg|png);base64,/.test(b.miniatura)) {
       // Decodifica primeiro: miniatura ilegível não pode custar uma quebra de
       // página que depois ninguém preenche.
@@ -1729,7 +1731,7 @@ function sectionImages(ctx, extracted) {
         ctx.doc.y = y + 176;
       }
     }
-    field(ctx, "Página / dimensões", `pág. ${b.pagina} · ${b.largura} x ${b.altura} pixels (${String(b.megapixels).replace(".", ",")} megapixel)`);
+    field(ctx, "Página / dimensões", `${b.pagina ? `pág. ${b.pagina} · ` : "página não determinada nesta cópia · "}${b.largura} x ${b.altura} pixels (${String(b.megapixels).replace(".", ",")} megapixel)`);
     field(ctx, "Formato e tamanho", [b.formato, b.bytes ? `${b.bytes.toLocaleString("pt-BR")} bytes` : null].filter(Boolean).join(" · "));
     field(ctx, "SHA-256 da imagem", b.sha256, { mono: true });
     field(ctx, "EXIF", b.exif === false ? "ausente" : b.exif ? "presente" : "não aferido");
@@ -1760,9 +1762,9 @@ function sectionImages(ctx, extracted) {
           }
         }
         field(ctx, "Classificação ELA", b.ela.classificacao);
-        field(ctx, "Média de resíduos", b.ela.media_diferenca != null ? String(b.ela.media_diferenca).replace(".", ",") : "—");
-        field(ctx, "Desvio padrão", b.ela.desvio_padrao != null ? String(b.ela.desvio_padrao).replace(".", ",") : "—");
-        field(ctx, "Pixels com erro anômalo (outliers)", b.ela.percentual_outliers != null ? `${String(b.ela.percentual_outliers).replace(".", ",")}%` : "—");
+        field(ctx, "Média de resíduos", b.ela.media_diferenca != null ? String(b.ela.media_diferenca).replace(".", ",") : "não medido");
+        field(ctx, "Desvio padrão", b.ela.desvio_padrao != null ? String(b.ela.desvio_padrao).replace(".", ",") : "não medido");
+        field(ctx, "Pixels com erro anômalo (outliers)", b.ela.percentual_outliers != null ? `${String(b.ela.percentual_outliers).replace(".", ",")}%` : "não medido");
         if (b.ela.dispersao_regional != null) field(ctx, "Dispersão regional", String(b.ela.dispersao_regional).replace(".", ","));
         field(ctx, "Ferramenta", b.ela.ferramenta || "sharp (libvips)");
         if (b.ela.conclusao) {
@@ -1830,9 +1832,9 @@ function sectionImages(ctx, extracted) {
     grupos.forEach((g, i) => {
       reserve(ctx, 60);
       field(ctx, `Grupo repetido #${i + 1}`, `${g.ocorrencias} ocorrências · SHA-256 ${shortHash(g.sha256, 18, 10)}`);
-      field(ctx, "   Páginas", g.paginas?.join(" · "));
+      field(ctx, "   Páginas", (g.paginas || []).filter(Boolean).join(" · ") || null);
       (g.imagens || []).forEach((item, j) => {
-        field(ctx, `   Ocorrência ${j + 1}`, `pág. ${item.page}, img ${item.num}, ${item.width} x ${item.height}px, ${item.size || "tamanho não informado"}`);
+        field(ctx, `   Ocorrência ${j + 1}`, `${item.page ? `pág. ${item.page}` : "página n/d"}, img ${item.num}, ${item.width} x ${item.height}px, ${item.size || "tamanho não informado"}`);
       });
       paragraph(
         ctx,
@@ -1871,7 +1873,7 @@ const COLUNAS_IMAGEM = [
 ];
 
 const linhaImagem = (item) => [
-  item.page,
+  item.page ?? "n/d",
   item.num,
   item.type,
   `${item.width} x ${item.height}`,
@@ -1881,6 +1883,43 @@ const linhaImagem = (item) => [
 ];
 
 /** Anexo técnico: inventário completo de imagens, fora do corpo do laudo. */
+/**
+ * § 4.5: regime de autorização do consignado INSS pela data do contrato e o que
+ * o dossiê traz sobre a autorização. O texto normativo vem pronto do motor
+ * (regimeInss.js), para a tela e o PDF dizerem a mesma coisa.
+ */
+function sectionInssAuthorization(ctx, extracted) {
+  const r = extracted.regime_inss;
+  if (!r) return;
+  const e = r.evidencias || {};
+  const altos = (extracted.achados_irregularidade || []).some((a) => /^INS\d/.test(a.codigo || "") && a.gravidade === "ALTA");
+  const naoLocalizado = "não localizado no dossiê";
+  const dataHora = (x) => (x ? [x.data, x.hora].filter(Boolean).join(" ") : null);
+  const conta = (c) => (c ? `agência ${c.agencia}, conta ${c.conta}` : null);
+
+  heading(ctx, "§ 4.5 · Autorização do benefício (INSS)", { danger: altos });
+  field(ctx, "Data do contrato", r.data_contrato || "não localizada no instrumento");
+  field(ctx, "Regime aplicável", r.rotulo);
+  field(ctx, "Norma de referência", r.norma);
+  field(ctx, "Via de autorização", r.via_rotulo);
+  if (r.nota_oficio) {
+    badge(ctx, "Registro da autorização no Meu INSS", e.meu_inss?.autorizacao ? "LOCALIZADO" : "AUSENTE", Boolean(e.meu_inss?.autorizacao));
+    field(ctx, "   Data e hora", dataHora(e.meu_inss?.autorizacao));
+    field(ctx, "Base oficial do confronto facial", (e.meu_inss?.bases_oficiais || []).join(", ") || naoLocalizado);
+    field(ctx, "Averbação", dataHora(e.averbacao) || naoLocalizado);
+  }
+  if (r.via === "GOVBR") {
+    field(ctx, "Nível da conta gov.br", e.govbr?.nivel || naoLocalizado);
+    field(ctx, "IP de acesso gov.br", e.govbr?.ip || naoLocalizado, { mono: true });
+    field(ctx, "Dispositivo de acesso gov.br", e.govbr?.dispositivo || naoLocalizado);
+    field(ctx, "Conta validada", conta(e.conta_validada) || naoLocalizado);
+    field(ctx, "Conta de recebimento do benefício", conta(e.conta_beneficio) || naoLocalizado);
+  }
+  if (r.codigo === "IN_213_VIA_DUPLA") field(ctx, "Data de início do benefício (DIB)", e.dib || naoLocalizado);
+  if (r.nota_oficio) paragraph(ctx, r.nota_oficio, { color: MUTED, size: 8.5 });
+  for (const ressalva of r.ressalvas || []) paragraph(ctx, ressalva, { color: MUTED, size: 8.5 });
+}
+
 function sectionImageAnnex(ctx, extracted) {
   const lista = extracted.imagens_pdf?.imagens || [];
   if (!lista.length) return;
@@ -2346,11 +2385,11 @@ function sectionRemarks(ctx, extracted) {
     { size: 8.5 }
   );
   const ferramentas = [
-    "• Criptografia e Integridade: Funções de dispersão criptográfica SHA-256 e MD5 (NIST FIPS 180-4);",
-    "• Análise Estrutural e Sintaxe PDF: QPDF v11 / Poppler pdfinfo e pdfsig para validação de catálogo e assinaturas;",
-    "• Auditoria de Metadados e XMP: ExifTool v12 / PDF-Lib com inspeção de histórico incremental e datas de modificação;",
-    "• Exame de Artefatos Gráficos e ELA: Sharp Forensics / Engine ELA (Error Level Analysis - ressalto de compressão JPEG em escala 10-20×) para detecção de fotomontagem em biometria e CNH;",
-    "• Georreferenciamento e Topologia IP: Bases MaxMind GeoIP2 / OpenStreetMap Nominatim para geocodificação e cálculo geodésico de distâncias pela fórmula de Haversine."
+    "• Criptografia e integridade: SHA-256 e SHA-1 (Node.js crypto, NIST FIPS 180-4) sobre o arquivo original e sobre cada objeto de imagem extraído;",
+    "• Estrutura do PDF, metadados e assinaturas: leitura do catálogo, do trailer, das datas internas e das atualizações incrementais com pdf.js/pdf-parse; Poppler pdfsig e pdfimages quando instalados, com leitor interno dos objetos de imagem no lugar deles;",
+    "• Exame de artefatos gráficos: EXIF do fluxo bruto de cada imagem e análise de nível de erro (ELA) com sharp/libvips, para apontar recompressão localizada em fotografia biométrica;",
+    "• Rede: RDAP e RIPEstat para titular, bloco e ASN do IP na data do ato; geolocalização do IP por ipapi.co e ipwho.is (estimativa de terceiro, sem margem de erro aferida);",
+    "• Georreferenciamento: OpenStreetMap Nominatim e awesomeapi-cep para geocodificar endereços e sedes de município; distância geodésica pela fórmula de Haversine."
   ];
   for (const f of ferramentas) {
     paragraph(ctx, f, { size: 8, color: MUTED });
@@ -2388,6 +2427,7 @@ function sectionQuesitos(ctx, extracted, result) {
     cidadeIp: ipItem?.geo ? [ipItem.geo.city, ipItem.geo.region].filter(Boolean).join(" / ") : null,
     cidadeDomicilio: result.home?.geo ? result.home.geo.display || result.home.query : null,
     distanciaKm: distanciaIp !== null ? distanciaIp.toFixed(1) : null,
+    divergenciaIp: ipItem?.divergenciaResidencia?.nivel || null,
     dataHora: ipItem?.data_hora || extracted.assinatura?.data_hora_assinatura,
     achados: extracted.achados_irregularidade || [],
     extracted,
@@ -2415,7 +2455,7 @@ function sectionLegal(ctx, extracted = {}, result = {}) {
   const longe = (km) => distanciaKm(km) !== null && distanciaKm(km) >= 300;
   if (longe(result.contractGeo?.distance) || (result.ipAnalysis || []).some((ip) => longe(ip.distance))) destaques.push("incompatibilidade geográfica do ato");
   paragraph(ctx, `Achados deste laudo com maior aderência normativa: ${destaques.join("; ")}.`, { size: 9 });
-  for (const { grupo, itens } of fundamentacaoPara(extracted.contrato?.produto_codigo)) {
+  for (const { grupo, itens } of fundamentacaoPara(extracted.contrato?.produto_codigo, extracted.regime_inss)) {
     const { doc, contentWidth } = ctx;
     reserve(ctx, 72); // título do grupo + o primeiro dispositivo junto
     doc.moveDown(0.3);

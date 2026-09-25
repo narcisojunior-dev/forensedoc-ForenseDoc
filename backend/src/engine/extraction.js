@@ -22,6 +22,9 @@ import { extractFactaCartaoConsignado } from "./factaCartao.js";
 import { resolveBankByCnpj } from "./bankRegistry.js";
 import { parseUserAgent, assessPlatformIndependence, buildAcceptanceTimeline, formatDurationPt } from "./trilhaAnalysis.js";
 import { cnpsCeilingAt } from "./cnpsRateCeiling.js";
+import { classificarRegimeInss, fundamentacaoDoRegime, NOTA_OFICIO_INSS, REGIMES_MEU_INSS, REGRA_DIB, ROTULOS_VIA } from "./regimeInss.js";
+import { extrairEvidenciasAutorizacao } from "./evidenciasAutorizacao.js";
+import { avaliarAutorizacaoInss } from "./avaliacaoInss.js";
 import {
   extrairNomeContratante, nomePlausivel, extrairNumeroContrato, numeroContratoPlausivel,
   extrairCoordenadasPlausiveis, coordenadaComoTexto, extrairIps, enderecoPorColunas, valorEhRotulo,
@@ -344,6 +347,36 @@ function mergeDefined(...objects) {
     }
     return acc;
   }, {});
+}
+
+/** "do Rio de Janeiro", "de Deus", "na Praia": prosa de cláusula, não valor de campo. */
+function comecaPorPreposicao(value) {
+  return /^(?:d[oae]s?|n[oa]s?|em|a|à)\b/i.test(String(value || "").trim());
+}
+
+function valorDeCidadePlausivel(value) {
+  const v = String(value || "").trim();
+  if (v.length < 3) return false;
+  if (comecaPorPreposicao(v)) return false;
+  if (valorEhRotulo(v)) return false;
+  if (isInstitutionalAddress(v)) return false;
+  return /^[A-Za-zÀ-ÿ'´`.\- ]+$/.test(v);
+}
+
+/**
+ * Percorre os padrões na ordem e, dentro de cada um, todas as ocorrências;
+ * devolve o primeiro valor que passa no crivo. `firstMatch` parava na primeira
+ * ocorrência do primeiro padrão, fosse ela plausível ou não.
+ */
+function primeiroValorPlausivel(text, patterns, aceita) {
+  for (const pattern of patterns) {
+    const re = pattern.global ? pattern : new RegExp(pattern.source, `${pattern.flags}g`);
+    for (const match of String(text || "").matchAll(re)) {
+      const valor = (match[1] || match[0]).replace(/\s+/g, " ").trim();
+      if (aceita(valor)) return valor;
+    }
+  }
+  return null;
 }
 
 function isInstitutionalAddress(value) {
@@ -753,12 +786,17 @@ export function heuristicExtractionFromText(rawText) {
     /((?:rua|avenida|av\.|travessa|tv\.|rodovia|estrada)\s+[^.]{8,120})/i,
     /endere[cç]o\s*[:\-]?\s*([^.;\n]{8,140})/i,
   ]);
-  const cidade = firstMatch(issuerBlock || flat, [
-    /\bCidade\s*[:\-]?\s*([^.;\n]{3,60}?)(?=\s+(?:UF|Estado|CEP|Telefone|E-?mail)\b)/i,
-    /LOCAL\s+E\s+DATA\s+DE\s+EMISS[ÃA]O\s*[:\-]?\s*([^.;\n]{3,60}?)\s*-\s*[A-Z]{2}\s*-\s*\d{2}\/\d{2}\/\d{4}/i,
-    /cidade\s*[:\-]?\s*([^,.;\n]{3,60}?)(?=\s+(?:bairro|endere[cç]o|cep|estado)\b)/i,
-    /cidade\s*[:\-]?\s*([^,.;\n]{3,60})/i,
-  ]);
+  // A primeira ocorrência de "cidade" na CCB do Banco Master é a sede do credor
+  // ("com sede na cidade do Rio de Janeiro, Estado do Rio de Janeiro"), e o
+  // laudo saía com a cliente de Amparo/SP domiciliada no Rio. Valor que começa
+  // por preposição é prosa de cláusula, não campo de formulário; o campo
+  // "Cidade:" do quadro do cliente vem depois e é o que vale.
+  const cidade = primeiroValorPlausivel(issuerBlock || flat, [
+    /\bCidade\s*[:\-]?\s*([^.;\n]{3,60}?)(?=\s+(?:UF|Estado|CEP|Telefone|E-?mail)\b)/gi,
+    /LOCAL\s+E\s+DATA\s+DE\s+EMISS[ÃA]O\s*[:\-]?\s*([^.;\n]{3,60}?)\s*-\s*[A-Z]{2}\s*-\s*\d{2}\/\d{2}\/\d{4}/gi,
+    /cidade\s*[:\-]?\s*([^,.;\n]{3,60}?)(?=\s+(?:bairro|endere[cç]o|cep|estado)\b)/gi,
+    /cidade\s*[:\-]?\s*([^,.;\n]{3,60})/gi,
+  ], valorDeCidadePlausivel);
   const bairro = firstMatch(issuerBlock || flat, [
     /\bBairro\s*[:\-]?\s*([^.;\n]{3,60}?)(?=\s+(?:Cidade|UF|Estado|CEP|Telefone|E-?mail)\b)/i,
     /bairro\s*[:\-]?\s*([^,.;\n]{3,60}?)(?=\s+(?:endere[cç]o|cep|cidade|estado)\b)/i,
@@ -784,6 +822,7 @@ export function heuristicExtractionFromText(rawText) {
   const clienteEmail = rawClienteEmail && !isInstitutionalEmail(rawClienteEmail) ? rawClienteEmail : null;
   const correspondenteEmail = firstMatch(correspondentBlock || "", [/\b([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})\b/i]);
   const correspondenteCidade = firstField(correspondentBlock, [/\bCidade\s*[:\-]?\s*([^.;\n]{3,60}?)(?=\s+(?:UF|Estado|CEP|Telefone|E-?mail)\b)/i]);
+  const correspondenteUf = firstMatch(correspondentBlock || "", [/\b(?:UF|Estado)\s*[:\-]?\s*([A-Z]{2})\b/]);
   const normalizedBank = /BB\s+SOLU|BANCO\s+DO\s+BRASIL/i.test(banco || flat) ? "Banco do Brasil S.A." : banco;
   const ptMonths = { janeiro: "01", fevereiro: "02", marco: "03", abril: "04", maio: "05", junho: "06", julho: "07", agosto: "08", setembro: "09", outubro: "10", novembro: "11", dezembro: "12" };
   const bbIssueDateFormatted = bbIssueMatch
@@ -842,7 +881,7 @@ export function heuristicExtractionFromText(rawText) {
       "PAG1",
       "MÉDIA",
       "Numeração do rodapé acima do total declarado no próprio rodapé",
-      `O rodapé "${anomalia.modelo}" numera as páginas de 1/${anomalia.denominador} até ${anomalia.maior_numerador}/${anomalia.denominador}, nas págs. ${anomalia.paginas[0]} a ${anomalia.paginas.at(-1)} do arquivo: ${anomalia.maior_numerador} páginas numeradas contra ${anomalia.denominador} declaradas no denominador. O estado é de indício e não de comprovação. A leitura possível é que o documento juntado não corresponda ao modelo cuja numeração o rodapé declara, o que deve ser esclarecido pela instituição com a apresentação do modelo vigente na data da contratação.`
+      `O rodapé "${anomalia.modelo}" numera as páginas de 1/${anomalia.denominador} até ${anomalia.maior_numerador}/${anomalia.denominador}, nas págs. ${anomalia.paginas[0]} a ${anomalia.paginas.at(-1)} do arquivo: ${anomalia.maior_numerador} páginas numeradas contra ${anomalia.denominador} declaradas no denominador. A numeração é constatada no arquivo; o que ela significa é indício, não comprovação. A leitura possível é que o documento juntado não corresponda ao modelo cuja numeração o rodapé declara, o que deve ser esclarecido pela instituição com a apresentação do modelo vigente na data da contratação.`
     );
   }
   for (const alerta of dataContratoEleita.alertas) addIssue(alerta.codigo, alerta.gravidade, alerta.titulo, alerta.texto);
@@ -1276,7 +1315,7 @@ export function heuristicExtractionFromText(rawText) {
       endereco: layout.clienteEndereco || agiEndereco || endereco,
       bairro: layout.clienteBairro || agiBairro || bairro,
       cidade: layout.clienteCidade || (finalModalidade === "Renegociação CDC" ? null : (agiCidadeEstado?.[1]?.trim() || cidade)),
-      estado: layout.clienteEstado || agiCidadeEstado?.[2] || firstMatch(issuerBlock || flat, [/\bUF\s*[:\-]?\s*([A-Z]{2})\b/i, /LOCAL\s+E\s+DATA\s+DE\s+EMISS[ÃA]O\s*[:\-]?\s*[^.;\n]{3,60}?\s*-\s*([A-Z]{2})\s*-\s*\d{2}\/\d{2}\/\d{4}/i, /-\s*([A-Z]{2})\s*-\s*\d{2}\/\d{2}\/\d{4}/, /estado\s*[:\-]?\s*([A-Z]{2})\b/i, /\b([A-Z]{2})\b(?=\s*(?:CEP|cep|\d{5}-?\d{3}))/]),
+      estado: layout.clienteEstado || agiCidadeEstado?.[2] || firstMatch(issuerBlock || flat, [/\bUF\s*[:\-]?\s*([A-Z]{2})\b/, /LOCAL\s+E\s+DATA\s+DE\s+EMISS[ÃA]O\s*[:\-]?\s*[^.;\n]{3,60}?\s*-\s*([A-Z]{2})\s*-\s*\d{2}\/\d{2}\/\d{4}/i, /-\s*([A-Z]{2})\s*-\s*\d{2}\/\d{2}\/\d{4}/, /[Ee]stado\s*[:\-]?\s*([A-Z]{2})\b/, /\b([A-Z]{2})\b(?=\s*(?:CEP|cep|\d{5}-?\d{3}))/]),
       cep: finalClienteCep,
       telefone: clienteTelefone,
       email: clienteEmail,
@@ -1294,6 +1333,7 @@ export function heuristicExtractionFromText(rawText) {
     correspondente: {
       email: correspondenteEmail,
       cidade: correspondenteCidade,
+      uf: correspondenteUf,
       observacoes: correspondenteEmail ? "Dado extraído do bloco de correspondente/originação; não deve ser atribuído ao contratante." : null,
     },
     assinatura: {
@@ -1525,6 +1565,33 @@ export function heuristicExtractionFromText(rawText) {
   const seguro = isCartaoConsignado ? null : extrairSeguroPrestamista({ texto: text, segmentacao, contrato: contratoExtraido });
   extracted.seguro_prestamista = seguro;
   for (const a of seguro?.achados || []) addIssue(a.codigo, a.gravidade, a.titulo, a.texto);
+
+  // Regime de autorização do consignado INSS pela data do contrato. A régua do
+  // exame da imagem (§ 4.4) e da autorização depende dele: ver regimeInss.js.
+  const regimeInss = classificarRegimeInss({
+    produtoCodigo: contratoExtraido.produto_codigo,
+    dataContrato: contratoExtraido.data_contrato,
+    confiancaData: contratoExtraido.data_contrato_confianca,
+  });
+  if (regimeInss) {
+    const evidencias = extrairEvidenciasAutorizacao(text);
+    const via = regimeInss.codigo === "IN_213_VIA_DUPLA" ? evidencias.via : regimeInss.codigo === "MEU_INSS_BIOMETRIA" ? "FACIAL" : null;
+    const regime = { ...regimeInss, via };
+    const avaliacao = avaliarAutorizacaoInss({ regime, evidencias, contrato: contratoExtraido, liberacao: extracted.liberacao_credito || {} });
+    extracted.regime_inss = {
+      ...regime,
+      via_rotulo: via ? ROTULOS_VIA[via] : regimeInss.codigo === "IN_213_VIA_DUPLA" ? "Não identificada no dossiê" : null,
+      regra_dib_dias: REGRA_DIB.dias,
+      nota_oficio: REGIMES_MEU_INSS.has(regimeInss.codigo) ? NOTA_OFICIO_INSS : null,
+      evidencias,
+      diligencias: avaliacao.diligencias,
+      fundamentacao: fundamentacaoDoRegime(regimeInss),
+    };
+    for (const a of avaliacao.achados) addIssue(a.codigo, a.gravidade, a.titulo, a.texto);
+  } else {
+    extracted.regime_inss = null;
+  }
+
 
   const ufEmissao = firstMatch(flat, [/LOCAL\s+E\s+DATA\s+DE\s+EMISS[ÃA]O\s*:?\s*[^\n]{2,60}?\s-\s([A-Z]{2})\s-\s\d{2}\/\d{2}\/\d{4}/i]) || extracted.cliente?.estado || null;
   const trilhaEventos = analisarTrilhaEventos({

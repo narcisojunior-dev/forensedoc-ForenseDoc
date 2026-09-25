@@ -51,8 +51,14 @@ export const DESCRICAO_GRAU = {
  * @param {string} [gravidade=""] - Severidade do achado ("CRÍTICA", "ALTA", "MÉDIA", "INFO")
  * @returns {"CONSTATADO" | "NÃO VERIFICÁVEL" | "INDÍCIO"} Grau de conclusão
  */
+/** Achados de autorização INSS que o próprio dossiê demonstra (ver regimeInss.js). */
+const INS_CONSTATADOS = new Set(["INS1", "INS4", "INS6", "INS9", "INS10"]);
+
 export function classificarGrauProcessual(codigo, gravidade = "") {
   const c = String(codigo || "").toUpperCase();
+  // Autorização do consignado INSS: o que o dossiê mostra é constatado; o que o
+  // INSS ou a instituição não apresentou é não verificável.
+  if (/^INS\d+$/.test(c)) return INS_CONSTATADOS.has(c) ? GRAUS.CONSTATADO : GRAUS.NAO_VERIFICAVEL;
 
   // 1. CONSTATADO: reproduzível no documento / cálculo objetivo direto
   if (/^(ASS1|S5|CET2|FIN1|FIN2|LIB2|LIB3|TRL1|TRL4|TRL5|TZ1|TML1|TIME1|PAG1|CRONO\d|IMG_REPEATED|IMG2|IMG3|IMG6|INT3|INT4|CAD4|SIGBANK1|IP-INFRAESTRUTURA|HASH-MISMATCH|HASH-MALFORMED|INTEGRITY-REJECTED|DATES-COLLAPSED|CHRONOLOGY|GPS-IP-CONFLICT|GPS-HOME-DISTANCE|GPS-OUTRO-MUNICIPIO|DIVERGENCIA-ENDERECO-CADASTRAL|CLIENT-QUALIFICATION)$|^(ASS1|S5|CET2|FIN1|FIN2|LIB2|TRL1|TZ1|TML1|PAG1|CRONO\d|IMG_REPEATED|IMG2|IMG3)/.test(c)) {

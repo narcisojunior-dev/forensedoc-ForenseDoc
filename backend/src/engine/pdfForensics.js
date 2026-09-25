@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { cleanMetadataText, formatPdfDate, parseFormattedPdfDate, plural } from "./format.js";
 import { analisarELA } from "./elaAnalysis.js";
+import { medirPele, pareceIlustracao, CLASSE_ILUSTRACAO } from "./aparenciaFoto.js";
 import { inventarioImagensInterno } from "./pdfImagensInterno.js";
 
 const execFileAsync = promisify(execFile);
@@ -294,6 +295,9 @@ function classifyEmbeddedImage(image) {
   if (bytes !== null && bytes < 1000 && image.height <= 80) return "elemento gráfico do template";
   if (isLikelyFaceOrBiometricImage(image)) return "fotografia/biometria provável";
   if (ratio > 4 || ratio < 0.25) return "elemento gráfico/template";
+  // Ícone ou selo de até ~120 x 120 px: um documento fotografado tem dezenas de
+  // vezes isso. O dossiê C6 de 2024 listava 28 "imagens documentais" de 31 x 83.
+  if (Number.isFinite(image.pixels) && image.pixels < 15000) return "elemento gráfico/template";
   return "imagem documental";
 }
 
@@ -347,11 +351,24 @@ export function buildImageFindings(images, repeatedGroups, extractedCount, avail
     });
   }
   if (relevantRepeatedGroups.length) {
+    // A mesma captura carimbada em várias folhas (capa, cédula, termo) é a
+    // impressão do dossiê, não duas capturas; só a repetição na MESMA página,
+    // onde "identificação" e "prova de vida" deveriam ser fotos distintas, é
+    // crítica. O dossiê Pan de 2017 trazia a selfie em quatro folhas e saía
+    // como achado crítico.
+    // Sem página conhecida não dá para afirmar reimpressão: fica crítico.
+    const folhasDistintas = relevantRepeatedGroups.every((group) => {
+      const paginas = (group.imagens || []).map((img) => img.page).filter(Boolean);
+      return paginas.length >= 2 && new Set(paginas).size === paginas.length;
+    });
+    const mesmaPagina = !folhasDistintas;
     findings.push({
       codigo: "IMG2",
-      severidade: "CRÍTICO",
-      titulo: "Imagem repetida byte a byte",
-      detalhe: `${plural(relevantRepeatedGroups.length, "grupo", "grupos")} de imagens biométricas prováveis possuem o mesmo SHA-256. Quando a mesma imagem aparece como identificação e prova de vida, a vivacidade não fica demonstrada pelo PDF.`,
+      severidade: mesmaPagina ? "CRÍTICO" : "MÉDIO",
+      titulo: mesmaPagina ? "Imagem repetida byte a byte na mesma página" : "Mesma fotografia reproduzida em mais de uma folha",
+      detalhe: mesmaPagina
+        ? `${plural(relevantRepeatedGroups.length, "grupo", "grupos")} de imagens biométricas prováveis possuem o mesmo SHA-256 e aparecem mais de uma vez na mesma página. Quando a mesma imagem aparece como identificação e prova de vida, a vivacidade não fica demonstrada pelo PDF.`
+        : `${plural(relevantRepeatedGroups.length, "grupo", "grupos")} de imagens biométricas prováveis possuem o mesmo SHA-256, reproduzidas em folhas diferentes do dossiê. Uma única captura reimpressa em várias folhas é compatível com a montagem do dossiê pela instituição; ela não demonstra capturas independentes nem prova de vida, e as ocorrências devem ser lidas como uma só fotografia.`,
     });
   } else {
     // MED-03 (rodada 2): grupos só de template, logotipo ou máscara alfa não viram
@@ -457,6 +474,20 @@ export async function inspectPdfImagesInterno(pdfBuffer, rawText = "", motivo = 
   for (const image of images) {
     image.classificacao = classifyEmbeddedImage(image);
     image.biometricaProvavel = image.classificacao === "fotografia/biometria provável";
+    // Dimensão não distingue selfie de arte do template (cartão Credcesta,
+    // 379 x 240): sem tom de pele, a imagem não é biometria.
+    if (image.biometricaProvavel && image.miniatura) {
+      try {
+        const pele = await medirPele(Buffer.from(String(image.miniatura).split(",")[1], "base64"));
+        image.pele = pele;
+        if (pareceIlustracao(pele)) {
+          image.classificacao = CLASSE_ILUSTRACAO;
+          image.biometricaProvavel = false;
+        }
+      } catch {
+        // Sem medida, fica a classificação por dimensão.
+      }
+    }
     // Miniatura só da fotografia provável: é dado biométrico (LGPD, art. 11).
     if (!image.biometricaProvavel) delete image.miniatura;
     // ELA também no caminho sem Poppler: os bytes do JPEG estão na miniatura.
@@ -548,6 +579,15 @@ export async function inspectPdfImages(pdfBuffer, rawText = "") {
       if (!data) continue;
       const jpeg = data[0] === 0xff && data[1] === 0xd8;
       const png = data.slice(1, 4).toString("latin1") === "PNG";
+      if (jpeg || png) {
+        const pele = await medirPele(data);
+        image.pele = pele;
+        if (pareceIlustracao(pele)) {
+          image.classificacao = CLASSE_ILUSTRACAO;
+          image.biometricaProvavel = false;
+          continue;
+        }
+      }
       image.formato = jpeg ? "JPEG" : png ? "PNG" : String(image.enc || "").toUpperCase() || null;
       image.megapixels = Number(((image.width * image.height) / 1_000_000).toFixed(2));
       image.exif = jpeg ? temExif(data) : false;

@@ -231,16 +231,21 @@ export function extrairIps(texto) {
 // ─── Tabelas em colunas (texto com `-layout`) ───────────────────────────────
 
 const ROTULOS_DE_ENDERECO = {
-  bairro: /^bairro$/i,
-  cidade: /^(?:cidade|munic[íi]pio)$/i,
-  estado: /^(?:estado|uf)$/i,
-  cep: /^cep$/i,
+  bairro: /^bairro:?$/i,
+  cidade: /^(?:cidade|munic[íi]pio):?$/i,
+  estado: /^(?:estado|uf):?$/i,
+  cep: /^cep:?$/i,
 };
 
-/** Rótulo de formulário lido como se fosse valor ("Cidade: Estado"). */
+/**
+ * Rótulo de formulário lido como se fosse valor ("Cidade: Estado", "Estado:").
+ * Na CCB do Banco Master os rótulos vêm com dois-pontos e em sequência, e o
+ * laudo imprimia "Bairro: Cidade: Estado:" como bairro da cliente.
+ */
 export function valorEhRotulo(valor) {
   const t = String(valor || "").trim();
-  return Object.values(ROTULOS_DE_ENDERECO).some((re) => re.test(t)) || /^endere[çc]o$/i.test(t);
+  if (!t) return false;
+  return /^(?:(?:bairro|cidade|munic[íi]pio|estado|uf|cep|endere[çc]o(?:\s+residencial)?)\s*:?\s*)+$/i.test(t);
 }
 
 /**

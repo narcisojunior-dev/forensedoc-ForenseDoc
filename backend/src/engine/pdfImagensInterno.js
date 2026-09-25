@@ -115,7 +115,7 @@ export function varrerObjetosDeImagem(pdfBuffer) {
   return objetos;
 }
 
-const PRAZO_PDFJS_MS = 20_000;
+const PRAZO_PDFJS_MS = 40_000;
 
 /**
  * Páginas e imagens desenhadas, pelo pdf.js.

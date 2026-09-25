@@ -64,7 +64,7 @@ describe("D12 · anomalia de paginação como indício", () => {
     const extraido = heuristicExtractionFromText(texto);
     const pag1 = (extraido.achados_irregularidade || []).find((a) => a.codigo === "PAG1");
     expect(pag1).toBeDefined();
-    expect(pag1.texto).toMatch(/ind[íi]cio e n[ãa]o de comprova[çc][ãa]o/i);
+    expect(pag1.texto).toMatch(/constatada no arquivo.*ind[íi]cio, n[ãa]o comprova[çc][ãa]o/i);
     expect(pag1.texto).not.toMatch(/adultera|fraude|falsific/i);
   });
 });

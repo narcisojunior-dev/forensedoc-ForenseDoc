@@ -102,13 +102,17 @@ export const FUNDAMENTACAO = [
 /**
  * Fundamentação aplicável ao produto classificado na extração.
  * CDC e renegociação não recebem grupo de consignado; os demais recebem o do
- * próprio produto.
+ * próprio produto. No consignado INSS com regime enquadrado, o item genérico
+ * ("verificar a IN vigente") dá lugar às normas do regime da data do contrato.
  */
-export function fundamentacaoPara(produtoCodigo) {
+export function fundamentacaoPara(produtoCodigo, regime = null) {
   return FUNDAMENTACAO.flatMap((bloco) => {
     if (bloco !== GRUPO_CONSIGNADO) return [bloco];
     if (produtoCodigo === "CDC") return [];
-    return [GRUPOS_CONSIGNADO[produtoCodigo] || GRUPO_CONSIGNADO];
+    const grupo = GRUPOS_CONSIGNADO[produtoCodigo] || GRUPO_CONSIGNADO;
+    const doRegime = regime?.fundamentacao || [];
+    if (grupo !== GRUPOS_CONSIGNADO.CONSIGNADO_INSS || !doRegime.length) return [grupo];
+    return [{ ...grupo, itens: [...grupo.itens.filter(([dispositivo]) => !/^Normas do INSS/.test(dispositivo)), ...doRegime] }];
   });
 }
 

@@ -13,7 +13,7 @@
  */
 
 import { ordenarAchados } from "../engine/eixosAchado.js";
-import { classificarGrauProcessual, GRAUS, ROTULOS_GRAU, DESCRICAO_GRAU } from "../engine/grausConclusao.js";
+import { classificarGrauProcessual, contarPorGrau, GRAUS, ROTULOS_GRAU, DESCRICAO_GRAU } from "../engine/grausConclusao.js";
 import { distanciaKm, distanciaSuspeita } from "../utils/distancia.js";
 
 export function classifyHashString(s) {
@@ -263,6 +263,7 @@ export function reportIssues(extracted = {}, projecao = null) {
 export function issueBucket(issue) {
   const code = String(issue.codigo || "");
   const text = `${issue.titulo || ""} ${issue.texto || ""}`;
+  if (/^INS\d/.test(code)) return classificarGrauProcessual(code) === GRAUS.CONSTATADO ? "instrumento" : "lacunas";
   if (/FIN3/i.test(code) || /\bcar[eê]ncia\b|contexto econ[oô]mico/i.test(text)) return "contexto";
   if (/^(LIB|BIO|ASS|TRL|TZ)/.test(code)) return "lacunas";
   if (/^SEG/.test(code)) return "instrumento";
@@ -359,7 +360,19 @@ function recontarCorte(corte, projecao, findings) {
  * residência calculada a partir de nulo. Sem confronto válido, a tela retira
  * esses itens; o PDF tem de retirar os mesmos.
  */
+/**
+ * O placar de graus é gravado na análise sobre a lista inteira. Os cortes
+ * abaixo (eixo financeiro, distância à residência) tiram achados da projeção
+ * que o corpo do laudo imprime, e o placar precisa contar o que sobrou: o laudo
+ * FD-20260923 dizia 10 indícios no sumário e 4 no § 6.
+ */
 export function sanearSumario(sumario, home, ipAnalysis = [], contractGeo = null) {
+  const saneado = sanearSemGraus(sumario, home, ipAnalysis, contractGeo);
+  if (!saneado || !saneado.graus) return saneado;
+  return { ...saneado, graus: contarPorGrau(saneado.projecao ?? saneado.allFindings ?? []) };
+}
+
+function sanearSemGraus(sumario, home, ipAnalysis = [], contractGeo = null) {
   if (!sumario) return sumario;
   // O corte do eixo financeiro vale para todo sumário, independentemente do que
   // aconteceu com a referência residencial.

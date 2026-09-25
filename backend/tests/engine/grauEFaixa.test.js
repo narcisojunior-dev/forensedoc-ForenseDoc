@@ -44,3 +44,34 @@ describe("faixa do IP pelo titular do bloco", () => {
     expect(classificarFaixaIp({})).toMatchObject({ tipo: "desconhecida", alerta: false });
   });
 });
+
+describe("placar de graus depois dos cortes do sumário", () => {
+  it("conta o que sobrou na projeção, não a lista gravada", async () => {
+    const { sanearSumario } = await import("../../src/reports/laudoApresentacao.js");
+    const achado = (key, severity, grau) => ({ key, severity, grau, title: key, text: "x" });
+    const sumario = {
+      graus: { total: 4, constatados: 1, naoVerificaveis: 1, indicios: 2 },
+      findings: [achado("CAD4", "MÉDIA", GRAUS.CONSTATADO), achado("LIB1", "ALTA", GRAUS.NAO_VERIFICAVEL), achado("FIN3", "INFO", GRAUS.INDICIO), achado("gps-home-distance", "INFO", GRAUS.INDICIO)],
+      allFindings: [achado("CAD4", "MÉDIA", GRAUS.CONSTATADO), achado("LIB1", "ALTA", GRAUS.NAO_VERIFICAVEL), achado("FIN3", "INFO", GRAUS.INDICIO), achado("gps-home-distance", "INFO", GRAUS.INDICIO)],
+      favorable: [],
+      checks: [],
+      diligences: [],
+      geo: { items: [] },
+    };
+    // Residência recusada: sai o achado de distância; eixo financeiro sai sempre.
+    const s = sanearSumario(sumario, { estado_confronto: "RECUSADO_CONFLITO" }, [], null);
+    expect(s.graus).toEqual({ total: 2, constatados: 1, naoVerificaveis: 1, indicios: 0 });
+  });
+});
+
+describe("quesito 2 só com divergência do § 5", () => {
+  it("IP compatível a 23 km não gera quesito de divergência geográfica", async () => {
+    const { generateJudicialQuesitos } = await import("../../src/reports/quesitosTemplate.js");
+    const base = { clienteNome: "Fulano", banco: "Banco X", cidadeDomicilio: "Manaquiri, AM", distanciaKm: "23.1", cidadeIp: "Manacapuru / Amazonas", ip: "2804::1", achados: [], extracted: {} };
+    const titulos = (q) => q.map((x) => x.titulo);
+    expect(titulos(generateJudicialQuesitos({ ...base, divergenciaIp: "compativel" }))).not.toContain("Esclarecimento sobre a Divergência Geográfica");
+    expect(titulos(generateJudicialQuesitos({ ...base, divergenciaIp: "grave" }))).toContain("Esclarecimento sobre a Divergência Geográfica");
+    // Sem o nível informado (análises antigas), a regra anterior continua valendo.
+    expect(titulos(generateJudicialQuesitos(base))).toContain("Esclarecimento sobre a Divergência Geográfica");
+  });
+});

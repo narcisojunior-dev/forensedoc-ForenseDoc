@@ -79,6 +79,7 @@ export async function analisarDocumento({
     imagens: imageAnalysis,
     flat: textoDoProcesso.replace(/\s+/g, " "),
     alegaBiometria: Boolean(fallback.assinatura?.biometria_registrada_como_evento) || /biometria\s+facial/i.test(textoDoProcesso),
+    regime: fallback.regime_inss || null,
   });
   fallback.imagem_biometrica = biometria;
   if (biometria?.achado && !fallback.achados_irregularidade.some((issue) => issue.codigo === biometria.achado.codigo)) {

@@ -215,7 +215,7 @@ export async function analisarELA(imageBuffer, options = {}) {
         titulo: "Nível de erro ELA uniforme",
         texto: `A análise de nível de erro (ELA a ${qualidadeReferencia}%) indicou degradação de compressão homogênea em toda a extensão da imagem biométrica (média ${mediaDiferenca.toFixed(1)}, desvio padrão ${desvioPadrao.toFixed(1)}, ${percentualOutliers.toFixed(1)}% outliers), sem evidências de descontinuidade localizada.`,
       };
-      conclusao = "A análise de nível de erro indica compressão uniforme em toda a imagem — sem indício de edição ou inserção localizada.";
+      conclusao = "A análise de nível de erro indica compressão uniforme em toda a imagem: sem indício de edição ou inserção localizada.";
     }
 
     return {

@@ -10,6 +10,7 @@
 
 const EIXOS = [
   { eixo: "assinatura", regex: /^(ASS\d|AUT\d|signature-absent|simple-signature|sig-)/ },
+  { eixo: "autorizacao", regex: /^INS\d/ },
   { eixo: "credito", regex: /^LIB\d/ },
   { eixo: "biometria", regex: /^(BIO\d|ELA\d|IMG3|IMG2)/ },
   { eixo: "consentimento", regex: /^(TRL\d|TZ\d|TML\d|chronology|device-gap)/ },

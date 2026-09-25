@@ -72,6 +72,87 @@ Para ver o laudo inteiro num PDF real:
 node scripts/gerarLaudoTeste.mjs "/caminho/dossie.pdf" "Endereço do cliente" --saida=laudo.pdf
 ```
 
+## Segunda rodada (22/09, noite): o que o laudo FD-20260923 do dossiê Irailzo mostrou
+
+O primeiro laudo gerado no servidor com o motor novo (v16, 22:05) trouxe quatro defeitos, todos
+corrigidos aqui:
+
+1. **IMG6 acusava o próprio dossiê.** A busca de reúso encontrava as nove análises anteriores do
+   mesmo PDF (mesmo SHA-256 ABC18B73E5…, mesmo contrato 6046501059) e imprimia "mesma fotografia
+   em outro dossiê", crítico e constatado. Agora a consulta exclui análises com o mesmo SHA-256 do
+   arquivo, o serviço descarta outra cópia do mesmo número de contrato, e várias análises do mesmo
+   laudo anterior contam uma vez. O achado só sai quando a foto aparece em contratação diversa.
+2. **Placar do sumário contradizia o § 6** (10 indícios contra 4). O placar era gravado sobre a
+   lista inteira e o sumário depois cortava o eixo financeiro e os achados de distância residencial
+   sem recontar. `sanearSumario` (backend e frontend) reconta os graus sobre a projeção que o corpo
+   imprime.
+3. **Quesito 2 afirmava "incompatibilidade espacial" a 23 km** que o § 5 classificava como
+   compatível. O quesito agora recebe o nível do confronto IP × residência e só é montado em
+   divergência relevante ou grave. Sem o nível (análises antigas), vale a regra anterior.
+4. **A lista de ferramental citava o que o sistema não usa** (MaxMind GeoIP2, QPDF, ExifTool,
+   MD5). Passou a listar o que roda de fato: Node crypto, pdf.js/pdf-parse, Poppler quando
+   instalado e o leitor interno, sharp/libvips, RDAP, RIPEstat, ipapi.co, ipwho.is, Nominatim,
+   awesomeapi-cep.
+
+Também: o texto do PAG1 dizia "estado é de indício" com grau CONSTATADO; agora separa o fato
+(numeração constatada no arquivo) da leitura (indício).
+
+Ponto que fica para o Ronney decidir: LIB1 ("ausência de comprovante de transferência") e o
+quesito "Comprovação do crédito liberado" tratam de o dinheiro ter chegado ou não à conta, e a
+regra dele de 22/09 é que o laudo trata só dos dados técnicos do contrato. Retirar os dois é uma
+linha no motor e ajuste em quatro testes de regressão; não foi feito sem a palavra dele.
+
+## Terceira rodada (25/09): os dois laudos da Eunice x Banco Master
+
+Os laudos FD-20260925-C5FEC93785 (CCB 27766845) e FD-20260925-C58D1C00C6 (CCB 66637168)
+saíram do servidor com dois defeitos novos, corrigidos aqui:
+
+1. **A arte do cartão Credcesta virou "fotografia biométrica".** A imagem de 379 x 240 (vermelho
+   chapado, chip, logotipo Visa) passa no crivo por dimensão e aparece duas vezes em cada dossiê
+   e nos dois contratos. O laudo imprimiu IMG2 crítico (repetida) e IMG6 crítico (mesma foto em
+   outro dossiê) sobre um desenho. `engine/aparenciaFoto.js` mede tom de pele (regra RGB de Kovac
+   e YCbCr de Chai e Ngan, em 48 x 48) e cor chapada de marca; selfies reais deram 28 % a 37 %
+   de pele, o cartão 6,6 % de pele com 83 % de cor chapada. Abaixo de 10 % de pele, ou abaixo
+   de 20 % com mais de 45 % de cor chapada, a imagem vira "ilustração/cartão do template" e sai
+   do IMG2, do IMG6, do BIO2 e da ELA. Vale nos dois caminhos (Poppler e leitor interno).
+2. **A cliente de Amparo/SP saiu domiciliada "do Rio de Janeiro", UF "do".** A primeira
+   ocorrência de "cidade" na CCB do Master é a sede do credor ("com sede na cidade do Rio de
+   Janeiro, Estado do Rio de Janeiro"), e a regex de UF com `/i` lia "do" como sigla. Agora o
+   valor de cidade que começa por preposição, é rótulo ou endereço institucional é descartado e
+   o motor segue para a próxima ocorrência (o campo "Cidade:" do quadro do cliente); a sigla da
+   UF só aceita maiúsculas; e "Bairro: Cidade: Estado:" em sequência é reconhecido como rótulo.
+   Com isso somem a "divergência cadastral" ALTA e constatada contra a residência de Amparo e o
+   "confronto não aferido" do segundo laudo.
+
+Também: `sanearSumario` já recontava os graus; o placar dos dois laudos batia com o § 6 só por
+coincidência de cortes.
+
+Ponto de desenho para o Ronney decidir: o "Índice de anomalia forense" da capa mede só
+distância geográfica (`utils/forensicScore.js`). Um laudo com IMG2 e IMG6 críticos saiu com
+"4/100 · baixa". Ou o rótulo passa a dizer "índice geográfico", ou o índice passa a pesar os
+achados constatados.
+
+## Quarta rodada (25/09): regimes de autorização do INSS e ciclo de validação
+
+Implementado o plano `docs/superpowers/plans/2026-09-25-regimes-autorizacao-inss.md` (tarefas 1 a
+11), com duas travas a mais que o plano, pela regra do escritório de nunca afirmar norma não
+conferida: INS2 (demonstrativo prévio) só sai como achado quando
+`DISPOSITIVOS_IN138.DEMONSTRATIVO_PREVIO.conferido` for verdadeiro; até lá a ausência entra como
+diligência. INS1 (correspondente de outra UF) não afirma o dispositivo enquanto
+`LOCAL_DOMICILIO.conferido` for falso. A tarefa 12 (trava jurídica) fica com o escritório: conferir no
+DOU a IN 138 (art. 5º, VIII e § 9º), a norma de maio de 2026 e a IN 213/2026 e virar os flags em
+`engine/regimeInss.js`.
+
+Ciclo de validação com laudos reais (Irailzo, Eunice, C6 Maria de Lourdes, C6 INSS 2024, Master
+MFacil, Pan 2017, Agibank, Bradesco 2021, C6 2024) e verificador automático
+(`undefined`, `null`, travessão, placar contra § 6, rótulo como valor, quesito contra confronto
+compatível). Corrigido no ciclo: o campo "Fonte Pagadora:" decide o produto antes da prosa das
+condições gerais (a CCB do Master da servidora do GOV SP saía como INSS); foto sem página não
+imprime "pág. null"; IMG2 da mesma selfie reimpressa em folhas distintas é MÉDIO; ícones de até
+15 mil pixels são template; travessão fora do texto da ELA. Levantamento dos 65 dossiês da pasta
+de testes: 39 com texto, 26 exigem OCR (pdftoppm); nenhum contrato cai no regime Meu INSS ou na
+IN 213 até setembro de 2026, todos os INSS estão na IN 138 ou na IN 28/2008.
+
 ## O que fica para a próxima rodada
 
 1. Validação de assinatura ICP-Brasil no verificador do ITI e cadeia até a AC-Raiz, com

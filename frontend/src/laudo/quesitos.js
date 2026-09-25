@@ -25,6 +25,7 @@ export function generateJudicialQuesitos({
   cidadeIp,
   cidadeDomicilio,
   distanciaKm,
+  divergenciaIp = null,
   dataHora,
   achados = [],
   extracted = {},
@@ -42,8 +43,15 @@ export function generateJudicialQuesitos({
    * texto padrão ("milhares de quilômetros", "outro estado/município") afirmava
    * incompatibilidade que ninguém mediu. No dossiê C6 isso levou ao juízo um
    * domicílio no Piauí digitado por engano.
+   *
+   * E quando a distância foi medida e o § 5 a classificou como compatível (ou
+   * atenção), não há divergência a esclarecer: o quesito afirmava ao juízo
+   * "incompatibilidade espacial" a 23 km, no mesmo estado, contra o próprio
+   * laudo. `divergenciaIp` é o nível do § 5.1 (compativel, atencao, relevante,
+   * grave); sem ele informado, vale a regra antiga.
    */
-  const temConfrontoGeografico = Boolean(cidadeDomicilio && distanciaKm);
+  const divergiu = divergenciaIp == null ? true : ["relevante", "grave"].includes(String(divergenciaIp));
+  const temConfrontoGeografico = Boolean(cidadeDomicilio && distanciaKm && divergiu);
 
   const ctx = { bancoRef, nomeRef, contratoRef };
   const selecionados = ordenarAchados((achados || []).filter((a) => a && MODELOS[a.codigo] && (a.gravidade === "ALTA" || SEMPRE.has(a.codigo))));
@@ -56,6 +64,9 @@ export function generateJudicialQuesitos({
     porAchado[achado.codigo] = q;
     if (!SUBSTITUI_GERAL.has(achado.codigo)) especificos.push(q);
   }
+
+  // Na via gov.br a fotografia e a prova de vida não são o objeto do exame.
+  const semFotografiaNoObjeto = extracted?.regime_inss?.codigo === "IN_213_VIA_DUPLA" && extracted.regime_inss.via === "GOVBR";
 
   const quesitos = [
     {
@@ -76,12 +87,12 @@ export function generateJudicialQuesitos({
       quesito: `Caso a contratação tenha utilizado autenticação secundária (como envio de código SMS ou token via WhatsApp), queira ${bancoRef} comprovar documentalmente a linha telefônica exata (número de telefone e operadora) que recebeu o código, demonstrando se referida linha pertencia de fato à titularidade de ${nomeRef} na data da operação.`,
       finalidade: "Demonstrar eventuais fraudes por SIM Swap, número falso ou intermediário ilícito.",
     },
-    porAchado.BIO2 || {
+    !semFotografiaNoObjeto && (porAchado.BIO2 || {
       numero: 4,
       titulo: "Validação Biométrica e Prova de Vida Ativa (Liveness Detection)",
       quesito: `Queira o Sr. Perito informar se os registros biométricos apresentados nos autos contêm comprovação de 'Prova de Vida' ativa (Liveness Detection) com desafio dinâmico no momento da captura da imagem, ou se tratou de mera foto estática ou upload de imagem prévia passível de injeção digital ou deepfake.`,
       finalidade: "Verificar o resultado individual da validação biométrica e sua vinculação à operação.",
-    },
+    }),
     porAchado.INT1 || {
       numero: 5,
       titulo: "Integridade Criptográfica e Ônus Probatório (Tema 1.061 STJ e MP 2.200-2/2001)",
@@ -115,7 +126,61 @@ const dias = (n) => `${n} ${n === 1 ? "dia" : "dias"}`;
  * Cada modelo devolve null quando falta o dado que o torna específico; nunca
  * imprime "undefined" nem valor inventado. Os valores vêm do próprio resultado.
  */
+function quesitoViaGovbr() {
+  return {
+    titulo: "Cabimento da Autorização pela Conta gov.br",
+    quesito: "Queira o INSS informar se, na data da autorização, o beneficiário possuía biometria facial cadastrada nas bases oficiais (CNH ou Justiça Eleitoral), esclarecendo por que a operação foi autorizada pela conta gov.br e não pela validação facial.",
+    finalidade: "Verificar se a via gov.br era cabível, já que quem tem biometria cadastrada continua obrigado à validação facial.",
+  };
+}
+
 const MODELOS = {
+  INS3(e, { bancoRef, contratoRef }) {
+    const r = e.regime_inss;
+    return {
+      titulo: "Registro da Autorização no Meu INSS (Ofício ao INSS e à Dataprev)",
+      quesito: `Queira o INSS, com apoio da Dataprev, informar se consta autorização da operação${contratoRef ? ` ${contratoRef}` : ""} no aplicativo Meu INSS e, em caso positivo, apresentar o registro com data, hora, método de validação, base oficial usada no confronto facial e resultado da validação de vivacidade${r?.data_contrato ? `, considerando que o contrato é de ${r.data_contrato}` : ""}. Queira ainda ${bancoRef} esclarecer se a operação foi averbada antes desse registro.`,
+      finalidade: "Obter do órgão público a prova central da manifestação, que a instituição não pode produzir sozinha.",
+    };
+  },
+  INS4(e, { bancoRef }) {
+    const a = e.regime_inss?.evidencias?.meu_inss?.autorizacao;
+    if (!a) return null;
+    return {
+      titulo: "Cronologia entre Autorização, Averbação e Crédito",
+      quesito: `Considerando que o dossiê registra a autorização no Meu INSS em ${a.data}${a.hora ? ` ${a.hora}` : ""}, queira ${bancoRef} explicar como a averbação ou a liberação do crédito ocorreram antes dessa autorização, apresentando os registros de data e hora de cada etapa.`,
+      finalidade: "Demonstrar se a operação foi efetivada antes da manifestação do beneficiário no Meu INSS.",
+    };
+  },
+  INS6: quesitoViaGovbr,
+  INS7: quesitoViaGovbr,
+  INS8() {
+    return {
+      titulo: "Registro de Acesso pela Conta gov.br",
+      quesito: "Queira o INSS, com apoio da Dataprev, apresentar o registro do acesso à conta gov.br que autorizou a operação, com o nível da conta, o endereço IP, o dispositivo, a data e a hora, e a conta bancária validada na autorização.",
+      finalidade: "Na via gov.br, esses registros tomam o lugar da fotografia e da prova de vida como objeto do exame.",
+    };
+  },
+  INS9(e, { bancoRef }) {
+    const v = e.regime_inss?.evidencias?.conta_validada;
+    const b = e.regime_inss?.evidencias?.conta_beneficio;
+    if (!v || !b) return null;
+    return {
+      titulo: "Conta Validada e Conta de Recebimento do Benefício",
+      quesito: `Queira ${bancoRef} esclarecer por que a conta validada na autorização (agência ${v.agencia}, conta ${v.conta}) difere da conta de recebimento do benefício (agência ${b.agencia}, conta ${b.conta}), e o INSS informar qual conta estava cadastrada para o pagamento do benefício na data da operação.`,
+      finalidade: "Verificar se a conta validada pertence ao beneficiário e é a de recebimento do benefício.",
+    };
+  },
+  INS10(e) {
+    const r = e.regime_inss;
+    const dib = r?.evidencias?.dib;
+    if (!dib || !r?.data_contrato || !r?.regra_dib_dias) return null;
+    return {
+      titulo: `Contratação nos Primeiros ${r.regra_dib_dias} Dias do Benefício`,
+      quesito: `Queira o INSS confirmar a data de início do benefício (a DIB informada no dossiê é ${dib}) e informar se a consignação averbada para o contrato de ${r.data_contrato} observou a vedação de contratação nos primeiros ${r.regra_dib_dias} dias do benefício.`,
+      finalidade: "Confrontar a data do contrato com a DIB.",
+    };
+  },
   LIB1(e, { bancoRef, contratoRef }) {
     const d = e.liberacao_credito?.declarada || {};
     const destino = [d.conta ? `conta ${d.conta}` : null, d.agencia ? `agência ${d.agencia}` : null, d.banco ? `Banco ${d.banco}` : null].filter(Boolean).join(", ");

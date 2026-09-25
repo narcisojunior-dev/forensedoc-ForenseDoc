@@ -1,6 +1,7 @@
 import { generateJudicialQuesitos } from "./quesitos.js";
 import { distanciaKm, distanciaSuspeita } from "./distancia.js";
 import { achadoFinanceiro, semCifras } from "./laudoUtils.js";
+import { contarPorGrau } from "./grausConclusao.js";
 
 // Achados e itens do sumário que dependem de distância à residência.
 const CHAVES_DISTANCIA_RESIDENCIA = new Set(["gps-near-home", "gps-home-distance"]);
@@ -109,7 +110,15 @@ function semFinanceiro(sumario) {
 }
 
 // Cópia no servidor: backend/src/reports/laudoApresentacao.js (sanearSumario).
+// O placar de graus conta o que sobrou dos cortes (financeiro e residência),
+// para bater com o § de achados. Cópia: backend laudoApresentacao.js.
 function sanearSumario(sumario, home, ipAnalysis, contractGeo) {
+  const saneado = sanearSemGraus(sumario, home, ipAnalysis, contractGeo);
+  if (!saneado || !saneado.graus) return saneado;
+  return { ...saneado, graus: contarPorGrau(saneado.projecao ?? saneado.allFindings ?? []) };
+}
+
+function sanearSemGraus(sumario, home, ipAnalysis, contractGeo) {
   if (!sumario) return sumario;
   // O corte do eixo financeiro vale para todo sumário, independentemente do que
   // aconteceu com a referência residencial.
@@ -257,6 +266,7 @@ export function montarRelatorio({ analysisId, result, createdAt }) {
           cidadeIp: primeiroIp?.geo ? [primeiroIp.geo.city, primeiroIp.geo.region].filter(Boolean).join(" / ") : null,
           cidadeDomicilio: home.geo ? home.geo.display || home.query : null,
           distanciaKm: distanciaKm(primeiroIp?.distance) !== null ? distanciaKm(primeiroIp.distance).toFixed(1) : null,
+          divergenciaIp: primeiroIp?.divergenciaResidencia?.nivel || null,
           dataHora: primeiroIp?.data_hora || extracted.assinatura?.data_hora_assinatura,
           achados: extracted.achados_irregularidade || [],
           extracted,

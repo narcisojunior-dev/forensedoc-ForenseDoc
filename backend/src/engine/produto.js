@@ -58,18 +58,69 @@ const ROTULOS = {
  * @param {string} flat texto do documento
  * @returns {{codigo: string, rotulo: string|null, marcadores: string[], pontuacao: object, confianca: "ALTA"|"BAIXA"}}
  */
+/**
+ * Valor do campo "Fonte Pagadora:" do quadro do cliente: a linha do rótulo (o
+ * que vier depois dos dois-pontos) ou a linha seguinte não vazia. A cláusula
+ * "quando minha fonte pagadora for o INSS" das condições gerais não é campo.
+ */
+export function campoFontePagadora(texto) {
+  const linhas = String(texto || "").split("\n");
+  for (let i = 0; i < linhas.length; i += 1) {
+    const m = linhas[i].match(/^\s*Fonte\s+Pagadora(?:\s*\(Conv[eê]nio\))?(?:\s*\/\s*[ÓO]rg[ãa]o\s+pagador)?\s*:\s*(.*)$/i);
+    if (!m) continue;
+    // "Fonte Pagadora: CNPJ/MF:" é rótulo seguido de rótulo; o valor vem na linha de baixo.
+    let valor = m[1].trim().replace(/^(?:CNPJ(?:\/MF)?|CPF|C[óo]digo|Nome)\s*:\s*/i, "").trim();
+    if (/:$/.test(valor)) valor = "";
+    for (let j = i + 1; !valor && j < Math.min(i + 3, linhas.length); j += 1) valor = linhas[j].trim();
+    // "X Sim Não" é a resposta de uma pergunta sobre a fonte pagadora, não o nome dela.
+    if (!valor || /^X?\s*Sim\b/i.test(valor)) continue;
+    return valor.slice(0, 120);
+  }
+  return null;
+}
+
+/** Empregador público que não é o INSS (estado, município, poderes, forças). */
+const FONTE_SERVIDOR = /\bGOV\b|GOVERNO|SECRETARIA|PREFEITURA|MUNIC[ÍI]PIO|ESTADO\s+D[OE]|TRIBUNAL|C[ÂA]MARA|ASSEMBL[ÉE]IA|\bSIAPE\b|EX[ÉE]RCITO|MARINHA|AERON[ÁA]UTICA|POL[ÍI]CIA|BOMBEIROS|UNIVERSIDADE|FUNDA[ÇC][ÃA]O|AUTARQUIA|MINIST[ÉE]RIO|DEFENSORIA|JUSTI[ÇC]A/i;
+
+/**
+ * Linha de opções "FORÇAS ARMADAS  SERVIDOR PÚBLICO  INSS  OUTROS": o X vem
+ * antes da opção marcada (o mesmo modelo escreve "Tipo de Operação: X Saque
+ * Fácil"). Devolve a opção marcada ou null.
+ */
+export function opcaoMarcadaDaFonte(texto) {
+  const linha = String(texto || "").split("\n").find((l) => /FOR[ÇC]AS\s+ARMADAS[\s\S]{0,40}SERVIDOR\s+P[ÚU]BLICO[\s\S]{0,40}INSS[\s\S]{0,40}OUTROS/i.test(l));
+  if (!linha) return null;
+  const m = linha.match(/\bX\s+(FOR[ÇC]AS\s+ARMADAS|SERVIDOR\s+P[ÚU]BLICO|INSS|OUTROS)\b/i);
+  return m ? m[1].toUpperCase().replace(/\s+/g, " ") : null;
+}
+
 export function classificarProduto(flat) {
   const texto = String(flat || "");
   // Campos preenchidos da operação prevalecem sobre cláusulas genéricas de
   // folha, FGTS ou rescisão que também constam em modelos usados pelo INSS.
   const plano = texto.replace(/\s+/g, " ");
-  const fonteInss = /Nome\s+do\s+Empregador[^\n]{0,120}Consignante[\s\S]{0,150}?\bINSS\b/i.test(texto)
+  // O campo "Fonte Pagadora:" preenchido decide antes de qualquer cláusula: a
+  // CCB do Banco Master da servidora de SP ("CREDCESTA GOV SP SECRETARIA")
+  // saía como consignado INSS por causa da cláusula "quando minha fonte
+  // pagadora for o INSS" das condições gerais.
+  const fonteCampo = campoFontePagadora(texto);
+  const opcaoMarcada = opcaoMarcadaDaFonte(texto);
+  if (fonteCampo && !/\bINSS\b|INSTITUTO\s+NACIONAL\s+DO\s+SEGURO\s+SOCIAL/i.test(fonteCampo)) {
+    if (FONTE_SERVIDOR.test(fonteCampo) || opcaoMarcada === "SERVIDOR PÚBLICO" || opcaoMarcada === "FORÇAS ARMADAS") {
+      return { codigo: "CONSIGNADO_SERVIDOR", rotulo: ROTULOS.CONSIGNADO_SERVIDOR, marcadores: [`fonte pagadora: ${fonteCampo}`], pontuacao: { CONSIGNADO_SERVIDOR: 10 }, confianca: "ALTA" };
+    }
+  }
+  const fonteCampoInss = Boolean(fonteCampo && /\bINSS\b|INSTITUTO\s+NACIONAL\s+DO\s+SEGURO\s+SOCIAL/i.test(fonteCampo));
+  // Campo preenchido com outra fonte (ou opção OUTROS marcada) desliga o
+  // atalho por prosa; os marcadores estruturais continuam valendo.
+  const prosaDesligada = (fonteCampo && !fonteCampoInss) || opcaoMarcada === "OUTROS";
+  const fonteInss = fonteCampoInss || (!prosaDesligada && (/Nome\s+do\s+Empregador[^\n]{0,120}Consignante[\s\S]{0,150}?\bINSS\b/i.test(texto)
     || /(?:Fonte\s+Pagadora|Nome\s+do\s+Empregador)[^\n]{0,150}\n[^\n]{0,100}\bINSS\b/i.test(texto)
     || /CONV[EÊ]NIO:[^\n]{0,100}\([xX]\)\s*INSS/i.test(texto)
     || /(?:Fonte\s+Pagadora(?:\s*\(Conv[eê]nio\))?(?:\s*\/\s*[ÓO]rg[ãa]o\s+pagador)?|Empregador\s*\(Nome\s+da\s+Fonte\s+Pagadora\))\s*:?\s*(?:CNPJ\/MF\s*)?(?:MFACIL\s+CONSIG\s+)?INSS\b/i.test(plano)
     || /(?:Nome\s+do\s+Empregador[^\n]{0,100}\n)[^\n]{0,80}\bINSS\b/i.test(texto)
     || /Ente\s+Consignante\)\s*:\s*INSTITUTO\s+NACIONAL\s+DO\s+SEGURO\s+SOCIAL/i.test(plano)
-    || /(?:Contrato\s+de\s+Empr[eé]stimo\s+Pessoal\s*-\s*Consignado\s*-\s*INSS|Consigna[cç][aã]o\s+e\/ou\s+Reten[cç][aã]o\s*-\s*INSS)/i.test(plano);
+    || /(?:Contrato\s+de\s+Empr[eé]stimo\s+Pessoal\s*-\s*Consignado\s*-\s*INSS|Consigna[cç][aã]o\s+e\/ou\s+Reten[cç][aã]o\s*-\s*INSS)/i.test(plano)));
   const fonteClt = /\bCONSIG\s+TRAB\b|\bCG[.\s]*CLTv?[\d.]+/i.test(plano);
   if (fonteInss && !fonteClt) return {codigo:"CONSIGNADO_INSS", rotulo:ROTULOS.CONSIGNADO_INSS, marcadores:["fonte pagadora ou título do instrumento: INSS"], pontuacao:{CONSIGNADO_INSS:10}, confianca:"ALTA"};
   const pontuacao = {};

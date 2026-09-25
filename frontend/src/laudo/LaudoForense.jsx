@@ -988,9 +988,10 @@ export default function LaudoForense({ report }) {
                       return (
                         <div className="ip-block" style={{ border: "1px solid rgba(240,99,99,0.35)", background: "rgba(240,99,99,0.06)" }}>
                           <div className="ip-head">
-                            <div className="ip-id" style={{ color: "#f06363" }}>Artefato biométrico · pág. {b.pagina}</div>
+                            <div className="ip-id" style={{ color: "#f06363" }}>Artefato biométrico{b.pagina ? ` · pág. ${b.pagina}` : ""}</div>
                             <Badge label={b.exif === false ? "SEM EXIF" : b.exif ? "COM EXIF" : "EXIF N/D"} color={b.exif ? "#3ddc97" : "#f06363"} />
                           </div>
+                          {b.nota_regime && <div className="note" style={{ marginTop: 0 }}>{b.nota_regime}</div>}
                           <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
                             {b.miniatura && (
                               <img src={b.miniatura} alt="Fotografia biométrica extraída do arquivo" style={{ width: 120, height: "auto", borderRadius: 6, border: "1px solid #52616c" }} />
@@ -1185,6 +1186,43 @@ export default function LaudoForense({ report }) {
                   })()}
                 </Section>
               )}
+
+              {/* §4.4 Autorização do benefício (INSS): regime pela data do contrato */}
+              {report.extracted.regime_inss && (() => {
+                const r = report.extracted.regime_inss;
+                const e = r.evidencias || {};
+                const altos = (report.extracted.achados_irregularidade || []).some((a) => /^INS\d/.test(a.codigo || "") && a.gravidade === "ALTA");
+                const dataHora = (x) => (x ? [x.data, x.hora].filter(Boolean).join(" ") : null);
+                const conta = (c) => (c ? `agência ${c.agencia}, conta ${c.conta}` : null);
+                const ausente = "Não localizado no dossiê";
+                return (
+                  <Section title="§ 4.4 · Autorização do benefício (INSS)" danger={altos}>
+                    <Row label="Data do contrato" value={r.data_contrato} nullText="Não localizada no instrumento" />
+                    <Row label="Regime aplicável" value={r.rotulo} />
+                    <Row label="Norma de referência" value={r.norma} />
+                    {r.via_rotulo && <Row label="Via de autorização" value={r.via_rotulo} />}
+                    {r.nota_oficio && (
+                      <>
+                        <Row label="Registro da autorização no Meu INSS" value={dataHora(e.meu_inss?.autorizacao)} nullText={ausente} />
+                        <Row label="Base oficial do confronto facial" value={(e.meu_inss?.bases_oficiais || []).join(", ")} nullText={ausente} />
+                        <Row label="Averbação" value={dataHora(e.averbacao)} nullText={ausente} />
+                      </>
+                    )}
+                    {r.via === "GOVBR" && (
+                      <>
+                        <Row label="Nível da conta gov.br" value={e.govbr?.nivel} nullText={ausente} />
+                        <Row label="IP de acesso gov.br" value={e.govbr?.ip} mono nullText={ausente} />
+                        <Row label="Dispositivo de acesso gov.br" value={e.govbr?.dispositivo} nullText={ausente} />
+                        <Row label="Conta validada" value={conta(e.conta_validada)} nullText={ausente} />
+                        <Row label="Conta de recebimento do benefício" value={conta(e.conta_beneficio)} nullText={ausente} />
+                      </>
+                    )}
+                    {r.codigo === "IN_213_VIA_DUPLA" && <Row label="Data de início do benefício (DIB)" value={e.dib} nullText={ausente} />}
+                    {r.nota_oficio && <div className="note">{r.nota_oficio}</div>}
+                    {(r.ressalvas || []).map((texto) => <div className="note" key={texto}>{texto}</div>)}
+                  </Section>
+                );
+              })()}
 
               {report.ipAnalysis.length === 0 && !report.contractGeo ? (
                 <Section title="§ 5-6 · Rastros de rede e geolocalização">
@@ -1589,7 +1627,12 @@ export default function LaudoForense({ report }) {
                     ]]] : [["Crédito consignado e benefício do INSS", [
                       ["Lei 10.820/2003 e Decreto 4.840/2003", "Disciplinam a autorização e os limites do desconto de prestações de empréstimo consignado em folha de pagamento e em benefício previdenciário."],
                       ["Lei 8.213/1991, art. 115", "Define as hipóteses e os limites de desconto sobre o valor do benefício previdenciário."],
-                      ["Normas do INSS sobre consignações (Instrução Normativa vigente) e Resoluções do CNPS", "Regulam margem consignável, formalização e averbação. Número da IN vigente: verificar conforme a data do contrato."],
+                      // Regime da data do contrato (backend/src/engine/regimeInss.js):
+                      // o item genérico só fica quando o regime não foi enquadrado.
+                      ...(report.extracted.regime_inss?.fundamentacao?.length
+                        ? report.extracted.regime_inss.fundamentacao
+                        : [
+                      ["Normas do INSS sobre consignações (Instrução Normativa vigente) e Resoluções do CNPS", "Regulam margem consignável, formalização e averbação. Número da IN vigente: verificar conforme a data do contrato."]]),
                     ]]]),
                     ["Assinatura eletrônica e ônus da prova", [
                       ["MP 2.200-2/2001, art. 10, § 2º", "Admite outros meios de comprovação de autoria e integridade, além da certificação ICP-Brasil."],

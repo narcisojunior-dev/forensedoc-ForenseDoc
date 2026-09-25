@@ -82,9 +82,14 @@ export async function processAnalysis(job) {
     // Consulta ao banco em try/catch próprio: falha aqui não pode derrubar a
     // análise nem estornar o crédito.
     try {
-      const hashes = (fallback?.imagens_pdf?.imagens || []).filter((i) => i.biometricaProvavel && i.sha256).map((i) => i.sha256);
-      const ocorrencias = hashes.length ? await localizarReusoDeImagem({ tenantId, analysisId, hashes }) : [];
-      fallback.reuso_imagens = { hashes_conferidos: hashes.length, ocorrencias };
+      const hashesFotos = (fallback?.imagens_pdf?.imagens || []).filter((i) => i.biometricaProvavel && i.sha256).map((i) => i.sha256);
+      // O mesmo PDF subido de novo (mesmo SHA-256) e outra cópia do mesmo
+      // contrato não são outro dossiê: sem isso, cada reprocessamento acusava
+      // IMG6 contra si mesmo.
+      const ocorrencias = hashesFotos.length
+        ? await localizarReusoDeImagem({ tenantId, analysisId, hashes: hashesFotos, documentoSha256: hashes.sha256, contratoAtual: fallback?.contrato?.numero || null })
+        : [];
+      fallback.reuso_imagens = { hashes_conferidos: hashesFotos.length, ocorrencias };
       const achadoReuso = montarAchadoReuso(ocorrencias, { contratoAtual: fallback?.contrato?.numero || null });
       if (achadoReuso && !(fallback.achados_irregularidade || []).some((a) => a.codigo === "IMG6")) {
         fallback.achados_irregularidade = [...(fallback.achados_irregularidade || []), achadoReuso];

@@ -1,6 +1,7 @@
 import { buildCustodyChain } from "../reports/custodyChain.js";
 import { ordenarAchados } from "./eixosAchado.js";
 import { classificarGrauProcessual, contarPorGrau } from "./grausConclusao.js";
+import { citarDispositivo, DISPOSITIVOS_IN138, REGIMES_COM_IN138 } from "./regimeInss.js";
 import { distanciaKm, distanciaSuspeita, formatarDistancia, montarConfrontoGeografico, STATUS_CONFRONTO } from "../utils/distancia.js";
 import { descreverIndisponibilidade } from "../utils/confrontoEnderecos.js";
 // Sumário executivo de irregularidades (placar de gravidade, confronto GPS x IP,
@@ -458,8 +459,17 @@ export function buildIrregularitySummary(report = {}) {
   const gpsMunicipio = normalizeText(report.contractGeo?.municipio);
   const residenciaMunicipio = normalizeText(domicilioCidade);
   const ufsDiferentes = Boolean(report.contractGeo?.uf && domicilioUf && normalizeText(report.contractGeo.uf) !== normalizeText(domicilioUf));
+  // INS1: no consignado INSS (IN 138 em diante), o correspondente tem de estar
+  // na UF do domicílio. O domicílio é o mesmo do confronto geográfico do § 5.
+  const regimeInss = extracted.regime_inss;
+  const regimeComIn138 = Boolean(regimeInss && REGIMES_COM_IN138.has(regimeInss.codigo));
+  const ufCorrespondente = String(extracted.correspondente?.uf || contract.correspondente?.uf || "").toUpperCase();
+  if (regimeComIn138 && ufCorrespondente && domicilioUf && ufCorrespondente !== normalizeText(domicilioUf).toUpperCase()) {
+    const cidadeCorrespondente = extracted.correspondente?.cidade || contract.correspondente?.cidade;
+    addFinding("ALTA", "INS1", "Correspondente bancário de outra unidade da federação.", `O correspondente que originou a operação está em ${cidadeCorrespondente ? `${cidadeCorrespondente}/` : ""}${ufCorrespondente}, e o domicílio do beneficiário, em ${domicilioCidade ? `${domicilioCidade}/` : ""}${domicilioUf}${referenciaMunicipio ? " (residência de referência)" : ""}. ${DISPOSITIVOS_IN138.LOCAL_DOMICILIO.conferido ? `No consignado em benefício do INSS, a ${citarDispositivo("LOCAL_DOMICILIO")} exige local de contratação compatível com o domicílio do beneficiário.` : "No consignado em benefício do INSS, a IN PRES/INSS nº 138/2022 rege o local e a forma da contratação; o dispositivo que vincula o correspondente ao domicílio do beneficiário ainda não foi conferido no DOU pelo escritório e deve sê-lo antes do uso deste achado em juízo."}`);
+  }
   if (gpsMunicipio && residenciaMunicipio && (gpsMunicipio !== residenciaMunicipio || ufsDiferentes)) {
-    addFinding("MÉDIA", "gps-outro-municipio", "Ato praticado em município diverso do domicílio.", `A coordenada declarada no dossiê de contratação cai em ${report.contractGeo.municipio}${report.contractGeo.uf ? `/${report.contractGeo.uf}` : ""}, município diferente do domicílio do cliente (${domicilioCidade}${domicilioUf ? `/${domicilioUf}` : ""}${referenciaMunicipio ? ", residência de referência" : ""})${gpsDistance !== null && !distanciaSuspeita(gpsDistance) ? `, a ${formatKm(gpsDistance)}` : ""}. Verifique se a contratação ocorreu em loja de correspondente bancário ou por dispositivo de terceiro.`);
+    addFinding("MÉDIA", "gps-outro-municipio", "Ato praticado em município diverso do domicílio.", `A coordenada declarada no dossiê de contratação cai em ${report.contractGeo.municipio}${report.contractGeo.uf ? `/${report.contractGeo.uf}` : ""}, município diferente do domicílio do cliente (${domicilioCidade}${domicilioUf ? `/${domicilioUf}` : ""}${referenciaMunicipio ? ", residência de referência" : ""})${gpsDistance !== null && !distanciaSuspeita(gpsDistance) ? `, a ${formatKm(gpsDistance)}` : ""}. Verifique se a contratação ocorreu em loja de correspondente bancário ou por dispositivo de terceiro.${regimeComIn138 && ufsDiferentes && DISPOSITIVOS_IN138.LOCAL_DOMICILIO.conferido ? ` No consignado em benefício do INSS, a ${citarDispositivo("LOCAL_DOMICILIO")} exige local de contratação compatível com o domicílio do beneficiário.` : ""}`);
     addCheck("F", "gps-municipio", "ALERTA", `${report.contractGeo.municipio} ≠ ${domicilioCidade}`);
     // Município do GPS diverso do domicílio + correspondente identificado
     // no instrumento: a diligência natural é perguntar ao banco quem
@@ -561,6 +571,9 @@ export function buildIrregularitySummary(report = {}) {
     addDiligence("ip-holder", "Identificação do titular da conexão", `Requisitar à operadora os dados da conexão vinculada ao IP ${accessIp.endereco}${accessIp.data_hora ? ` em ${accessIp.data_hora}` : signature.data_hora_assinatura ? ` na data/hora ${signature.data_hora_assinatura}` : " no intervalo registrado"}, mediante autorização judicial.`);
   }
   const issueCodes = new Set(sourceIssues.map((issue, index) => normalizeIssue(issue, index).codigo));
+  // Diligências do regime INSS (ofício ao INSS e à Dataprev, DIB, demonstrativo
+  // prévio) entram antes das genéricas: a página do sumário corta em sete.
+  for (const d of extracted.regime_inss?.diligencias || []) addDiligence(d.chave, d.titulo, d.texto);
   if (signature.presente || audit.eventCount || issueCodes.has("LOG1")) {
     addDiligence("raw-logs", "Logs brutos da plataforma", "Exigir eventos completos, fuso, identificador de sessão, IP de cada etapa, fator de autenticação e política de retenção.");
   }
